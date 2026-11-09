@@ -9,11 +9,13 @@ subdir: ""
 description: >-
   Run a local TempleOS-family guest (default TinkerOS 5.20-rc10; optional
   stock TempleOS 5.03 and ZealOS) in QEMU so the Hermes agent and the user
-  can share the screen. Disclosure — spawns qemu-system-x86_64 as a child
-  (KVM only when /dev/kvm can be opened, otherwise TCG), may fetch a pinned
-  ISO from its official URL, injects keys and HolyC over QMP/serial, keeps a
-  background QEMU process, and stores disks under plugin data. Networking is
-  always off. QEMU and ISOs are not bundled.
+  can share one live screen. Disclosure — spawns qemu-system-x86_64 as a
+  child (KVM only when /dev/kvm can be opened, otherwise TCG), may fetch a
+  pinned ISO from its official URL (SHA-256 verified), injects keys and
+  HolyC over QMP/serial, transfers files over a framed COM1 protocol, keeps
+  a background QEMU process, and stores disks under plugin data. Networking
+  is always off (-nic none). QEMU and ISOs are not bundled. This is a child
+  hypervisor, not an OS sandbox.
 maintainer: mojomast
 tier: community
 category: desktop
@@ -22,7 +24,9 @@ version: "0.1.0"
 docs_url: https://github.com/mojomast/hermes-templeos#readme
 readme: true
 platforms: []
-known_issues: []
+known_issues:
+  - "FAT floppy push is experimental; bake-off did not see hot-added FAT12 as A: on TinkerOS live CD."
+  - "Primary host is Linux x86_64. Apple Silicon and Windows are untested."
 capabilities:
   provides_tools:
     - templeos_vm
