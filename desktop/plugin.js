@@ -94,13 +94,22 @@ function revokeUrl(url) {
   }
 }
 
+function isAbortError(error) {
+  if (!error) return false;
+  if (error.name === "AbortError") return true;
+  if (error.code === "ABORT_ERR" || error.code === 20) return true;
+  const message = String(error.message || error || "");
+  return /signal is aborted|aborted without reason|The operation was aborted|AbortError/i.test(message);
+}
+
 function errorText(error) {
+  if (isAbortError(error)) return "";
   const message = (error && error.message) || "Something went wrong.";
   const fix = error && error.fix;
   return fix ? message + " " + fix : message;
 }
 
-  return { "createApi": createApi, "blobUrlFromBase64": blobUrlFromBase64, "revokeUrl": revokeUrl, "errorText": errorText };
+  return { "createApi": createApi, "blobUrlFromBase64": blobUrlFromBase64, "revokeUrl": revokeUrl, "isAbortError": isAbortError, "errorText": errorText };
 })();
 
 // desktop/src/ui/host.js
@@ -137,12 +146,13 @@ const FLAVOR_LABELS = {
   zealos: "ZealOS",
 };
 
-/** Visible running: ~10–15 fps. Idle or hidden backs off. */
-const POLL_VISIBLE_MS = 80;
-const POLL_FOCUSED_MS = 70;
-const POLL_IDLE_MS = 400;
-const POLL_STOPPED_MS = 800;
-const POLL_HIDDEN_MS = 2000;
+/** Cap pane polls so /frame never starves the Hermes gateway (≤5 fps). */
+const POLL_VISIBLE_MS = 250;
+const POLL_FOCUSED_MS = 200;
+const POLL_IDLE_MS = 1000;
+const POLL_STOPPED_MS = 1500;
+const POLL_HIDDEN_MS = 5000;
+const POLL_SLOW_MS = 2000;
 
 function guestSize(flavor, status) {
   if (status && Number(status.width) > 0 && Number(status.height) > 0) {
@@ -271,8 +281,10 @@ function pollIntervalMs(state) {
   const running = !!(state && state.running);
   const unchanged = !!(state && state.unchanged);
   const focused = !!(state && state.focused);
+  const slow = !!(state && state.slow);
   if (hidden) return POLL_HIDDEN_MS;
   if (!running) return POLL_STOPPED_MS;
+  if (slow) return Math.max(POLL_SLOW_MS, POLL_IDLE_MS);
   if (unchanged && !focused) return POLL_IDLE_MS;
   if (focused) return POLL_FOCUSED_MS;
   return POLL_VISIBLE_MS;
@@ -408,7 +420,7 @@ function logLine(event) {
   return (time ? time + "  " : "") + who + "  " + summary + suffix;
 }
 
-  return { "DEFAULT_WIDTH": DEFAULT_WIDTH, "DEFAULT_HEIGHT": DEFAULT_HEIGHT, "ZEALOS_WIDTH": ZEALOS_WIDTH, "ZEALOS_HEIGHT": ZEALOS_HEIGHT, "CONTROL_MODES": CONTROL_MODES, "GOLDEN_SNAPSHOT": GOLDEN_SNAPSHOT, "FLAVOR_LABELS": FLAVOR_LABELS, "POLL_VISIBLE_MS": POLL_VISIBLE_MS, "POLL_FOCUSED_MS": POLL_FOCUSED_MS, "POLL_IDLE_MS": POLL_IDLE_MS, "POLL_STOPPED_MS": POLL_STOPPED_MS, "POLL_HIDDEN_MS": POLL_HIDDEN_MS, "guestSize": guestSize, "flavorLabel": flavorLabel, "integerScale": integerScale, "mapPointerToGuest": mapPointerToGuest, "modeLabel": modeLabel, "accelLabel": accelLabel, "statusSummary": statusSummary, "drivingChip": drivingChip, "firstCheck": firstCheck, "checkState": checkState, "checkMissing": checkMissing, "needsOnboarding": needsOnboarding, "pollIntervalMs": pollIntervalMs, "isReleaseHatch": isReleaseHatch, "qcodeFor": qcodeFor, "keyEventToPayload": keyEventToPayload, "nextMode": nextMode, "userMayInput": userMayInput, "formatLogTime": formatLogTime, "logLine": logLine };
+  return { "DEFAULT_WIDTH": DEFAULT_WIDTH, "DEFAULT_HEIGHT": DEFAULT_HEIGHT, "ZEALOS_WIDTH": ZEALOS_WIDTH, "ZEALOS_HEIGHT": ZEALOS_HEIGHT, "CONTROL_MODES": CONTROL_MODES, "GOLDEN_SNAPSHOT": GOLDEN_SNAPSHOT, "FLAVOR_LABELS": FLAVOR_LABELS, "POLL_VISIBLE_MS": POLL_VISIBLE_MS, "POLL_FOCUSED_MS": POLL_FOCUSED_MS, "POLL_IDLE_MS": POLL_IDLE_MS, "POLL_STOPPED_MS": POLL_STOPPED_MS, "POLL_HIDDEN_MS": POLL_HIDDEN_MS, "POLL_SLOW_MS": POLL_SLOW_MS, "guestSize": guestSize, "flavorLabel": flavorLabel, "integerScale": integerScale, "mapPointerToGuest": mapPointerToGuest, "modeLabel": modeLabel, "accelLabel": accelLabel, "statusSummary": statusSummary, "drivingChip": drivingChip, "firstCheck": firstCheck, "checkState": checkState, "checkMissing": checkMissing, "needsOnboarding": needsOnboarding, "pollIntervalMs": pollIntervalMs, "isReleaseHatch": isReleaseHatch, "qcodeFor": qcodeFor, "keyEventToPayload": keyEventToPayload, "nextMode": nextMode, "userMayInput": userMayInput, "formatLogTime": formatLogTime, "logLine": logLine };
 })();
 
 // desktop/src/ui/pane.js
@@ -422,6 +434,7 @@ const __m3 = (function () {
   const blobUrlFromBase64 = __m0["blobUrlFromBase64"];
   const revokeUrl = __m0["revokeUrl"];
   const errorText = __m0["errorText"];
+  const isAbortError = __m0["isAbortError"];
   const getHostTransport = __m1["getHostTransport"];
   const GOLDEN_SNAPSHOT = __m2["GOLDEN_SNAPSHOT"];
   const accelLabel = __m2["accelLabel"];
@@ -498,12 +511,17 @@ function TempleOSPane({ transport, initial } = {}) {
   hiddenRef.current = hidden;
 
   function noteError(err) {
-    setError(errorText(err));
+    if (isAbortError(err)) return;
+    const text = errorText(err);
+    if (!text) return;
+    setError(text);
   }
 
   function refreshLog(body) {
     if (body && Array.isArray(body.events)) setLog(body.events);
   }
+
+  const slowRef = useRef(false);
 
   useEffect(() => {
     if (skip) return undefined;
@@ -515,6 +533,7 @@ function TempleOSPane({ transport, initial } = {}) {
         running: !!(statusRef.current && statusRef.current.running),
         unchanged: unchangedRef.current,
         focused: focusedRef.current,
+        slow: slowRef.current,
       });
       api
         .status()
@@ -532,14 +551,20 @@ function TempleOSPane({ transport, initial } = {}) {
         .then((body) => {
           if (!cancelled) refreshLog(body);
         })
-        .catch(() => {});
+        .catch((err) => {
+          if (isAbortError(err)) return;
+        });
       if (now - lastFrameAt.current < interval) return;
       lastFrameAt.current = now;
       const since = shaRef.current;
+      const frameStarted = Date.now();
       api
         .frame(since ? { since } : undefined)
         .then((body) => {
           if (cancelled) return;
+          const elapsed = Date.now() - frameStarted;
+          // Back off when the host is slow so we never stampede /frame.
+          slowRef.current = elapsed >= 500;
           if (body && body.sha256) shaRef.current = body.sha256;
           if (body && body.unchanged) {
             setUnchanged(true);
@@ -552,8 +577,10 @@ function TempleOSPane({ transport, initial } = {}) {
           prevUrl.current = next;
           setFrameUrl(next);
         })
-        .catch(() => {
-          /* look may be soft-fail; status still drives the chip */
+        .catch((err) => {
+          if (isAbortError(err)) return;
+          slowRef.current = true;
+          /* soft-fail; status still drives the chip */
         });
     };
     tick();
@@ -818,7 +845,7 @@ function TempleOSPane({ transport, initial } = {}) {
   });
 }
 
-const POLL_TICK = 80;
+const POLL_TICK = 100;
 
 function modeButton(mode, label, current, disabled, setMode) {
   const op = mode === "user" ? "take" : mode === "shared" ? "handback" : "watch";
@@ -908,7 +935,7 @@ const __m5 = (function () {
 })();
 
 const TEMPLEOS_STYLE_ID = "templeos-desktop-styles";
-const TEMPLEOS_STYLES = "/* TempleOS pane. 16-color accents on Hermes chrome variables. */\n\n.tos-pane {\n  --tos-black: #000000;\n  --tos-navy: #0000aa;\n  --tos-yellow: #ffff55;\n  --tos-white: #ffffff;\n  --tos-ltgray: #aaaaaa;\n  --tos-dkgray: #555555;\n  --tos-cyan: #55ffff;\n  --tos-green: #55ff55;\n  --tos-red: #ff5555;\n  --tos-blue: #5555ff;\n  --tos-brown: #aa5500;\n  display: flex;\n  flex-direction: column;\n  gap: 10px;\n  padding: 12px 14px 16px;\n  color: var(--ui-text-primary, var(--tos-yellow));\n  background:\n    linear-gradient(180deg, color-mix(in srgb, var(--tos-navy) 35%, var(--tos-black)) 0 52px, var(--tos-black) 52px);\n  font-family: \"IBM Plex Mono\", \"Lucida Console\", ui-monospace, monospace;\n  min-height: 100%;\n  box-sizing: border-box;\n}\n\n.tos-top,\n.tos-bar {\n  display: flex;\n  flex-wrap: wrap;\n  gap: 8px;\n  align-items: center;\n}\n\n.tos-brand {\n  display: flex;\n  gap: 8px;\n  align-items: center;\n  margin-right: 6px;\n}\n\n.tos-brand strong {\n  display: block;\n  font-size: 14px;\n  letter-spacing: 0.08em;\n  text-transform: uppercase;\n  color: var(--tos-yellow);\n}\n\n.tos-brand em {\n  display: block;\n  font-style: normal;\n  font-size: 10px;\n  letter-spacing: 0.16em;\n  text-transform: uppercase;\n  color: var(--ui-text-tertiary, var(--tos-ltgray));\n}\n\n.tos-mark {\n  width: 22px;\n  height: 22px;\n  background:\n    linear-gradient(180deg, var(--tos-navy), #000055);\n  box-shadow: inset 0 0 0 1px var(--tos-yellow);\n}\n\n.tos-badge,\n.tos-chip,\n.tos-btn {\n  font: inherit;\n  color: var(--tos-yellow);\n  background: transparent;\n  border: 1px solid color-mix(in srgb, var(--tos-yellow) 55%, var(--tos-dkgray));\n  border-radius: 2px;\n  padding: 3px 9px;\n  letter-spacing: 0.02em;\n}\n\n.tos-badge,\n.tos-chip {\n  font-size: 11px;\n  text-transform: uppercase;\n}\n\n.tos-badge-accel {\n  color: var(--tos-cyan);\n  border-color: color-mix(in srgb, var(--tos-cyan) 50%, var(--tos-dkgray));\n}\n\n.tos-chip {\n  margin-left: auto;\n  border-radius: 999px;\n  color: var(--ui-text-secondary, var(--tos-ltgray));\n  text-transform: none;\n}\n\n.tos-btn {\n  cursor: pointer;\n  background: color-mix(in srgb, var(--tos-navy) 40%, transparent);\n}\n\n.tos-btn:hover:not(:disabled) {\n  background: color-mix(in srgb, var(--tos-navy) 80%, var(--tos-black));\n  border-color: var(--tos-yellow);\n}\n\n.tos-btn:disabled {\n  opacity: 0.4;\n  cursor: default;\n  color: var(--tos-ltgray);\n  border-color: var(--tos-dkgray);\n  background: transparent;\n}\n\n.tos-btn.is-on,\n.tos-primary {\n  background: color-mix(in srgb, var(--tos-navy) 85%, var(--tos-black));\n  border-color: var(--tos-yellow);\n  color: var(--tos-yellow);\n  font-weight: 650;\n}\n\n.tos-modes {\n  display: flex;\n  gap: 0;\n  margin-left: 4px;\n}\n\n.tos-modes .tos-btn {\n  border-radius: 0;\n}\n\n.tos-modes .tos-btn:first-child {\n  border-top-left-radius: 2px;\n  border-bottom-left-radius: 2px;\n}\n\n.tos-modes .tos-btn:last-child {\n  border-top-right-radius: 2px;\n  border-bottom-right-radius: 2px;\n}\n\n.tos-drive {\n  align-self: flex-start;\n  padding: 4px 12px;\n  border: 1px solid var(--tos-yellow);\n  background: color-mix(in srgb, var(--tos-navy) 70%, var(--tos-black));\n  color: var(--tos-yellow);\n  font-size: 12px;\n  letter-spacing: 0.04em;\n  text-transform: uppercase;\n}\n\n.tos-drive-agent {\n  border-color: var(--tos-cyan);\n  color: var(--tos-cyan);\n}\n\n.tos-drive-user {\n  border-color: var(--tos-green);\n  color: var(--tos-green);\n}\n\n.tos-onboard {\n  padding: 12px 14px;\n  border: 1px solid color-mix(in srgb, var(--tos-yellow) 50%, var(--tos-dkgray));\n  background: color-mix(in srgb, var(--tos-navy) 22%, var(--tos-black));\n}\n\n.tos-onboard h2,\n.tos-log h2 {\n  margin: 0 0 8px;\n  font-size: 13px;\n  font-weight: 650;\n  letter-spacing: 0.08em;\n  text-transform: uppercase;\n  color: var(--tos-yellow);\n}\n\n.tos-onboard p,\n.tos-hint,\n.tos-hatch,\n.tos-error,\n.tos-info,\n.tos-log,\n.tos-placeholder {\n  font-size: 13px;\n  line-height: 1.45;\n}\n\n.tos-onboard p,\n.tos-hint {\n  margin: 0 0 10px;\n  color: var(--ui-text-secondary, var(--tos-ltgray));\n  max-width: 62ch;\n}\n\n.tos-checks {\n  display: flex;\n  flex-wrap: wrap;\n  gap: 8px 18px;\n  margin: 0 0 12px;\n  padding: 0;\n  list-style: none;\n}\n\n.tos-check-ok { color: var(--tos-green); }\n.tos-check-no { color: var(--tos-red); }\n.tos-check-unknown { color: var(--tos-ltgray); }\n\n.tos-body {\n  display: grid;\n  grid-template-columns: max-content minmax(260px, 1fr);\n  gap: 12px;\n  align-items: start;\n  min-height: 0;\n}\n\n.tos-stage {\n  min-width: 0;\n}\n\n.tos-screen {\n  background: var(--tos-black);\n  border: 1px solid var(--tos-dkgray);\n  image-rendering: pixelated;\n  overflow: hidden;\n  outline: none;\n  cursor: crosshair;\n  box-shadow: 0 0 0 1px var(--tos-black);\n}\n\n.tos-screen img {\n  display: block;\n  image-rendering: pixelated;\n  image-rendering: crisp-edges;\n}\n\n.tos-screen.is-focused {\n  border-color: var(--tos-cyan);\n  box-shadow: 0 0 0 2px var(--tos-cyan);\n}\n\n.tos-placeholder {\n  display: flex;\n  align-items: center;\n  justify-content: center;\n  width: 100%;\n  height: 100%;\n  color: var(--tos-yellow);\n  text-align: center;\n  padding: 16px;\n  box-sizing: border-box;\n}\n\n.tos-hatch {\n  margin: 6px 0 0;\n  color: var(--tos-cyan);\n  font-size: 11px;\n  letter-spacing: 0.04em;\n}\n\n.tos-hatch-idle {\n  color: var(--ui-text-tertiary, var(--tos-ltgray));\n}\n\n.tos-log {\n  min-height: 160px;\n  max-height: 520px;\n  overflow: auto;\n  padding: 10px 12px;\n  border: 1px solid color-mix(in srgb, var(--tos-yellow) 35%, var(--tos-dkgray));\n  background: color-mix(in srgb, var(--tos-navy) 18%, var(--tos-black));\n}\n\n.tos-log-line,\n.tos-log p {\n  margin: 0 0 6px;\n  color: var(--tos-ltgray);\n  white-space: nowrap;\n  overflow: hidden;\n  text-overflow: ellipsis;\n}\n\n.tos-log-agent { color: var(--tos-cyan); }\n.tos-log-user { color: var(--tos-yellow); }\n.tos-log-line.is-failed { color: var(--tos-red); }\n.tos-log-empty { color: var(--ui-text-tertiary, var(--tos-dkgray)); }\n\n.tos-error { color: var(--tos-red); }\n.tos-info { color: var(--tos-cyan); }\n\n@media (max-width: 900px) {\n  .tos-body {\n    grid-template-columns: 1fr;\n  }\n  .tos-chip {\n    margin-left: 0;\n  }\n}\n";
+const TEMPLEOS_STYLES = "/* TempleOS pane. 16-color accents on Hermes chrome variables. */\n\n.tos-pane {\n  color-scheme: dark;\n  --tos-black: #000000;\n  --tos-navy: #0000aa;\n  --tos-yellow: #ffff55;\n  --tos-white: #ffffff;\n  --tos-ltgray: #aaaaaa;\n  --tos-dkgray: #555555;\n  --tos-cyan: #55ffff;\n  --tos-green: #55ff55;\n  --tos-red: #ff5555;\n  --tos-blue: #5555ff;\n  --tos-brown: #aa5500;\n  display: flex;\n  flex-direction: column;\n  gap: 10px;\n  padding: 12px 14px 16px;\n  color: var(--tos-yellow);\n  background:\n    linear-gradient(180deg, color-mix(in srgb, var(--tos-navy) 35%, var(--tos-black)) 0 52px, var(--tos-black) 52px);\n  font-family: \"IBM Plex Mono\", \"Lucida Console\", ui-monospace, monospace;\n  min-height: 100%;\n  box-sizing: border-box;\n}\n\n.tos-top,\n.tos-bar {\n  display: flex;\n  flex-wrap: wrap;\n  gap: 8px;\n  align-items: center;\n}\n\n.tos-brand {\n  display: flex;\n  gap: 8px;\n  align-items: center;\n  margin-right: 6px;\n}\n\n.tos-brand strong {\n  display: block;\n  font-size: 14px;\n  letter-spacing: 0.08em;\n  text-transform: uppercase;\n  color: var(--tos-yellow);\n}\n\n.tos-brand em {\n  display: block;\n  font-style: normal;\n  font-size: 10px;\n  letter-spacing: 0.16em;\n  text-transform: uppercase;\n  color: var(--tos-ltgray);\n}\n\n.tos-mark {\n  width: 22px;\n  height: 22px;\n  background:\n    linear-gradient(180deg, var(--tos-navy), #000055);\n  box-shadow: inset 0 0 0 1px var(--tos-yellow);\n}\n\n.tos-badge,\n.tos-chip,\n.tos-btn {\n  font: inherit;\n  color: var(--tos-yellow);\n  background: transparent;\n  border: 1px solid color-mix(in srgb, var(--tos-yellow) 55%, var(--tos-dkgray));\n  border-radius: 2px;\n  padding: 3px 9px;\n  letter-spacing: 0.02em;\n}\n\n.tos-badge,\n.tos-chip {\n  font-size: 11px;\n  text-transform: uppercase;\n}\n\n.tos-badge-accel {\n  color: var(--tos-cyan);\n  border-color: color-mix(in srgb, var(--tos-cyan) 50%, var(--tos-dkgray));\n}\n\n.tos-chip {\n  margin-left: auto;\n  border-radius: 999px;\n  color: var(--tos-ltgray);\n  text-transform: none;\n}\n\n.tos-btn {\n  cursor: pointer;\n  background: color-mix(in srgb, var(--tos-navy) 40%, transparent);\n}\n\n.tos-btn:hover:not(:disabled) {\n  background: color-mix(in srgb, var(--tos-navy) 80%, var(--tos-black));\n  border-color: var(--tos-yellow);\n}\n\n.tos-btn:disabled {\n  opacity: 0.4;\n  cursor: default;\n  color: var(--tos-ltgray);\n  border-color: var(--tos-dkgray);\n  background: transparent;\n}\n\n.tos-btn.is-on,\n.tos-primary {\n  background: color-mix(in srgb, var(--tos-navy) 85%, var(--tos-black));\n  border-color: var(--tos-yellow);\n  color: var(--tos-yellow);\n  font-weight: 650;\n}\n\n.tos-modes {\n  display: flex;\n  gap: 0;\n  margin-left: 4px;\n}\n\n.tos-modes .tos-btn {\n  border-radius: 0;\n}\n\n.tos-modes .tos-btn:first-child {\n  border-top-left-radius: 2px;\n  border-bottom-left-radius: 2px;\n}\n\n.tos-modes .tos-btn:last-child {\n  border-top-right-radius: 2px;\n  border-bottom-right-radius: 2px;\n}\n\n.tos-drive {\n  align-self: flex-start;\n  padding: 4px 12px;\n  border: 1px solid var(--tos-yellow);\n  background: color-mix(in srgb, var(--tos-navy) 70%, var(--tos-black));\n  color: var(--tos-yellow);\n  font-size: 12px;\n  letter-spacing: 0.04em;\n  text-transform: uppercase;\n}\n\n.tos-drive-agent {\n  border-color: var(--tos-cyan);\n  color: var(--tos-cyan);\n}\n\n.tos-drive-user {\n  border-color: var(--tos-green);\n  color: var(--tos-green);\n}\n\n.tos-onboard {\n  padding: 12px 14px;\n  border: 1px solid color-mix(in srgb, var(--tos-yellow) 50%, var(--tos-dkgray));\n  background: color-mix(in srgb, var(--tos-navy) 22%, var(--tos-black));\n}\n\n.tos-onboard h2,\n.tos-log h2 {\n  margin: 0 0 8px;\n  font-size: 13px;\n  font-weight: 650;\n  letter-spacing: 0.08em;\n  text-transform: uppercase;\n  color: var(--tos-yellow);\n}\n\n.tos-onboard p,\n.tos-hint,\n.tos-hatch,\n.tos-error,\n.tos-info,\n.tos-log,\n.tos-placeholder {\n  font-size: 13px;\n  line-height: 1.45;\n}\n\n.tos-onboard p,\n.tos-hint {\n  margin: 0 0 10px;\n  color: var(--tos-ltgray);\n  max-width: 62ch;\n}\n\n.tos-checks {\n  display: flex;\n  flex-wrap: wrap;\n  gap: 8px 18px;\n  margin: 0 0 12px;\n  padding: 0;\n  list-style: none;\n}\n\n.tos-check-ok { color: var(--tos-green); }\n.tos-check-no { color: var(--tos-red); }\n.tos-check-unknown { color: var(--tos-ltgray); }\n\n.tos-body {\n  display: grid;\n  grid-template-columns: max-content minmax(260px, 1fr);\n  gap: 12px;\n  align-items: start;\n  min-height: 0;\n}\n\n.tos-stage {\n  min-width: 0;\n}\n\n.tos-screen {\n  background: var(--tos-black);\n  border: 1px solid var(--tos-dkgray);\n  image-rendering: pixelated;\n  overflow: hidden;\n  outline: none;\n  cursor: crosshair;\n  box-shadow: 0 0 0 1px var(--tos-black);\n}\n\n.tos-screen img {\n  display: block;\n  image-rendering: pixelated;\n  image-rendering: crisp-edges;\n}\n\n.tos-screen.is-focused {\n  border-color: var(--tos-cyan);\n  box-shadow: 0 0 0 2px var(--tos-cyan);\n}\n\n.tos-placeholder {\n  display: flex;\n  align-items: center;\n  justify-content: center;\n  width: 100%;\n  height: 100%;\n  color: var(--tos-yellow);\n  text-align: center;\n  padding: 16px;\n  box-sizing: border-box;\n}\n\n.tos-hatch {\n  margin: 6px 0 0;\n  color: var(--tos-cyan);\n  font-size: 11px;\n  letter-spacing: 0.04em;\n}\n\n.tos-hatch-idle {\n  color: var(--tos-ltgray);\n}\n\n.tos-log {\n  min-height: 160px;\n  max-height: 520px;\n  overflow: auto;\n  padding: 10px 12px;\n  border: 1px solid color-mix(in srgb, var(--tos-yellow) 35%, var(--tos-dkgray));\n  background: color-mix(in srgb, var(--tos-navy) 18%, var(--tos-black));\n}\n\n.tos-log-line,\n.tos-log p {\n  margin: 0 0 6px;\n  color: var(--tos-ltgray);\n  white-space: nowrap;\n  overflow: hidden;\n  text-overflow: ellipsis;\n}\n\n.tos-log-agent { color: var(--tos-cyan); }\n.tos-log-user { color: var(--tos-yellow); }\n.tos-log-line.is-failed { color: var(--tos-red); }\n.tos-log-empty { color: var(--ui-text-tertiary, var(--tos-dkgray)); }\n\n.tos-error { color: var(--tos-red); }\n.tos-info { color: var(--tos-cyan); }\n\n@media (max-width: 900px) {\n  .tos-body {\n    grid-template-columns: 1fr;\n  }\n  .tos-chip {\n    margin-left: 0;\n  }\n}\n";
 
 function injectTempleOSStyles() {
   if (typeof document === "undefined") return false;

@@ -410,8 +410,14 @@ def click(
     button: str = "left",
     via: str = "auto",
     flavor: str | None = None,
+    settle_s: float | None = None,
+    hold_s: float | None = None,
 ) -> dict[str, Any]:
-    """Click guest coordinates. via=auto picks vmmouse, MsSet, or relative."""
+    """Click guest coordinates. via=auto picks vmmouse, MsSet, or relative.
+
+    settle_s/hold_s override the live defaults. The pane passes short values so
+    /input never blocks the Hermes gateway behind a 250 ms sleep.
+    """
     if button not in BUTTONS:
         raise ValueError("button must be left, right, or middle.")
     if not isinstance(x, int) or not isinstance(y, int):
@@ -444,9 +450,15 @@ def click(
                 return info
             # Bake-off: wait after the absolute move, then a short button hold.
             # Keep this at zero when type_delay_s is 0 so unit tests stay fast.
-            # Live clicks (type_delay_s > 0) settle, then hold ~150 ms.
-            settle = 0.0 if not rt.type_delay_s else max(0.25, float(rt.type_delay_s) * 3)
-            hold = 0.0 if not rt.type_delay_s else 0.15
+            # Live agent clicks (type_delay_s > 0) settle, then hold ~150 ms.
+            if settle_s is None:
+                settle = 0.0 if not rt.type_delay_s else max(0.25, float(rt.type_delay_s) * 3)
+            else:
+                settle = max(0.0, float(settle_s))
+            if hold_s is None:
+                hold = 0.0 if not rt.type_delay_s else 0.15
+            else:
+                hold = max(0.0, float(hold_s))
             if settle:
                 time.sleep(settle)
             _click_button(qmp, button, hold_s=hold)

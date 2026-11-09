@@ -8,6 +8,7 @@ import {
   POLL_FOCUSED_MS,
   POLL_HIDDEN_MS,
   POLL_IDLE_MS,
+  POLL_SLOW_MS,
   POLL_STOPPED_MS,
   POLL_VISIBLE_MS,
   accelLabel,
@@ -61,14 +62,16 @@ test("pointer mapping is absolute guest coordinates and clamps", () => {
   assert.deepEqual(mapPointerToGuest(-20, -20, rect, 640, 480), { x: 0, y: 0 });
 });
 
-test("adaptive polling is 10-15 fps when visible and slower when idle or hidden", () => {
+test("adaptive polling stays at or under 5 fps and backs off when idle, hidden, or slow", () => {
   assert.equal(pollIntervalMs({ hidden: true, running: true }), POLL_HIDDEN_MS);
   assert.equal(pollIntervalMs({ running: false }), POLL_STOPPED_MS);
   assert.equal(pollIntervalMs({ running: true, unchanged: true }), POLL_IDLE_MS);
   assert.equal(pollIntervalMs({ running: true, focused: true }), POLL_FOCUSED_MS);
   assert.equal(pollIntervalMs({ running: true }), POLL_VISIBLE_MS);
-  assert.ok(POLL_VISIBLE_MS >= 66 && POLL_VISIBLE_MS <= 100);
-  assert.ok(POLL_FOCUSED_MS >= 66 && POLL_FOCUSED_MS <= 100);
+  assert.equal(pollIntervalMs({ running: true, slow: true }), Math.max(POLL_SLOW_MS, POLL_IDLE_MS));
+  assert.ok(POLL_VISIBLE_MS >= 200 && POLL_VISIBLE_MS <= 300);
+  assert.ok(POLL_FOCUSED_MS >= 180 && POLL_FOCUSED_MS <= 250);
+  assert.ok(POLL_VISIBLE_MS >= 200); // ≤5 fps
 });
 
 test("key capture maps qcodes and Esc is the hatch", () => {
@@ -111,4 +114,15 @@ test("mode transitions, onboarding, driving chip, and log lines", () => {
   });
   assert.match(line, /Agent/);
   assert.match(line, /templeos_input type/);
+});
+
+import { isAbortError, errorText } from "../../desktop/src/ui/api.js";
+
+test("aborted fetches stay silent in the pane error banner", () => {
+  assert.equal(isAbortError({ name: "AbortError", message: "signal is aborted without reason" }), true);
+  const abortLike = { name: "AbortError", message: "The operation was aborted." };
+  assert.equal(isAbortError(abortLike), true);
+  assert.equal(isAbortError({ message: "QEMU missing" }), false);
+  assert.equal(errorText({ name: "AbortError", message: "signal is aborted without reason" }), "");
+  assert.match(errorText({ message: "TempleOS could not finish that.", fix: "Retry." }), /Retry/);
 });

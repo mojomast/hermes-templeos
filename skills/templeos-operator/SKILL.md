@@ -82,7 +82,7 @@ Push `skills/templeos-operator/guest/Xfer.HC` with `templeos_files op=push` once
 ### Keys and menus
 
 - `ret` Enter, `esc` Esc, `f1`–`f10`, arrows as QEMU qcodes.
-- AutoComplete and the System Keys overlay can swallow typing — `wait_idle` + `read_text` after surprises.
+- First-boot "Install onto hard drive" / "Take Tour" prompts are auto-answered **n** after `op=start` (Esc clears AutoComplete focus first). AutoComplete and the System Keys overlay can still swallow typing — `wait_idle` + `read_text` after surprises.
 - Clicks: TinkerOS uses absolute VMMouse (`via=auto`). Stock TempleOS / ZealOS need `MsSet` or relative; absolute QMP events error there.
 
 ## Snapshots before risk

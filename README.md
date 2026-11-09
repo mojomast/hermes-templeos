@@ -121,7 +121,9 @@ The Hermes Desktop pane (`desktop/plugin.js`, needs Hermes `>=0.23.0`) talks onl
 | Shared (default) | Both can type. Your key/click pauses the agent ~2 s. |
 | Take control | Agent tools return `agent_paused` until **Hand back**. |
 
-Frames are PNG, integer-scaled from 640×480 (ZealOS may present 1024×768). About 10–15 fps is enough. Blob URLs are revoked when the next frame arrives.
+Frames are PNG, integer-scaled from 640×480 (ZealOS may present 1024×768). The pane polls at most ~4–5 fps (slower when idle, hidden, or the host is slow); `/frame` is served from a background cache so capture never blocks the Hermes gateway. Blob URLs are revoked when the next frame arrives.
+
+On a fresh ISO boot (no `golden` snapshot), `templeos_vm op=start` auto-dismisses the first-boot **Install onto hard drive** and **Take Tour** prompts in the background (Esc clears AutoComplete focus, then `n` + Enter). Restore a snapshot to skip them.
 
 <p>
 <img src="docs/images/pane-shared.png" alt="Shared mode: TinkerOS desktop in the TempleOS pane" width="800">

@@ -1,6 +1,6 @@
 import { jsx, jsxs } from "react/jsx-runtime";
 import { useEffect, useRef, useState } from "react";
-import { createApi, blobUrlFromBase64, revokeUrl, errorText } from "./api.js";
+import { createApi, blobUrlFromBase64, revokeUrl, errorText, isAbortError } from "./api.js";
 import { getHostTransport } from "./host.js";
 import {
   GOLDEN_SNAPSHOT,
@@ -79,12 +79,17 @@ export function TempleOSPane({ transport, initial } = {}) {
   hiddenRef.current = hidden;
 
   function noteError(err) {
-    setError(errorText(err));
+    if (isAbortError(err)) return;
+    const text = errorText(err);
+    if (!text) return;
+    setError(text);
   }
 
   function refreshLog(body) {
     if (body && Array.isArray(body.events)) setLog(body.events);
   }
+
+  const slowRef = useRef(false);
 
   useEffect(() => {
     if (skip) return undefined;
@@ -96,6 +101,7 @@ export function TempleOSPane({ transport, initial } = {}) {
         running: !!(statusRef.current && statusRef.current.running),
         unchanged: unchangedRef.current,
         focused: focusedRef.current,
+        slow: slowRef.current,
       });
       api
         .status()
@@ -113,14 +119,20 @@ export function TempleOSPane({ transport, initial } = {}) {
         .then((body) => {
           if (!cancelled) refreshLog(body);
         })
-        .catch(() => {});
+        .catch((err) => {
+          if (isAbortError(err)) return;
+        });
       if (now - lastFrameAt.current < interval) return;
       lastFrameAt.current = now;
       const since = shaRef.current;
+      const frameStarted = Date.now();
       api
         .frame(since ? { since } : undefined)
         .then((body) => {
           if (cancelled) return;
+          const elapsed = Date.now() - frameStarted;
+          // Back off when the host is slow so we never stampede /frame.
+          slowRef.current = elapsed >= 500;
           if (body && body.sha256) shaRef.current = body.sha256;
           if (body && body.unchanged) {
             setUnchanged(true);
@@ -133,8 +145,10 @@ export function TempleOSPane({ transport, initial } = {}) {
           prevUrl.current = next;
           setFrameUrl(next);
         })
-        .catch(() => {
-          /* look may be soft-fail; status still drives the chip */
+        .catch((err) => {
+          if (isAbortError(err)) return;
+          slowRef.current = true;
+          /* soft-fail; status still drives the chip */
         });
     };
     tick();
@@ -399,7 +413,7 @@ export function TempleOSPane({ transport, initial } = {}) {
   });
 }
 
-const POLL_TICK = 80;
+const POLL_TICK = 100;
 
 function modeButton(mode, label, current, disabled, setMode) {
   const op = mode === "user" ? "take" : mode === "shared" ? "handback" : "watch";

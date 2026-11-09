@@ -12,7 +12,7 @@ license = { text = "MIT" }
 authors = [{ name = "Kyle Durepos" }]
 keywords = ["hermes", "templeos", "tinkeros", "qemu", "plugin"]
 dependencies = [
-  "pillow>=10,<12",
+  "pillow>=10,<14",
 ]
 
 [project.optional-dependencies]

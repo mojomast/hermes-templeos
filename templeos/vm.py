@@ -65,14 +65,20 @@ class Runtime:
 _runtime: Runtime | None = None
 
 
-def start(*, flavor: str = "tinkeros", snapshot: str = GOLDEN) -> dict[str, Any]:
+def start(*, flavor: str = "tinkeros", snapshot: str = GOLDEN, skip_prompts: bool = True) -> dict[str, Any]:
     """Boot the guest. Prefer loadvm of ``snapshot`` when it exists, else the ISO.
+
+    When ``skip_prompts`` is true (default) and the guest boots from the ISO
+    instead of a snapshot, a background helper dismisses the first-boot
+    "Install onto hard drive (y or n)?" and "Take Tour" prompts by sending Esc
+    (to clear AutoComplete focus) then ``n`` + Enter via the existing input
+    path. No new tool is required.
 
     Returns a status dict: running, flavor, accel, snapshot, pid (never tokens
     or socket contents; socket paths only as existence flags).
     """
     with _LOCK:
-        return _start(flavor=flavor, snapshot=snapshot)
+        return _start(flavor=flavor, snapshot=snapshot, skip_prompts=skip_prompts)
 
 
 def stop() -> dict[str, Any]:
@@ -158,7 +164,7 @@ def available_snapshots() -> dict[str, Any]:
         return {"ok": True, "snapshots": names, "snapshot": current}
 
 
-def _start(*, flavor: str, snapshot: str) -> dict[str, Any]:
+def _start(*, flavor: str, snapshot: str, skip_prompts: bool = True) -> dict[str, Any]:
     try:
         rec = get_flavor(flavor)
     except FlavorError as exc:
@@ -265,6 +271,7 @@ def _start(*, flavor: str, snapshot: str) -> dict[str, Any]:
     _bind_screen(_runtime)
 
     wanted = snap_name
+    restored = False
     if wanted and wanted in list_snapshots(disk):
         loaded = _restore(wanted)
         if not loaded.get("ok", True) and loaded.get("code"):
@@ -274,6 +281,18 @@ def _start(*, flavor: str, snapshot: str) -> dict[str, Any]:
         else:
             _runtime.snapshot = wanted
             _write_state(root, _runtime)
+            restored = True
+
+    try:
+        from templeos.frame_cache import get_frame_cache
+
+        get_frame_cache().poke()
+    except Exception:
+        pass
+
+    # First-boot ISO prompts steal focus into AutoComplete unless Esc'd first.
+    if skip_prompts and not restored:
+        _schedule_first_boot_dismiss()
 
     return _status()
 
@@ -310,6 +329,12 @@ def _stop() -> dict[str, Any]:
     flavor = rt.flavor if rt is not None else "tinkeros"
     _runtime = None
     _unbind_screen()
+    try:
+        from templeos.frame_cache import get_frame_cache
+
+        get_frame_cache().reset()
+    except Exception:
+        pass
     state_path = root / STATE_NAME
     if state_path.exists():
         try:
@@ -665,3 +690,73 @@ def _fail(error: str, code: str, fix: str | None = None) -> dict[str, Any]:
         "fix": fix or "See docs/CONTRACTS.md.",
         "running": _process_is_up(),
     }
+
+
+_FIRST_BOOT_THREAD: threading.Thread | None = None
+_FIRST_BOOT_LOCK = threading.Lock()
+
+
+def _schedule_first_boot_dismiss() -> None:
+    """Background: dismiss Install/Tour prompts without blocking start()."""
+    global _FIRST_BOOT_THREAD
+    with _FIRST_BOOT_LOCK:
+        if _FIRST_BOOT_THREAD is not None and _FIRST_BOOT_THREAD.is_alive():
+            return
+        _FIRST_BOOT_THREAD = threading.Thread(
+            target=_dismiss_first_boot_prompts,
+            name="templeos-first-boot",
+            daemon=True,
+        )
+        _FIRST_BOOT_THREAD.start()
+
+
+def _dismiss_first_boot_prompts(*, timeout_s: float = 120.0) -> dict[str, Any]:
+    """Answer first-boot y/n prompts via the existing input path.
+
+    TinkerOS/TempleOS show "Install onto hard drive (y or n)?" then
+    "Take Tour (y or n)?". AutoComplete often holds keyboard focus, so we
+    send Esc first, then ``n`` + Enter for each prompt. Runs off the start()
+    request path so the gateway stays responsive.
+    """
+    deadline = time.monotonic() + float(timeout_s)
+    answered = 0
+    last_text = ""
+    while time.monotonic() < deadline and answered < 2:
+        if _runtime is None:
+            return {"ok": False, "answered": answered, "reason": "vm_stopped"}
+        try:
+            from templeos import input as inp
+            from templeos.screen import read_text, wait_idle
+        except Exception as exc:
+            return {"ok": False, "answered": answered, "error": str(exc)}
+        try:
+            wait_idle(timeout_s=2.0, stable_ms=150)
+        except Exception:
+            pass
+        try:
+            body = read_text()
+        except Exception:
+            body = {}
+        text = str((body or {}).get("text") or "")
+        last_text = text
+        lower = text.lower()
+        needs_install = "install onto hard drive" in lower and "y or n" in lower
+        needs_tour = "take tour" in lower and "y or n" in lower
+        if not needs_install and not needs_tour:
+            # Already past prompts (or snapshot).
+            if "t:/home>" in lower or "home>" in lower:
+                return {"ok": True, "answered": answered, "skipped": True}
+            time.sleep(1.0)
+            continue
+        try:
+            # Esc clears AutoComplete / focus so ``n`` lands on the y/n prompt.
+            inp.send_keys(["esc"], hold_ms=40)
+            time.sleep(0.15)
+            inp.type_text("n", delay_s=0.0)
+            time.sleep(0.05)
+            inp.send_keys(["ret"], hold_ms=40)
+            answered += 1
+            time.sleep(0.8)
+        except Exception as exc:
+            return {"ok": False, "answered": answered, "error": str(exc), "text": last_text[:200]}
+    return {"ok": answered > 0, "answered": answered, "text": last_text[:200]}

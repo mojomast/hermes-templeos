@@ -31,4 +31,4 @@ requires_env: []
 # Pillow is required for screendumps and PNG frames. qemu-system-x86_64 and
 # qemu-img must be on PATH (system package). pyproject.toml wins if both lists exist.
 python_dependencies:
-  - "pillow>=10,<12"
+  - "pillow>=10,<14"

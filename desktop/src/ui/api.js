@@ -83,7 +83,16 @@ export function revokeUrl(url) {
   }
 }
 
+export function isAbortError(error) {
+  if (!error) return false;
+  if (error.name === "AbortError") return true;
+  if (error.code === "ABORT_ERR" || error.code === 20) return true;
+  const message = String(error.message || error || "");
+  return /signal is aborted|aborted without reason|The operation was aborted|AbortError/i.test(message);
+}
+
 export function errorText(error) {
+  if (isAbortError(error)) return "";
   const message = (error && error.message) || "Something went wrong.";
   const fix = error && error.fix;
   return fix ? message + " " + fix : message;
