@@ -1,0 +1,51 @@
+{
+  "tinkeros-holyc-prompt.png": {
+    "flavor": "tinkeros",
+    "needles": [
+      "Hello",
+      "T:/Home>",
+      "Help & Index",
+      "Cmd line",
+      "Public Domain Operating System",
+      "TinkerOS"
+    ]
+  },
+  "tinkeros-mouse-click.png": {
+    "flavor": "tinkeros",
+    "needles": [
+      "Command Line Overview",
+      "HolyC",
+      "Cmd line",
+      "TinkerOS"
+    ]
+  },
+  "tinkeros-boot2-ready.png": {
+    "flavor": "tinkeros",
+    "needles": [
+      "TinkerOS",
+      "Public Domain Operating System",
+      "Help & Index",
+      "T:/Home>"
+    ]
+  },
+  "templeos-holyc-prompt.png": {
+    "flavor": "templeos",
+    "needles": [
+      "Hello",
+      "T:/Home>",
+      "TempleOS",
+      "Public Domain Operating System"
+    ]
+  },
+  "zealos-holyc-prompt.png": {
+    "flavor": "zealos",
+    "needles": [
+      "Hello",
+      "T:/Home>",
+      "Help & Index",
+      "ZealOS",
+      "Public Domain"
+    ],
+    "optional": true
+  }
+}
