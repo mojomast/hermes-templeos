@@ -1,0 +1,33 @@
+name: templeos
+version: "0.1.0"
+description: >-
+  Skill id templeos:templeos-operator. TempleOS runs official-family guests
+  (default TinkerOS 5.20-rc10; optional stock TempleOS 5.03 and ZealOS) in a
+  local QEMU VM so the Hermes agent and the user can share the screen. The
+  plugin spawns qemu-system-x86_64 as a child (KVM only when /dev/kvm can be
+  opened, otherwise TCG), keeps QMP, VNC and COM1 on unix sockets under the
+  plugin data dir, and may fetch a pinned ISO from its official URL (SHA-256
+  verified). Networking is always off (-nic none). The Desktop pane talks only
+  through ctx.rest. HolyC and serial input can drive the guest. QEMU and ISOs
+  are not bundled. This is a child hypervisor, not an OS sandbox.
+author: mojomast
+license: MIT
+requires_hermes: ">=0.23.0"
+homepage: https://github.com/mojomast/hermes-templeos
+tags:
+  - templeos
+  - qemu
+  - desktop
+  - skills
+manifest_version: 2
+api_version: 1
+provides_tools:
+  - templeos_vm
+  - templeos_screen
+  - templeos_input
+  - templeos_files
+provides_hooks: []
+requires_env: []
+# No Python runtime dependencies. qemu-system-x86_64 and qemu-img must be on
+# PATH (system package). pyproject.toml is what Hermes installs if both lists exist.
+python_dependencies: []

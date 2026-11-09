@@ -1,0 +1,34 @@
+# DRAFT only. Do not open a catalog PR from this file.
+# sha must be replaced with a full 40-character commit after an authorized
+# tag/release. Never invent a self-referential pin.
+name: templeos
+title: TempleOS
+repo: https://github.com/mojomast/hermes-templeos
+sha: 0000000000000000000000000000000000000000
+subdir: ""
+description: >-
+  Run a local TempleOS-family guest (default TinkerOS 5.20-rc10; optional
+  stock TempleOS 5.03 and ZealOS) in QEMU so the Hermes agent and the user
+  can share the screen. Disclosure — spawns qemu-system-x86_64 as a child
+  (KVM only when /dev/kvm can be opened, otherwise TCG), may fetch a pinned
+  ISO from its official URL, injects keys and HolyC over QMP/serial, keeps a
+  background QEMU process, and stores disks under plugin data. Networking is
+  always off. QEMU and ISOs are not bundled.
+maintainer: mojomast
+tier: community
+category: desktop
+requires_hermes: ">=0.23.0"
+version: "0.1.0"
+docs_url: https://github.com/mojomast/hermes-templeos#readme
+readme: true
+platforms: []
+known_issues: []
+capabilities:
+  provides_tools:
+    - templeos_vm
+    - templeos_screen
+    - templeos_input
+    - templeos_files
+  provides_hooks: []
+  provides_middleware: []
+  requires_env: []
