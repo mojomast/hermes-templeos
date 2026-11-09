@@ -11,12 +11,23 @@ import { TempleOSPane } from "./src/ui/pane.js";
 import { resetFiber, rerender } from "../tests/js/shims/jsx-runtime.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const OUT = path.join(ROOT, "desktop", "screenshots");
+const OUT = process.env.TEMPLEOS_SHOT_DIR
+  ? path.resolve(process.env.TEMPLEOS_SHOT_DIR)
+  : path.join(ROOT, "desktop", "screenshots");
 const CSS = readFileSync(path.join(ROOT, "desktop", "src", "ui", "styles.css"), "utf8");
-const BAKEOFF = process.env.TEMPLEOS_SHOTS || "/workspace/templeos-bakeoff/shots";
+const FRAMES = process.env.TEMPLEOS_SHOTS || path.join(ROOT, "tests", "fixtures", "frames");
+
+function findChrome() {
+  if (process.env.CHROME) return process.env.CHROME;
+  for (const name of ["google-chrome", "chromium", "chromium-browser"]) {
+    const probe = spawnSync("which", [name], { encoding: "utf8" });
+    if (probe.status === 0) return name;
+  }
+  return "google-chrome";
+}
 
 function frameDataUrl(name) {
-  const file = path.join(BAKEOFF, name);
+  const file = path.join(FRAMES, name);
   const bytes = readFileSync(file);
   return "data:image/png;base64," + bytes.toString("base64");
 }
@@ -220,10 +231,81 @@ const shots = {
       log,
     }),
   },
+  "pane-theme-hermes-running.png": {
+    size: "1680,1180",
+    html: render({
+      theme: "hermes",
+      scale: 2,
+      viewport: { width: 1680, height: 1180 },
+      frameUrl: tinkeros,
+      status: ready,
+    }),
+  },
+  "pane-theme-hermes-onboarding.png": {
+    size: "1280,1100",
+    html: render({
+      theme: "hermes",
+      status: {
+        running: false,
+        mode: "shared",
+        agent_paused: false,
+        setup_needed: true,
+        ready: false,
+        flavor: "tinkeros",
+        flavor_name: "TinkerOS 5.20-rc10",
+        accel: null,
+        kvm: false,
+        snapshot: null,
+        checks: { qemu: false, iso: false, kvm: "unknown" },
+      },
+    }),
+  },
+  "pane-theme-hermes-user-driving.png": {
+    size: "1680,1180",
+    html: render({
+      theme: "hermes",
+      scale: 2,
+      focused: true,
+      viewport: { width: 1680, height: 1180 },
+      frameUrl: prompt,
+      status: {
+        ...ready,
+        mode: "user",
+        agent_paused: true,
+        user_may_input: true,
+      },
+    }),
+  },
+  "pane-theme-hermes-agent-log.png": {
+    size: "1680,1180",
+    html: render({
+      theme: "hermes",
+      scale: 2,
+      viewport: { width: 1680, height: 1180 },
+      frameUrl: tinkeros,
+      status: {
+        ...ready,
+        agent_busy: true,
+        accel: "kvm",
+        kvm: true,
+      },
+      log,
+    }),
+  },
+  "pane-theme-vga-running.png": {
+    size: "1680,1180",
+    html: render({
+      theme: "vga",
+      scale: 2,
+      viewport: { width: 1680, height: 1180 },
+      frameUrl: tinkeros,
+      status: ready,
+    }),
+  },
 };
 
 mkdirSync(OUT, { recursive: true });
-const chrome = process.env.CHROME || "google-chrome";
+const chrome = findChrome();
 for (const [name, shot] of Object.entries(shots)) {
   const file = path.join("/tmp", name.replace(".png", ".html"));
   writeFileSync(file, shot.html);

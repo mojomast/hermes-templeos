@@ -291,6 +291,224 @@
 .tos-error { color: var(--tos-red); }
 .tos-info { color: var(--tos-cyan); }
 
+/* Temple of Hermes theme.
+   Palette: art/palette.json (TempleOS gr32_palette_std), branch hermes/art
+   @ 97d7ad2. Header strip, wallpaper and icons come from the same branch. */
+
+.tos-pane[data-theme="hermes"] {
+  --tos-hermes-gold: #ffff55;
+  --tos-hermes-cyan: #55ffff;
+  --tos-hermes-azure: #5555ff;
+  --tos-hermes-violet: #ff55ff;
+  --tos-hermes-teal: #00aaaa;
+  --tos-hermes-marble: #aaaaaa;
+  --tos-hermes-ink: #000000;
+  --tos-hermes-deep: #0000aa;
+  color: var(--tos-hermes-gold);
+  background:
+    radial-gradient(120% 72% at 50% 0%, rgba(85, 85, 255, 0.22), rgba(0, 0, 0, 0) 62%),
+    linear-gradient(180deg, rgba(0, 0, 0, 0.74) 0 62px, rgba(0, 0, 0, 0.9) 62px),
+    var(--tos-hermes-wallpaper) center / cover no-repeat,
+    var(--tos-hermes-ink);
+}
+
+.tos-pane[data-theme="hermes"] .tos-top {
+  position: relative;
+  padding: 10px 12px 13px;
+  border: 1px solid rgba(85, 255, 255, 0.42);
+  background:
+    linear-gradient(90deg, rgba(0, 0, 0, 0.88), rgba(0, 0, 0, 0.58) 60%, rgba(0, 0, 0, 0.88)),
+    var(--tos-hermes-header) center / cover no-repeat;
+  box-shadow:
+    inset 0 0 26px rgba(0, 0, 170, 0.5),
+    0 0 20px rgba(85, 255, 255, 0.14);
+}
+
+.tos-pane[data-theme="hermes"] .tos-top::after {
+  content: "";
+  position: absolute;
+  left: 8px;
+  right: 8px;
+  bottom: 4px;
+  height: 3px;
+  background: repeating-linear-gradient(
+    90deg,
+    var(--tos-hermes-cyan) 0 2px,
+    transparent 2px 7px
+  );
+  opacity: 0.55;
+  pointer-events: none;
+}
+
+.tos-pane[data-theme="hermes"] .tos-mark {
+  width: 30px;
+  height: 30px;
+  background: var(--tos-hermes-mark) center / contain no-repeat;
+  image-rendering: pixelated;
+  box-shadow:
+    0 0 0 1px rgba(255, 255, 85, 0.7),
+    0 0 12px rgba(85, 255, 255, 0.35);
+}
+
+.tos-pane[data-theme="hermes"] .tos-brand strong {
+  color: var(--tos-hermes-gold);
+  text-shadow: 0 0 10px rgba(255, 255, 85, 0.28);
+}
+
+.tos-pane[data-theme="hermes"] .tos-brand em {
+  color: var(--tos-hermes-cyan);
+}
+
+.tos-pane[data-theme="hermes"] .tos-badge {
+  color: var(--tos-hermes-cyan);
+  border-color: rgba(85, 255, 255, 0.55);
+  background: rgba(0, 0, 170, 0.18);
+}
+
+.tos-pane[data-theme="hermes"] .tos-badge-accel {
+  color: var(--tos-hermes-gold);
+  border-color: rgba(255, 255, 85, 0.6);
+}
+
+.tos-pane[data-theme="hermes"] .tos-chip {
+  color: var(--tos-hermes-violet);
+  border-color: rgba(255, 85, 255, 0.5);
+  background: rgba(255, 85, 255, 0.16);
+}
+
+.tos-pane[data-theme="hermes"] .tos-btn {
+  color: var(--tos-hermes-gold);
+  border-color: rgba(255, 255, 85, 0.5);
+  background: linear-gradient(180deg, rgba(0, 0, 170, 0.35), rgba(0, 0, 0, 0.45));
+}
+
+.tos-pane[data-theme="hermes"] .tos-btn:hover:not(:disabled) {
+  color: var(--tos-white);
+  border-color: var(--tos-hermes-cyan);
+  background: linear-gradient(180deg, rgba(85, 85, 255, 0.42), rgba(0, 0, 170, 0.6));
+}
+
+.tos-pane[data-theme="hermes"] .tos-btn.is-on,
+.tos-pane[data-theme="hermes"] .tos-primary {
+  color: var(--tos-white);
+  border-color: var(--tos-hermes-cyan);
+  background: linear-gradient(180deg, rgba(85, 85, 255, 0.48), rgba(0, 0, 170, 0.62));
+  box-shadow: 0 0 10px rgba(85, 255, 255, 0.2);
+}
+
+.tos-pane[data-theme="hermes"] .tos-theme {
+  color: var(--tos-hermes-violet);
+  border-color: rgba(255, 85, 255, 0.55);
+}
+
+.tos-pane[data-theme="hermes"] .tos-theme::before {
+  content: "";
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  margin-right: 5px;
+  vertical-align: -2px;
+  background: var(--tos-hermes-nous) center / contain no-repeat;
+  image-rendering: pixelated;
+}
+
+.tos-pane[data-theme="hermes"] .tos-drive {
+  color: var(--tos-hermes-cyan);
+  border-color: var(--tos-hermes-cyan);
+  background: linear-gradient(90deg, rgba(0, 0, 170, 0.58), rgba(0, 0, 0, 0.72));
+  box-shadow: 0 0 12px rgba(85, 255, 255, 0.12);
+}
+
+.tos-pane[data-theme="hermes"] .tos-drive-user {
+  color: var(--tos-green);
+  border-color: var(--tos-green);
+}
+
+.tos-pane[data-theme="hermes"] .tos-onboard {
+  border-color: rgba(85, 255, 255, 0.42);
+  background:
+    linear-gradient(180deg, rgba(0, 0, 170, 0.3), rgba(0, 0, 0, 0.62));
+  box-shadow: inset 0 0 22px rgba(0, 0, 170, 0.38);
+}
+
+.tos-pane[data-theme="hermes"] .tos-onboard h2,
+.tos-pane[data-theme="hermes"] .tos-log h2 {
+  color: var(--tos-hermes-gold);
+}
+
+.tos-pane[data-theme="hermes"] .tos-log h2::before {
+  content: "";
+  display: inline-block;
+  width: 16px;
+  height: 16px;
+  margin-right: 6px;
+  vertical-align: -3px;
+  background: var(--tos-hermes-chat) center / contain no-repeat;
+  image-rendering: pixelated;
+}
+
+.tos-pane[data-theme="hermes"] .tos-hint::before {
+  content: "";
+  display: inline-block;
+  width: 16px;
+  height: 16px;
+  margin-right: 6px;
+  vertical-align: -3px;
+  background: var(--tos-hermes-capy) center / contain no-repeat;
+  image-rendering: pixelated;
+}
+
+.tos-pane[data-theme="hermes"] .tos-screen {
+  border-color: rgba(85, 255, 255, 0.45);
+  box-shadow:
+    0 0 0 1px var(--tos-hermes-ink),
+    0 0 26px rgba(0, 0, 170, 0.5);
+}
+
+.tos-pane[data-theme="hermes"] .tos-screen.is-focused {
+  border-color: var(--tos-hermes-cyan);
+  box-shadow:
+    0 0 0 2px var(--tos-hermes-cyan),
+    0 0 30px rgba(85, 255, 255, 0.3);
+}
+
+.tos-pane[data-theme="hermes"] .tos-log {
+  border-color: rgba(255, 255, 85, 0.32);
+  background:
+    linear-gradient(180deg, rgba(0, 0, 170, 0.22), rgba(0, 0, 0, 0.7));
+  box-shadow: inset 0 0 18px rgba(0, 0, 170, 0.32);
+}
+
+.tos-pane[data-theme="hermes"] .tos-log-agent {
+  color: var(--tos-hermes-cyan);
+}
+
+.tos-pane[data-theme="hermes"] .tos-log-user {
+  color: var(--tos-hermes-gold);
+}
+
+.tos-pane[data-theme="hermes"] .tos-log-line.is-failed,
+.tos-pane[data-theme="hermes"] .tos-error {
+  color: var(--tos-red);
+}
+
+.tos-pane[data-theme="hermes"] .tos-info,
+.tos-pane[data-theme="hermes"] .tos-hatch {
+  color: var(--tos-hermes-cyan);
+}
+
+.tos-pane[data-theme="hermes"] .tos-check-ok {
+  color: var(--tos-green);
+}
+
+.tos-pane[data-theme="hermes"] .tos-check-no {
+  color: var(--tos-red);
+}
+
+.tos-pane[data-theme="hermes"] .tos-check-unknown {
+  color: var(--tos-hermes-marble);
+}
+
 @media (max-width: 900px) {
   .tos-body {
     grid-template-columns: 1fr;
