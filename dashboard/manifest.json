@@ -1,7 +1,7 @@
 {
   "name": "templeos",
   "label": "TempleOS",
-  "description": "Watch and share a local TempleOS (TinkerOS) QEMU guest with the agent.",
+  "description": "Watch and co-drive a local TempleOS (TinkerOS) QEMU guest with the agent. The Desktop pane talks only through ctx.rest.",
   "icon": "Monitor",
   "version": "0.1.0",
   "api": "plugin_api.py"

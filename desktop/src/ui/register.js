@@ -11,7 +11,7 @@ export function createPaneContribution() {
     title: PANE_TITLE,
     area: "panes",
     order: 45,
-    data: { placement: "right", width: "720px" },
+    data: { placement: "right", width: "920px" },
     render: function renderTempleOS() {
       return jsx(TempleOSPane, {});
     },
