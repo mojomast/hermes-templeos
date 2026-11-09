@@ -3,9 +3,9 @@
 
 import { jsx as __ext0 } from "react/jsx-runtime";
 import { jsxs as __ext1 } from "react/jsx-runtime";
-import { useEffect as __ext2 } from "react/jsx-runtime";
-import { useRef as __ext3 } from "react/jsx-runtime";
-import { useState as __ext4 } from "react/jsx-runtime";
+import { useEffect as __ext2 } from "react";
+import { useRef as __ext3 } from "react";
+import { useState as __ext4 } from "react";
 
 // desktop/src/ui/api.js
 const __m0 = (function () {
