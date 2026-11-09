@@ -117,6 +117,47 @@ def current() -> Runtime | None:
     return _runtime
 
 
+def get_runtime() -> Runtime | None:
+    """In-process runtime for screen/input binding (None if the VM is stopped)."""
+    return _runtime
+
+
+def get_serial() -> Any | None:
+    """Open COM1 port for the current session, or None if it is not connected."""
+    rt = _runtime
+    if rt is None:
+        return None
+    serial = rt.serial
+    if serial is not None and getattr(serial, "connected", False):
+        return serial
+    return None
+
+
+def available_snapshots() -> dict[str, Any]:
+    """Named savevm snapshots on the current (or default flavor) disk."""
+    with _LOCK:
+        root = home()
+        rt = _runtime
+        disk = rt.disk if rt is not None else None
+        current = rt.snapshot if rt is not None else None
+        if disk is None:
+            state = _read_state(root)
+            flavor = str(state.get("flavor") or "tinkeros")
+            try:
+                rec = get_flavor(flavor)
+                disk = disks_dir(root) / f"{rec['id']}.qcow2"
+            except Exception:
+                disk = None
+            current = state.get("snapshot")
+        names: list[str] = []
+        if disk is not None:
+            try:
+                names = list(list_snapshots(disk))
+            except Exception:
+                names = []
+        return {"ok": True, "snapshots": names, "snapshot": current}
+
+
 def _start(*, flavor: str, snapshot: str) -> dict[str, Any]:
     try:
         rec = get_flavor(flavor)
@@ -221,6 +262,7 @@ def _start(*, flavor: str, snapshot: str) -> dict[str, Any]:
         sockets=socks,
     )
     _write_state(root, _runtime)
+    _bind_screen(_runtime)
 
     wanted = snap_name
     if wanted and wanted in list_snapshots(disk):
@@ -267,6 +309,7 @@ def _stop() -> dict[str, Any]:
         pass
     flavor = rt.flavor if rt is not None else "tinkeros"
     _runtime = None
+    _unbind_screen()
     state_path = root / STATE_NAME
     if state_path.exists():
         try:
@@ -589,6 +632,29 @@ def _check_snapshot_name(name: str) -> str | dict[str, Any]:
     if "/" in token or "\\" in token or ".." in token or not _SNAPSHOT_NAME.match(token):
         return _fail("name must be a simple snapshot id (default golden).", "invalid_args")
     return token
+
+
+def _bind_screen(rt: Runtime) -> None:
+    """Attach the live QMP/serial session so screen and input can use it."""
+    try:
+        from templeos.screen import bind as bind_screen
+    except Exception:
+        return
+    try:
+        bind_screen(qmp=rt.qmp, serial=rt.serial, flavor=rt.flavor, state_dir=rt.home)
+    except Exception:
+        return
+
+
+def _unbind_screen() -> None:
+    try:
+        from templeos.screen import unbind as unbind_screen
+    except Exception:
+        return
+    try:
+        unbind_screen()
+    except Exception:
+        return
 
 
 def _fail(error: str, code: str, fix: str | None = None) -> dict[str, Any]:

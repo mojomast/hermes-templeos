@@ -163,7 +163,7 @@ Typed signatures and docstrings live in the modules themselves. Summary:
 | `templeos.qemu` | `build_argv`, `spawn`, `terminate`, `is_running` | A |
 | `templeos.qmp` | `QMPClient.connect/close/cmd/hmp/screendump/send_key/input_send_event` | A |
 | `templeos.serial` | `SerialPort.open/close/write/read/read_available` | A |
-| `templeos.vm` | `start`, `stop`, `reset`, `snapshot`, `restore`, `status` | A |
+| `templeos.vm` | `start`, `stop`, `reset`, `snapshot`, `restore`, `status`, `get_runtime`, `get_serial` | A |
 | `templeos.doctor` | `kvm_usable`, `qemu_version`, `ensure_iso`, `doctor` | A |
 | `templeos.screen` | `look`, `read_text`, `wait_idle`, `frame_hash`, `glyph_read` | B |
 | `templeos.input` | `type_text`, `send_keys`, `click`, `move`, `holyc` | B |
@@ -223,16 +223,25 @@ remote scripts. `ctx.rest` only. Hermes `>= 0.23.0`.
 |---|---|---|---|
 | GET | `/health` | | `{ok, plugin, version, mode, agent_paused}` |
 | GET | `/status` | | health + `running, flavor, accel, snapshot, kvm, sockets, mode, ...` |
-| GET | `/frame` | | `{ok, mime, data, width, height, sha256, caption}` PNG |
+| GET | `/frame` | `?since=<sha256>` or `If-None-Match` | PNG `{ok, mime, data, width, height, sha256, caption}`. If the hash matches, HTTP 200 with `{unchanged: true, data: null, sha256}` (not 304). |
 | GET | `/control` | | `{ok, mode, agent_paused, hold_off_s, user_may_input}` |
 | POST | `/control` | `{op\|mode: take\|handback\|watch\|shared\|user}` | same, after the change |
 | POST | `/input` | `{type: key\|click\|move, text?, key?, keys?, x?, y?, button?}` | injects user input; starts the shared hold-off |
+| POST | `/vm` | `{op: start\|stop\|reset\|...}` | VM lifecycle (same ops as `templeos_vm`) |
+| POST | `/start` | `{flavor?, name?}` | alias for `/vm` `op=start` |
+| POST | `/stop` | | alias for `/vm` `op=stop` |
+| POST | `/reset` | | alias for `/vm` `op=reset` |
+| GET | `/snapshots` | | `{ok, snapshots, snapshot}` |
+| POST | `/snapshots` | `{op: save\|restore, name?}` | savevm / loadvm (ejects non-qcow2 writables first) |
+| GET | `/log` | `?limit=` | recent agent/user actions (`api.note_agent_action`) |
+| GET | `/doctor` | | doctor report (QEMU, ISO pin, KVM openable) |
+| POST | `/setup` | `{flavor?}` | fetch/verify the pinned ISO, then doctor |
 
-`/health` and `/control` are fully implemented in Slice 0. `/status`
-returns arbiter fields now and fills VM fields once Slice A lands.
-`/frame` and live `/input` injection return `not_implemented` until
-Slices B and C finish them; `/input` still records the user event so
-the hold-off works.
+All of these routes are implemented. `/frame` and `/input` return
+`vm_not_running` when the guest is stopped (never a slice stub). `/input`
+always records the user event so the shared-mode hold-off works, even if
+injection fails. `dashboard/plugin_api.py` wraps `templeos.tools.HANDLERS`
+so tool calls appear in `GET /log`.
 
 ## Pane protocol
 
@@ -279,12 +288,10 @@ possible.
 - Bind a port for tests with `templeos.files.bind_serial(FakeSerial(...))`.
   Production should expose the live port via `templeos.vm.get_serial()` once
   Slice A lands.
-- When COM1 is not bound (`bind_serial` / `vm.get_serial`), the public
-  functions still raise `NotImplementedError` so Slice 0 stub tests stay
-  green. Mid-transfer failures return `serial_not_ready`. After Slice A
-  exposes `get_serial`, integration should switch the empty-serial branch to
-  `serial_not_ready` and drop the files rows from `tests/test_stubs.py` /
-  `tests/test_tools.py`.
+- When COM1 is not bound (`bind_serial` / `vm.get_serial()`), the public
+  functions return `serial_not_ready`. Mid-transfer failures also use
+  `serial_not_ready`. `push` may fall back to experimental FAT only when
+  the VM does not appear running.
 - Experimental FAT push lives in `_push_via_fat` (stopped VM only). Never
   mount the live RedSea qcow2 while QEMU has it open.
 - Caps: 256 KiB file, 200-char guest path, exchange dir under `home()/exchange/`.

@@ -28,6 +28,7 @@ provides_tools:
   - templeos_files
 provides_hooks: []
 requires_env: []
-# No Python runtime dependencies. qemu-system-x86_64 and qemu-img must be on
-# PATH (system package). pyproject.toml is what Hermes installs if both lists exist.
-python_dependencies: []
+# Pillow is required for screendumps and PNG frames. qemu-system-x86_64 and
+# qemu-img must be on PATH (system package). pyproject.toml wins if both lists exist.
+python_dependencies:
+  - "pillow>=10,<12"

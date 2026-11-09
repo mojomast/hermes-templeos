@@ -39,19 +39,27 @@ def test_unknown_flavor_and_snapshot_name(tos_home):
     assert body["ok"] is False and body["code"] == "invalid_args"
 
 
-def test_unimplemented_ops_return_not_implemented(tos_home):
-    for raw in (
-        handle_vm({"op": "start", "flavor": "tinkeros"}),
-        handle_vm({"op": "doctor"}),
-        handle_screen({"op": "look"}),
-        handle_screen({"op": "read_text"}),
-        handle_input({"op": "type", "text": "Hi"}),
-        handle_files({"op": "list", "path": "T:/"}),
-    ):
-        body = _parse(raw)
-        assert body["ok"] is False
-        assert body["code"] == "not_implemented"
-        assert body["fix"]
+def test_ops_without_a_running_vm_return_structured_errors(tos_home):
+    start = _parse(handle_vm({"op": "start", "flavor": "tinkeros"}))
+    assert start["ok"] is False
+    assert start["code"] in {"iso_missing", "qemu_missing", "doctor_failed"}
+    assert start["fix"]
+
+    doctor = _parse(handle_vm({"op": "doctor"}))
+    assert "ok" in doctor and doctor["code"] in {None, "doctor_failed", "iso_missing", "qemu_missing"}
+    assert doctor["fix"] or doctor["ok"] is True
+
+    look = _parse(handle_screen({"op": "look"}))
+    assert look["ok"] is False and look["code"] == "vm_not_running"
+    text = _parse(handle_screen({"op": "read_text"}))
+    assert text["ok"] is False and text["code"] == "vm_not_running"
+
+    typed = _parse(handle_input({"op": "type", "text": "Hi"}))
+    assert typed["ok"] is False and typed["code"] == "vm_not_running"
+
+    listed = _parse(handle_files({"op": "list", "path": "T:/"}))
+    assert listed["ok"] is False and listed["code"] == "serial_not_ready"
+    assert listed["fix"]
 
 
 def test_input_is_paused_in_user_mode(tos_home):
@@ -73,7 +81,7 @@ def test_files_confinement(tos_home, tmp_path):
     dest = tos_home / "inbox" / "X.HC"
     dest.parent.mkdir()
     body = _parse(handle_files({"op": "pull", "path": "T:/Home/X.HC", "dest": str(dest)}))
-    assert body["code"] == "not_implemented"
+    assert body["code"] == "serial_not_ready"
 
 
 def test_type_requires_text_and_holyc_has_a_cap(tos_home):

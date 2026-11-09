@@ -63,10 +63,11 @@ def _bind(tos_home, framebuffer: bytes | None = None, *, flavor: str = "tinkeros
     return qmp
 
 
-def test_unbound_look_raises_slice_not_implemented():
-    with pytest.raises(NotImplementedError, match="Slice "):
-        look()
-    with pytest.raises(NotImplementedError, match="Slice "):
+def test_unbound_look_returns_vm_not_running():
+    body = look()
+    assert body["ok"] is False
+    assert body["code"] == "vm_not_running"
+    with pytest.raises(ValueError, match="image"):
         glyph_read(b"")
 
 

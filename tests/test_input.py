@@ -48,17 +48,16 @@ def _bind(tos_home, *, flavor: str = "tinkeros", serial=None, abs_mouse: bool = 
     return qmp
 
 
-def test_unbound_input_raises_slice_not_implemented():
-    with pytest.raises(NotImplementedError, match="Slice "):
-        type_text("Hi")
-    with pytest.raises(NotImplementedError, match="Slice "):
-        send_keys(["ret"])
-    with pytest.raises(NotImplementedError, match="Slice "):
-        click(1, 2)
-    with pytest.raises(NotImplementedError, match="Slice "):
-        move(1, 2)
-    with pytest.raises(NotImplementedError, match="Slice "):
-        holyc("Dir;")
+def test_unbound_input_returns_vm_not_running():
+    for body in (
+        type_text("Hi"),
+        send_keys(["ret"]),
+        click(1, 2),
+        move(1, 2),
+        holyc("Dir;"),
+    ):
+        assert body["ok"] is False
+        assert body["code"] == "vm_not_running"
 
 
 def test_qcodes_for_letters_shift_and_holyc_punctuation():

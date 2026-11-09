@@ -265,12 +265,7 @@ def list_guest(path: str = "T:/") -> dict[str, Any]:
 
     port = get_serial()
     if port is None:
-        # Integration stub tests still expect NotImplementedError until feat/integration
-        # flips this branch to serial_not_ready (see docs/CONTRACTS.md Files protocol).
-        raise NotImplementedError(
-            "templeos.files.list_guest: Slice D needs COM1 "
-            "(bind_serial in tests, or vm.get_serial once Slice A lands)"
-        )
+        return _serial_missing()
 
     try:
         cmd, payload = _transact(port, CMD_LIST, guest.encode("utf-8"))
@@ -323,10 +318,7 @@ def pull(guest_path: str, host_dest: Path) -> dict[str, Any]:
 
     port = get_serial()
     if port is None:
-        raise NotImplementedError(
-            "templeos.files.pull: Slice D needs COM1 "
-            "(bind_serial in tests, or vm.get_serial once Slice A lands)"
-        )
+        return _serial_missing()
 
     try:
         cmd, payload = _transact(port, CMD_PULL, guest.encode("utf-8"))
@@ -375,14 +367,6 @@ def push(host_src: Path, guest_path: str) -> dict[str, Any]:
     except PathError as exc:
         return _err_result(str(exc), getattr(exc, "code", "path_escape"))
 
-    port = get_serial()
-    if port is None:
-        raise NotImplementedError(
-            "templeos.files.push: Slice D needs COM1 "
-            "(bind_serial in tests, or vm.get_serial once Slice A lands); "
-            "experimental FAT is _push_via_fat"
-        )
-
     if not src.is_file():
         return _err_result(f"src is not a file: {src}", "invalid_args")
     size = src.stat().st_size
@@ -394,34 +378,34 @@ def push(host_src: Path, guest_path: str) -> dict[str, Any]:
         )
     data = src.read_bytes()
 
-    if port is not None:
-        payload = guest.encode("utf-8") + b"\x00" + data
-        try:
-            cmd, reply = _transact(port, CMD_PUSH, payload)
-        except TimeoutError as exc:
-            return _err_result(str(exc), "timeout")
-        except Exception as exc:
-            return _err_result(str(exc), "serial_not_ready")
-        if cmd == CMD_ERR:
-            return _err_result(
-                reply.decode("utf-8", errors="replace") or "guest push failed",
-                "invalid_args",
-            )
-        if cmd != CMD_PUSH_OK:
-            return _err_result(
-                f"unexpected serial reply cmd=0x{cmd:02x}",
-                "serial_not_ready",
-            )
-        return {
-            "ok": True,
-            "guest_path": guest,
-            "host_path": str(src),
-            "bytes": size,
-            "via": "serial",
-        }
+    port = get_serial()
+    if port is None:
+        return _push_via_fat(src, guest, data)
 
-    # port was checked non-None above; keep for type checkers.
-    return _err_result("serial not open", "serial_not_ready")
+    payload = guest.encode("utf-8") + b"\x00" + data
+    try:
+        cmd, reply = _transact(port, CMD_PUSH, payload)
+    except TimeoutError as exc:
+        return _err_result(str(exc), "timeout")
+    except Exception as exc:
+        return _err_result(str(exc), "serial_not_ready")
+    if cmd == CMD_ERR:
+        return _err_result(
+            reply.decode("utf-8", errors="replace") or "guest push failed",
+            "invalid_args",
+        )
+    if cmd != CMD_PUSH_OK:
+        return _err_result(
+            f"unexpected serial reply cmd=0x{cmd:02x}",
+            "serial_not_ready",
+        )
+    return {
+        "ok": True,
+        "guest_path": guest,
+        "host_path": str(src),
+        "bytes": size,
+        "via": "serial",
+    }
 
 
 def _vm_appears_running() -> bool:
@@ -463,51 +447,26 @@ def _push_via_fat(src: Path, guest: str, data: bytes) -> dict[str, Any]:
     staged = staging / name
     staged.write_bytes(data)
 
-    mkfs = _which("mkfs.vfat") or _which("mkfs.fat")
+    mformat = _which("mformat")
     mcopy = _which("mcopy")
-    if mkfs is None and mcopy is None:
+    if mformat is None or mcopy is None:
         return _err_result(
-            "FAT fallback needs mkfs.vfat or mtools (mcopy) on PATH.",
+            "FAT fallback needs mtools (mformat and mcopy) on PATH.",
             "doctor_failed",
-            "Install dosfstools or mtools, or use the serial Xfer path while the VM runs.",
+            "Install mtools, or use the serial Xfer path while the VM runs.",
             experimental=True,
         )
 
     try:
         img.write_bytes(b"\x00" * FAT_IMAGE_BYTES)
         env = child_env()
-        if mkfs is not None:
-            subprocess.run(
-                [mkfs, "-n", "XFER", str(img)],
-                check=True,
-                env=env,
-                capture_output=True,
-                timeout=30,
-            )
-        else:
-            # mformat from mtools
-            mformat = _which("mformat")
-            if mformat is None:
-                return _err_result(
-                    "mtools is present but mformat is missing.",
-                    "doctor_failed",
-                    "Install mtools, or mkfs.vfat from dosfstools.",
-                    experimental=True,
-                )
-            subprocess.run(
-                [mformat, "-i", str(img), "-v", "XFER", "::"],
-                check=True,
-                env=env,
-                capture_output=True,
-                timeout=30,
-            )
-        if mcopy is None:
-            return _err_result(
-                "mkfs.vfat worked but mcopy is missing; cannot place the file.",
-                "doctor_failed",
-                "Install mtools (mcopy).",
-                experimental=True,
-            )
+        subprocess.run(
+            [mformat, "-i", str(img), "-v", "XFER", "::"],
+            check=True,
+            env=env,
+            capture_output=True,
+            timeout=30,
+        )
         subprocess.run(
             [mcopy, "-o", "-i", str(img), str(staged), f"::{name}"],
             check=True,
@@ -519,7 +478,7 @@ def _push_via_fat(src: Path, guest: str, data: bytes) -> dict[str, Any]:
         return _err_result(
             f"FAT image build failed (exit {exc.returncode}).",
             "doctor_failed",
-            "Check dosfstools/mtools; the FAT path is experimental.",
+            "Check mtools (mformat/mcopy); the FAT path is experimental.",
             experimental=True,
         )
     except Exception as exc:

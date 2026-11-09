@@ -191,7 +191,14 @@ def _from_impl(fn: Callable[..., Any], *args: Any, unit: str = "operation", **kw
         return _json_err(str(exc), getattr(exc, "code", Code.UNKNOWN_FLAVOR))
     except ValueError as exc:
         return _json_err(str(exc), Code.INVALID_ARGS)
-    except Exception:
+    except Exception as exc:
+        envelope = getattr(exc, "envelope", None)
+        if isinstance(envelope, dict) and envelope.get("code"):
+            body = dict(envelope)
+            body["ok"] = False
+            body.setdefault("error", f"{unit} failed.")
+            body.setdefault("fix", CODE_FIX.get(body.get("code") or "", "See docs/CONTRACTS.md."))
+            return body
         return _json_err(
             f"{unit} failed.",
             Code.DOCTOR_FAILED,
@@ -529,6 +536,14 @@ def user_input(body: dict[str, Any] | None) -> dict[str, Any]:
                 **snap,
             )
             return envelope
+        except Exception as exc:
+            env = getattr(exc, "envelope", None)
+            if isinstance(env, dict) and env.get("code"):
+                body = dict(env)
+                body["ok"] = False
+                body.update({k: v for k, v in snap.items() if k not in body})
+                return body
+            raise
     if isinstance(result, dict):
         result.setdefault("ok", True)
         if result.get("ok") is False:
@@ -646,10 +661,10 @@ def snapshots_payload() -> dict[str, Any]:
     implemented = True
     from templeos import vm
 
-    lister = getattr(vm, "list_snapshots", None)
+    lister = getattr(vm, "available_snapshots", None) or getattr(vm, "list_snapshots", None)
     raw: dict[str, Any] | None = None
     if callable(lister):
-        raw = _from_impl(lister, unit="vm.list_snapshots")
+        raw = _from_impl(lister, unit="vm.available_snapshots")
         if raw.get("code") == Code.NOT_IMPLEMENTED:
             implemented = False
             raw = None

@@ -16,7 +16,7 @@ from typing import Any, Sequence
 
 from templeos.arbiter import get_arbiter
 from templeos.flavors import DEFAULT, guest_size, mouse_strategy
-from templeos.screen import bind, get_runtime, require_runtime, unbind
+from templeos.screen import ScreenError, bind, get_runtime, require_runtime, unbind
 from templeos.tools import CODE_FIX, Code
 
 # Re-export so tests and Slice A can bind a session from either module.
@@ -201,7 +201,7 @@ def _ok(**fields: Any) -> dict[str, Any]:
 
 
 def _require_qmp() -> Any:
-    """Bound QMP, or the Slice B NotImplementedError when nothing is attached."""
+    """Bound QMP, or ScreenError(vm_not_running) when nothing is attached."""
     return require_runtime().qmp
 
 
@@ -266,19 +266,22 @@ def type_text(text: str, *, delay_s: float = DEFAULT_DELAY_S) -> dict[str, Any]:
     """Type Unicode text as QEMU qcodes (US layout, shift as needed)."""
     if not isinstance(text, str):
         raise ValueError("text must be a string")
-    arbiter = get_arbiter()
-    with arbiter.queue():
-        qmp = _require_qmp()
-        typed = 0
-        for i, ch in enumerate(text):
-            codes = qcodes_for(ch)
-            _send_key(qmp, codes)
-            typed += 1
-            if delay_s > 0:
-                time.sleep(delay_s)
-                if CHUNK_CHARS and (i + 1) % CHUNK_CHARS == 0:
+    try:
+        arbiter = get_arbiter()
+        with arbiter.queue():
+            qmp = _require_qmp()
+            typed = 0
+            for i, ch in enumerate(text):
+                codes = qcodes_for(ch)
+                _send_key(qmp, codes)
+                typed += 1
+                if delay_s > 0:
                     time.sleep(delay_s)
-        return _ok(typed=typed)
+                    if CHUNK_CHARS and (i + 1) % CHUNK_CHARS == 0:
+                        time.sleep(delay_s)
+            return _ok(typed=typed)
+    except ScreenError as exc:
+        return exc.envelope
 
 
 def send_keys(keys: Sequence[str], *, hold_ms: int = DEFAULT_HOLD_MS) -> dict[str, Any]:
@@ -286,14 +289,17 @@ def send_keys(keys: Sequence[str], *, hold_ms: int = DEFAULT_HOLD_MS) -> dict[st
     if not keys:
         raise ValueError("keys must be a non-empty sequence of qcode names")
     combos = [_parse_combo(k) for k in keys]
-    arbiter = get_arbiter()
-    with arbiter.queue():
-        qmp = _require_qmp()
-        sent: list[list[str]] = []
-        for codes in combos:
-            _send_key(qmp, codes, hold_ms=hold_ms)
-            sent.append(list(codes))
-        return _ok(keys=sent)
+    try:
+        arbiter = get_arbiter()
+        with arbiter.queue():
+            qmp = _require_qmp()
+            sent: list[list[str]] = []
+            for codes in combos:
+                _send_key(qmp, codes, hold_ms=hold_ms)
+                sent.append(list(codes))
+            return _ok(keys=sent)
+    except ScreenError as exc:
+        return exc.envelope
 
 
 def _abs_axis(px: int, size: int) -> int:
@@ -410,38 +416,44 @@ def click(
         raise ValueError("button must be left, right, or middle.")
     if not isinstance(x, int) or not isinstance(y, int):
         raise ValueError("x and y must be integers")
-    arbiter = get_arbiter()
-    with arbiter.queue():
-        rt = require_runtime()
-        qmp = rt.qmp
-        used_flavor = flavor or rt.flavor
-        delay = 0.0 if rt.type_delay_s is None else min(rt.type_delay_s, DEFAULT_DELAY_S)
-        # MsSet types at the HolyC prompt; keep that path snappy in tests.
-        try:
-            info = _apply_move(
-                x=x,
-                y=y,
-                via=via,
-                flavor=used_flavor,
-                qmp=qmp,
-                last=rt.last_pointer,
-                delay_s=0.0 if delay == 0.09 else delay,
-            )
-        except Exception as exc:
-            if "input handler not found" in str(exc).lower():
-                return _fail(str(exc), Code.INVALID_ARGS, via=via, x=x, y=y)
-            raise
-        if info.get("ok") is False:
-            return info
-        # Bake-off: wait after the absolute move, then a short button hold.
-        # Keep this at zero when type_delay_s is 0 so unit tests stay fast.
-        settle = 0.0 if not rt.type_delay_s else max(0.25, float(rt.type_delay_s) * 3)
-        hold = 0.0 if not rt.type_delay_s else 0.15
-        if settle:
-            time.sleep(settle)
-        _click_button(qmp, button, hold_s=hold)
-        rt.last_pointer = (x, y)
-        return _ok(button=button, **info)
+    try:
+        arbiter = get_arbiter()
+        with arbiter.queue():
+            rt = require_runtime()
+            qmp = rt.qmp
+            used_flavor = flavor or rt.flavor
+            delay = 0.0 if rt.type_delay_s is None else min(rt.type_delay_s, DEFAULT_DELAY_S)
+            # MsSet types at the HolyC prompt; keep that path snappy in tests.
+            try:
+                info = _apply_move(
+                    x=x,
+                    y=y,
+                    via=via,
+                    flavor=used_flavor,
+                    qmp=qmp,
+                    last=rt.last_pointer,
+                    delay_s=0.0 if delay == 0.09 else delay,
+                )
+            except ScreenError:
+                raise
+            except Exception as exc:
+                if "input handler not found" in str(exc).lower():
+                    return _fail(str(exc), Code.INVALID_ARGS, via=via, x=x, y=y)
+                raise
+            if info.get("ok") is False:
+                return info
+            # Bake-off: wait after the absolute move, then a short button hold.
+            # Keep this at zero when type_delay_s is 0 so unit tests stay fast.
+            # Live clicks (type_delay_s > 0) settle, then hold ~150 ms.
+            settle = 0.0 if not rt.type_delay_s else max(0.25, float(rt.type_delay_s) * 3)
+            hold = 0.0 if not rt.type_delay_s else 0.15
+            if settle:
+                time.sleep(settle)
+            _click_button(qmp, button, hold_s=hold)
+            rt.last_pointer = (x, y)
+            return _ok(button=button, **info)
+    except ScreenError as exc:
+        return exc.envelope
 
 
 def move(
@@ -454,29 +466,34 @@ def move(
     """Move the pointer to guest coordinates without a click."""
     if not isinstance(x, int) or not isinstance(y, int):
         raise ValueError("x and y must be integers")
-    arbiter = get_arbiter()
-    with arbiter.queue():
-        rt = require_runtime()
-        qmp = rt.qmp
-        used_flavor = flavor or rt.flavor
-        try:
-            info = _apply_move(
-                x=x,
-                y=y,
-                via=via,
-                flavor=used_flavor,
-                qmp=qmp,
-                last=rt.last_pointer,
-                delay_s=0.0,
-            )
-        except Exception as exc:
-            if "input handler not found" in str(exc).lower():
-                return _fail(str(exc), Code.INVALID_ARGS, via=via, x=x, y=y)
-            raise
-        if info.get("ok") is False:
-            return info
-        rt.last_pointer = (x, y)
-        return _ok(**info)
+    try:
+        arbiter = get_arbiter()
+        with arbiter.queue():
+            rt = require_runtime()
+            qmp = rt.qmp
+            used_flavor = flavor or rt.flavor
+            try:
+                info = _apply_move(
+                    x=x,
+                    y=y,
+                    via=via,
+                    flavor=used_flavor,
+                    qmp=qmp,
+                    last=rt.last_pointer,
+                    delay_s=0.0,
+                )
+            except ScreenError:
+                raise
+            except Exception as exc:
+                if "input handler not found" in str(exc).lower():
+                    return _fail(str(exc), Code.INVALID_ARGS, via=via, x=x, y=y)
+                raise
+            if info.get("ok") is False:
+                return info
+            rt.last_pointer = (x, y)
+            return _ok(**info)
+    except ScreenError as exc:
+        return exc.envelope
 
 
 def _serial_ready(serial: Any) -> bool:
@@ -500,24 +517,27 @@ def holyc(source: str, *, via: str = "auto") -> dict[str, Any]:
             bytes=size,
         )
     payload = source if source.endswith("\n") else source + "\n"
-    arbiter = get_arbiter()
-    with arbiter.queue():
-        rt = require_runtime()
-        serial = rt.serial
-        use_serial = via == "serial" or (via == "auto" and _serial_ready(serial))
-        if via == "serial" and not _serial_ready(serial):
-            return _fail(
-                "COM1 is not open. Keep the serial socket connected and, on TinkerOS, call CommInit then CommInit8n1.",
-                Code.SERIAL_NOT_READY,
-                via=via,
-            )
-        if use_serial and _serial_ready(serial):
-            try:
-                serial.write(payload.encode("utf-8"))
-            except Exception as exc:
-                return _fail(str(exc) or "Serial write failed.", Code.SERIAL_NOT_READY, via="serial")
-            return _ok(via="serial", bytes=len(payload.encode("utf-8")))
-        typed = type_text(payload, delay_s=0.0 if rt.type_delay_s == 0.09 else rt.type_delay_s)
-        if typed.get("ok") is False:
-            return typed
-        return _ok(via="type", typed=typed.get("typed"), bytes=len(payload.encode("utf-8")))
+    try:
+        arbiter = get_arbiter()
+        with arbiter.queue():
+            rt = require_runtime()
+            serial = rt.serial
+            use_serial = via == "serial" or (via == "auto" and _serial_ready(serial))
+            if via == "serial" and not _serial_ready(serial):
+                return _fail(
+                    "COM1 is not open. Keep the serial socket connected and, on TinkerOS, call CommInit then CommInit8n1.",
+                    Code.SERIAL_NOT_READY,
+                    via=via,
+                )
+            if use_serial and _serial_ready(serial):
+                try:
+                    serial.write(payload.encode("utf-8"))
+                except Exception as exc:
+                    return _fail(str(exc) or "Serial write failed.", Code.SERIAL_NOT_READY, via="serial")
+                return _ok(via="serial", bytes=len(payload.encode("utf-8")))
+            typed = type_text(payload, delay_s=0.0 if rt.type_delay_s == 0.09 else rt.type_delay_s)
+            if typed.get("ok") is False:
+                return typed
+            return _ok(via="type", typed=typed.get("typed"), bytes=len(payload.encode("utf-8")))
+    except ScreenError as exc:
+        return exc.envelope

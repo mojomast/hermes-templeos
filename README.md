@@ -14,14 +14,14 @@ Networking is always off. QEMU and ISOs are not bundled.
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-3776AB?logo=python&logoColor=white)](pyproject.toml)
 [![Tests](https://img.shields.io/badge/tests-pytest%20%2B%20node-0ea5e9)](#development)
 
-<!--
-Screenshot placeholders (integration fills real paths under docs/images/):
-  docs/images/pane-watch.png       — Desktop pane in Watch mode
-  docs/images/pane-shared.png      — Shared mode with agent chip
-  docs/images/tinkeros-prompt.png  — TinkerOS HolyC prompt (bake-off)
-  docs/images/tinkeros-click.png   — Absolute click opened Cmd Line Overview
-Do not add <img> tags until those files exist in this repo.
--->
+<p>
+<img src="docs/images/pane-onboarding.png" alt="TempleOS Desktop pane first-run setup, VM stopped" width="800">
+<img src="docs/images/pane-shared.png" alt="Shared-mode pane showing TinkerOS Command Line Overview after an absolute click" width="800">
+</p>
+<p>
+<img src="docs/images/pane-user-driving.png" alt="Take control: agent paused, the user is driving" width="800">
+<img src="docs/images/pane-agent-log.png" alt="Shared-mode pane with the agent activity log" width="800">
+</p>
 
 <sub>
 In memory of <strong>Terry A. Davis</strong> (1969–2018), author of TempleOS.
@@ -123,7 +123,13 @@ The Hermes Desktop pane (`desktop/plugin.js`, needs Hermes `>=0.23.0`) talks onl
 
 Frames are PNG, integer-scaled from 640×480 (ZealOS may present 1024×768). About 10–15 fps is enough. Blob URLs are revoked when the next frame arrives.
 
-<!-- docs/images/pane-watch.png and docs/images/pane-shared.png go here once committed. -->
+<p>
+<img src="docs/images/pane-shared.png" alt="Shared mode: TinkerOS desktop in the TempleOS pane" width="800">
+<img src="docs/images/tinkeros-prompt.png" alt="TinkerOS HolyC prompt" width="400">
+<img src="docs/images/tinkeros-click.png" alt="Absolute click opened Command Line Overview" width="400">
+</p>
+
+Source screenshots also live under [`desktop/screenshots/`](desktop/screenshots/).
 
 ## Flavors
 
@@ -205,11 +211,11 @@ node scripts/build_desktop.mjs --check
 python3 evals/measure_schemas.py
 ```
 
-`evals/measure_schemas.py` prints one integer: o200k tokens of the four tool schemas. Keep them under about 2,000. Schema delta on this slice must stay **0** (docs/files/skill only from the tools' point of view; do not edit `templeos/tools.py` here).
+`evals/measure_schemas.py` prints one integer: o200k tokens of the four tool schemas. Keep them under about 2,000. The baseline for this tree is **825** o200k; the delta vs that baseline should stay **0** (still four tools).
 
-Live QEMU tests are marked `@pytest.mark.smoke` and skipped unless `TEMPLEOS_SMOKE=1` and a pinned ISO already exists. Do not download ISOs in CI by default.
+Live QEMU tests are marked `@pytest.mark.smoke` and skipped unless `TEMPLEOS_SMOKE=1` and a pinned ISO already exists. Do not download ISOs in CI by default. The box `/dev/kvm` is often unusable, so smokes run in TCG.
 
-Parallel slice leases are in [docs/CONTRACTS.md](docs/CONTRACTS.md). This tree's files/docs work lands on `feat/files-docs`.
+Contracts and pane routes: [docs/CONTRACTS.md](docs/CONTRACTS.md).
 
 ## License
 

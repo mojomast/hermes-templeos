@@ -560,10 +560,8 @@ def glyph_read_ex(
 
 def glyph_read(image: Path | bytes, *, flavor: str | None = None, origin: tuple[int, int] | None = None) -> str:
     """Match official 8x8 glyphs on a screendump. Used when serial is silent."""
-    # Empty bytes stay NotImplemented so Slice 0's stub test keeps passing
-    # until integration drops that assertion. Real frames use the matcher.
     if isinstance(image, (bytes, bytearray, memoryview)) and not bytes(image):
-        raise NotImplementedError("templeos.screen.glyph_read: Slice B (feat/screen-input)")
+        raise ValueError("glyph_read requires image bytes or a PNG path")
     ImageMod = _require_pil()
     if isinstance(image, (bytes, bytearray, memoryview)):
         im = ImageMod.open(io.BytesIO(bytes(image))).convert("RGB")

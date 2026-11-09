@@ -175,15 +175,17 @@ def test_pull_missing_file(guest, tos_home):
     assert got["code"] == "invalid_args"
 
 
-def test_unbound_serial_still_raises_for_integration_stubs(tos_home):
-    """Until feat/integration flips the empty-serial branch, keep NI for stubs."""
+def test_unbound_serial_returns_serial_not_ready(tos_home):
     bind_serial(None)
-    with pytest.raises(NotImplementedError, match="Slice D"):
-        list_guest("T:/")
-    with pytest.raises(NotImplementedError, match="Slice D"):
-        pull("T:/Home/X.HC", tos_home / "X.HC")
-    with pytest.raises(NotImplementedError, match="Slice D"):
-        push(tos_home / "missing.HC", "T:/Home/X.HC")
+    listed = list_guest("T:/")
+    assert listed["ok"] is False and listed["code"] == "serial_not_ready"
+    pulled = pull("T:/Home/X.HC", tos_home / "X.HC")
+    assert pulled["ok"] is False and pulled["code"] == "serial_not_ready"
+    missing = tos_home / "missing.HC"
+    pushed = push(missing, "T:/Home/X.HC")
+    assert pushed["ok"] is False
+    # Missing src is invalid_args; a present file may take the experimental FAT path.
+    assert pushed["code"] in {"invalid_args", "serial_not_ready", "doctor_failed"}
 
 
 def test_closed_serial_is_treated_as_unbound(tos_home):
@@ -191,8 +193,8 @@ def test_closed_serial_is_treated_as_unbound(tos_home):
     # never open()
     bind_serial(port)
     try:
-        with pytest.raises(NotImplementedError, match="Slice D"):
-            list_guest("T:/")
+        listed = list_guest("T:/")
+        assert listed["ok"] is False and listed["code"] == "serial_not_ready"
     finally:
         bind_serial(None)
 

@@ -307,7 +307,15 @@ def _call_impl(fn: Callable[..., Any], *a: Any, **k: Any) -> str:
         return err(str(exc), getattr(exc, "code", Code.UNKNOWN_FLAVOR))
     except ValueError as exc:
         return err(str(exc), Code.INVALID_ARGS)
-    except Exception:
+    except Exception as exc:
+        envelope = getattr(exc, "envelope", None)
+        if isinstance(envelope, dict) and envelope.get("code"):
+            return err(
+                str(envelope.get("error") or exc),
+                str(envelope.get("code") or "internal_error"),
+                envelope.get("fix"),
+                **{k: v for k, v in envelope.items() if k not in {"ok", "error", "code", "fix"}},
+            )
         return err(
             "Internal error while running the tool.",
             "internal_error",

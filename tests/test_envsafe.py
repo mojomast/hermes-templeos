@@ -51,10 +51,11 @@ def test_dotenv_is_not_read(monkeypatch, tmp_path, tos_home):
 
     assert home() == tos_home.resolve()
     src = Path(__file__).resolve().parents[1]
+    skip = {".venv", "venv", "site-packages", "dist", "build", ".eggs", "__pycache__"}
     blob = "\n".join(
         p.read_text()
         for p in src.rglob("*.py")
-        if "tests" not in p.parts and p.suffix == ".py"
+        if "tests" not in p.parts and p.suffix == ".py" and not skip.intersection(p.parts)
     )
     assert "load_dotenv" not in blob
     assert "from dotenv" not in blob

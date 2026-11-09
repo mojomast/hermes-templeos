@@ -89,7 +89,7 @@ def test_health_and_control_are_implemented(fresh):
     assert watch["user_may_input"] is False
 
 
-def test_status_is_shaped_when_vm_is_a_stub(fresh):
+def test_status_is_shaped_when_vm_is_stopped(fresh):
     status = status_payload()
     assert status["running"] is False
     assert status["mode"] == "shared"
@@ -100,7 +100,7 @@ def test_status_is_shaped_when_vm_is_a_stub(fresh):
     assert status["flavor"] == "tinkeros"
     assert "TinkerOS" in status["flavor_name"]
     frame = frame_payload()
-    assert frame["ok"] is False and frame["code"] == "not_implemented"
+    assert frame["ok"] is False and frame["code"] == "vm_not_running"
     assert frame.get("mime") == "image/png"
 
 
@@ -144,7 +144,7 @@ def test_user_input_records_hold_off_and_watch_only(fresh):
     assert body["code"] == "watch_only"
     set_control({"op": "handback"})
     body = user_input({"type": "click", "x": 10, "y": 20})
-    assert body["code"] == "not_implemented"
+    assert body["code"] == "vm_not_running"
     assert body["agent_paused"] is True
 
 

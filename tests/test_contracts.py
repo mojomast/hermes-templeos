@@ -33,9 +33,13 @@ def test_every_documented_op_returns_a_json_envelope(tos_home):
             assert isinstance(raw, str), spec["name"]
             body = json.loads(raw)
             assert set(body) >= {"ok", "error", "code", "fix"}
-            assert body["ok"] is False  # stubs or validation
-            assert body["code"]
-            assert body["fix"]
+            assert body["ok"] in (True, False)
+            if body["ok"] is False:
+                assert body["code"]
+                assert body["fix"]
+            else:
+                assert body["code"] is None
+                assert body["error"] is None
             seen[spec["name"]].add(args["op"])
     assert seen["templeos_vm"] == set(VM_OPS)
     assert seen["templeos_screen"] == set(SCREEN_OPS)

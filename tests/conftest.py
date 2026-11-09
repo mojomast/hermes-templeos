@@ -18,6 +18,24 @@ def tos_home(tmp_path, monkeypatch):
     home.mkdir()
     monkeypatch.setenv("TEMPLEOS_HOME", str(home))
     from templeos.arbiter import reset_arbiter
+    from templeos import vm as vm_mod
 
     reset_arbiter()
-    return home
+    try:
+        from templeos.screen import unbind
+        unbind()
+    except Exception:
+        pass
+    try:
+        from templeos.files import bind_serial
+        bind_serial(None)
+    except Exception:
+        pass
+    vm_mod._runtime = None
+    yield home
+    try:
+        from templeos.screen import unbind
+        unbind()
+    except Exception:
+        pass
+    vm_mod._runtime = None

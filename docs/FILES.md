@@ -37,8 +37,8 @@ Guest paths must match `T:/…` style with no `..`.
 ## Experimental FAT push
 
 When COM1 is down and the VM does **not** appear running, `push` may build
-`exchange/xfer.img` (FAT) under the plugin data dir with `mkfs.vfat` /
-`mtools`. The bake-off found a hot-added FAT12 floppy was **not** visible as
+`exchange/xfer.img` (FAT) under the plugin data dir with mtools
+(`mformat` / `mcopy`). The bake-off found a hot-added FAT12 floppy was **not** visible as
 `A:` on the TinkerOS live CD, so this path is marked `experimental: true` and
 must never mount the live RedSea qcow2 while QEMU has it open.
 
