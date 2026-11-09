@@ -270,6 +270,25 @@ possible.
 - Desktop: `@hermes/plugin-sdk` / React only; no `eval`, no `new Function`,
   no prototype patching, no session token reads.
 
+## Files protocol (Slice D)
+
+`templeos.files` implements `list_guest`, `pull`, and `push`.
+
+- Primary transport: framed COM1 (`TXFR` magic, additive U32 checksum). See
+  `docs/FILES.md` and `skills/templeos-operator/guest/Xfer.HC`.
+- Bind a port for tests with `templeos.files.bind_serial(FakeSerial(...))`.
+  Production should expose the live port via `templeos.vm.get_serial()` once
+  Slice A lands.
+- When COM1 is not bound (`bind_serial` / `vm.get_serial`), the public
+  functions still raise `NotImplementedError` so Slice 0 stub tests stay
+  green. Mid-transfer failures return `serial_not_ready`. After Slice A
+  exposes `get_serial`, integration should switch the empty-serial branch to
+  `serial_not_ready` and drop the files rows from `tests/test_stubs.py` /
+  `tests/test_tools.py`.
+- Experimental FAT push lives in `_push_via_fat` (stopped VM only). Never
+  mount the live RedSea qcow2 while QEMU has it open.
+- Caps: 256 KiB file, 200-char guest path, exchange dir under `home()/exchange/`.
+
 ## Host and first run (Slice A / doctor)
 
 1. Find `qemu-system-x86_64`, print version, test-open `/dev/kvm`.
