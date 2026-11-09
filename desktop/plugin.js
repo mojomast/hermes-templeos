@@ -11,6 +11,23 @@ import { useState as __ext4 } from "react/jsx-runtime";
 const __m0 = (function () {
 /** ctx.rest client. Paths stay inside this plugin's namespace. Never dial loopback from the iframe. */
 
+const SOFT_CODES = {
+  not_implemented: true,
+  vm_not_running: true,
+};
+
+function joinPath(path, query) {
+  if (!query) return path;
+  const parts = [];
+  Object.keys(query).forEach((key) => {
+    const value = query[key];
+    if (value == null || value === "") return;
+    parts.push(encodeURIComponent(key) + "=" + encodeURIComponent(String(value)));
+  });
+  if (!parts.length) return path;
+  return path + "?" + parts.join("&");
+}
+
 function createApi(rest) {
   function call(path, options) {
     if (typeof rest !== "function") {
@@ -18,11 +35,14 @@ function createApi(rest) {
         new Error("TempleOS backend is not connected. Enable the plugin, then Rescan.")
       );
     }
-    return Promise.resolve(rest(path, options || {})).then((body) => {
+    const opts = options ? { ...options } : {};
+    // Host authentication belongs to ctx.rest. Never attach grants or headers.
+    if (opts.headers) delete opts.headers;
+    return Promise.resolve(rest(path, opts)).then((body) => {
       if (!body || typeof body !== "object") {
         throw new Error("TempleOS returned an empty response.");
       }
-      if (body.ok === false && body.code !== "not_implemented") {
+      if (body.ok === false && !SOFT_CODES[body.code]) {
         const error = new Error(body.error || "TempleOS could not finish that.");
         error.fix = body.fix || "";
         error.code = body.code || "";
@@ -35,9 +55,19 @@ function createApi(rest) {
   return {
     health: () => call("/health"),
     status: () => call("/status"),
-    frame: () => call("/frame"),
+    frame: (opts) => call(joinPath("/frame", opts && opts.since ? { since: opts.since } : null)),
     control: (body) => call("/control", { method: "POST", body }),
     input: (body) => call("/input", { method: "POST", body }),
+    vm: (body) => call("/vm", { method: "POST", body }),
+    start: (body) => call("/vm", { method: "POST", body: { ...(body || {}), op: "start" } }),
+    stop: () => call("/vm", { method: "POST", body: { op: "stop" } }),
+    reset: () => call("/vm", { method: "POST", body: { op: "reset" } }),
+    snapshots: () => call("/snapshots"),
+    saveSnapshot: (name) => call("/snapshots", { method: "POST", body: { op: "save", name: name || "golden" } }),
+    restoreSnapshot: (name) => call("/snapshots", { method: "POST", body: { op: "restore", name: name || "golden" } }),
+    log: () => call("/log"),
+    doctor: () => call("/doctor"),
+    setup: (body) => call("/setup", { method: "POST", body: body || {} }),
   };
 }
 
@@ -59,7 +89,7 @@ function blobUrlFromBase64(data, mime) {
 }
 
 function revokeUrl(url) {
-  if (url && typeof URL !== "undefined" && URL.revokeObjectURL) {
+  if (url && typeof url === "string" && url.slice(0, 5) === "blob:" && typeof URL !== "undefined" && URL.revokeObjectURL) {
     URL.revokeObjectURL(url);
   }
 }
@@ -99,10 +129,32 @@ const DEFAULT_HEIGHT = 480;
 const ZEALOS_WIDTH = 1024;
 const ZEALOS_HEIGHT = 768;
 const CONTROL_MODES = ["watch", "shared", "user"];
+const GOLDEN_SNAPSHOT = "golden";
 
-function guestSize(flavor) {
+const FLAVOR_LABELS = {
+  tinkeros: "TinkerOS 5.20-rc10",
+  templeos: "TempleOS 5.03",
+  zealos: "ZealOS",
+};
+
+/** Visible running: ~10–15 fps. Idle or hidden backs off. */
+const POLL_VISIBLE_MS = 80;
+const POLL_FOCUSED_MS = 70;
+const POLL_IDLE_MS = 400;
+const POLL_STOPPED_MS = 800;
+const POLL_HIDDEN_MS = 2000;
+
+function guestSize(flavor, status) {
+  if (status && Number(status.width) > 0 && Number(status.height) > 0) {
+    return { width: Number(status.width), height: Number(status.height) };
+  }
   if (flavor === "zealos") return { width: ZEALOS_WIDTH, height: ZEALOS_HEIGHT };
   return { width: DEFAULT_WIDTH, height: DEFAULT_HEIGHT };
+}
+
+function flavorLabel(flavor, flavorName) {
+  if (flavorName) return String(flavorName);
+  return FLAVOR_LABELS[flavor] || flavor || "TinkerOS";
 }
 
 function integerScale(innerWidth, innerHeight, guestWidth, guestHeight) {
@@ -113,6 +165,21 @@ function integerScale(innerWidth, innerHeight, guestWidth, guestHeight) {
   const raw = Math.min(w / gw, h / gh);
   const scale = Math.max(1, Math.floor(raw || 1));
   return { scale, width: gw * scale, height: gh * scale };
+}
+
+function mapPointerToGuest(clientX, clientY, rect, guestWidth, guestHeight) {
+  const gw = Number(guestWidth) || DEFAULT_WIDTH;
+  const gh = Number(guestHeight) || DEFAULT_HEIGHT;
+  const left = rect && Number(rect.left) ? Number(rect.left) : 0;
+  const top = rect && Number(rect.top) ? Number(rect.top) : 0;
+  const width = rect && Number(rect.width) ? Number(rect.width) : gw;
+  const height = rect && Number(rect.height) ? Number(rect.height) : gh;
+  const x = Math.floor(((Number(clientX) - left) / (width || 1)) * gw);
+  const y = Math.floor(((Number(clientY) - top) / (height || 1)) * gh);
+  return {
+    x: Math.max(0, Math.min(gw - 1, x)),
+    y: Math.max(0, Math.min(gh - 1, y)),
+  };
 }
 
 function modeLabel(mode, agentPaused) {
@@ -136,7 +203,212 @@ function statusSummary(status) {
   return `${running} · ${snap} · ${accel} · ${mode}`;
 }
 
-  return { "DEFAULT_WIDTH": DEFAULT_WIDTH, "DEFAULT_HEIGHT": DEFAULT_HEIGHT, "ZEALOS_WIDTH": ZEALOS_WIDTH, "ZEALOS_HEIGHT": ZEALOS_HEIGHT, "CONTROL_MODES": CONTROL_MODES, "guestSize": guestSize, "integerScale": integerScale, "modeLabel": modeLabel, "accelLabel": accelLabel, "statusSummary": statusSummary };
+function drivingChip(status) {
+  const mode = status && status.mode;
+  const paused = !!(status && status.agent_paused);
+  const busy = !!(status && status.agent_busy);
+  if (mode === "user") {
+    return { kind: "user", label: "Agent paused, you're driving" };
+  }
+  if (mode === "shared" && paused) {
+    return { kind: "user", label: "Agent paused, you're driving" };
+  }
+  if (busy && mode !== "user") {
+    return { kind: "agent", label: "Agent is typing" };
+  }
+  if (mode === "watch") {
+    return { kind: "watch", label: "Watching — agent can type" };
+  }
+  return { kind: "shared", label: "Shared — you or the agent can type" };
+}
+
+function firstCheck(checks, names) {
+  if (!checks) return undefined;
+  for (const name of names) {
+    if (Object.prototype.hasOwnProperty.call(checks, name) && checks[name] !== undefined) {
+      return checks[name];
+    }
+  }
+  return undefined;
+}
+
+function checkState(value) {
+  if (value === true || value === "ok" || value === "present" || value === "ready") return "ok";
+  if (value === false) return "no";
+  if (typeof value === "string") {
+    const lower = value.toLowerCase();
+    if (lower === "missing" || lower === "false" || lower === "error" || lower === "absent" || lower === "no") return "no";
+    return "unknown";
+  }
+  if (value && typeof value === "object") {
+    if (value.ok === false) return "no";
+    if (value.ok === true) return "ok";
+  }
+  return "unknown";
+}
+
+function checkMissing(value) {
+  return checkState(value) === "no";
+}
+
+function needsOnboarding(status) {
+  if (!status) return true;
+  if (status.running) return false;
+  if (status.setup_needed) return true;
+  const code = status.code;
+  if (code === "qemu_missing" || code === "iso_missing" || code === "iso_hash_mismatch" || code === "doctor_failed") {
+    return true;
+  }
+  const checks = status.checks || {};
+  if (checkMissing(checks.qemu) || checkMissing(checks.iso) || checkMissing(checks.iso_ok) || checkMissing(checks.iso_present)) {
+    return true;
+  }
+  return false;
+}
+
+function pollIntervalMs(state) {
+  const hidden = !!(state && (state.hidden || state.documentHidden));
+  const running = !!(state && state.running);
+  const unchanged = !!(state && state.unchanged);
+  const focused = !!(state && state.focused);
+  if (hidden) return POLL_HIDDEN_MS;
+  if (!running) return POLL_STOPPED_MS;
+  if (unchanged && !focused) return POLL_IDLE_MS;
+  if (focused) return POLL_FOCUSED_MS;
+  return POLL_VISIBLE_MS;
+}
+
+function isReleaseHatch(event) {
+  if (!event) return false;
+  return event.key === "Escape" && !event.shiftKey && !event.altKey && !event.ctrlKey && !event.metaKey;
+}
+
+const CODE_QCODES = {
+  Enter: "ret",
+  Escape: "esc",
+  Backspace: "backspace",
+  Tab: "tab",
+  " ": "spc",
+  Space: "spc",
+  ArrowUp: "up",
+  ArrowDown: "down",
+  ArrowLeft: "left",
+  ArrowRight: "right",
+  Delete: "delete",
+  Home: "home",
+  End: "end",
+  PageUp: "pgup",
+  PageDown: "pgdn",
+  Insert: "insert",
+  Shift: "shift",
+  Control: "ctrl",
+  Alt: "alt",
+  Meta: "meta_l",
+  CapsLock: "caps_lock",
+  ContextMenu: "menu",
+  Minus: "minus",
+  Equal: "equal",
+  BracketLeft: "bracket_left",
+  BracketRight: "bracket_right",
+  Backslash: "backslash",
+  Semicolon: "semicolon",
+  Quote: "apostrophe",
+  Comma: "comma",
+  Period: "dot",
+  Slash: "slash",
+  Backquote: "grave_accent",
+  IntlBackslash: "backslash",
+};
+
+const PHYSICAL_CODES = {
+  Minus: "minus",
+  Equal: "equal",
+  BracketLeft: "bracket_left",
+  BracketRight: "bracket_right",
+  Backslash: "backslash",
+  Semicolon: "semicolon",
+  Quote: "apostrophe",
+  Comma: "comma",
+  Period: "dot",
+  Slash: "slash",
+  Backquote: "grave_accent",
+  Space: "spc",
+};
+
+function qcodeFor(event) {
+  if (!event) return "";
+  const key = event.key;
+  if (key && CODE_QCODES[key]) return CODE_QCODES[key];
+  const code = event.code || "";
+  if (PHYSICAL_CODES[code]) return PHYSICAL_CODES[code];
+  const fn = /^F([1-9]|1[0-2])$/.exec(key) || /^F([1-9]|1[0-2])$/.exec(code);
+  if (fn) return "f" + fn[1];
+  const digit = /^Digit([0-9])$/.exec(code);
+  if (digit) return digit[1];
+  const letter = /^Key([A-Z])$/.exec(code);
+  if (letter) return letter[1].toLowerCase();
+  if (key && /^[a-z0-9]$/i.test(key) && key.length === 1) return key.toLowerCase();
+  return "";
+}
+
+function keyEventToPayload(event) {
+  if (!event) return null;
+  if (isReleaseHatch(event)) return { hatch: true };
+  if (event.key && event.key.length === 1 && !event.ctrlKey && !event.altKey && !event.metaKey) {
+    return { type: "type", text: event.key };
+  }
+  const qcode = qcodeFor(event);
+  if (!qcode) return null;
+  const keys = [];
+  if (event.ctrlKey) keys.push("ctrl");
+  if (event.altKey) keys.push("alt");
+  if (event.shiftKey && event.key && event.key.length !== 1) keys.push("shift");
+  if (qcode !== "ctrl" && qcode !== "alt" && qcode !== "shift") keys.push(qcode);
+  if (!keys.length) return null;
+  return { type: "keys", keys };
+}
+
+function nextMode(op, current) {
+  const token = String(op || "").toLowerCase().replace("-", "_");
+  if (token === "take" || token === "take_control" || token === "user") return "user";
+  if (token === "handback" || token === "hand_back" || token === "shared") return "shared";
+  if (token === "watch") return "watch";
+  return current || "shared";
+}
+
+function userMayInput(mode) {
+  return mode !== "watch";
+}
+
+function formatLogTime(event) {
+  if (!event) return "";
+  const raw = event.at || event.ts;
+  if (typeof raw === "number") {
+    const date = new Date(raw * (raw < 1e12 ? 1000 : 1));
+    if (!Number.isNaN(date.getTime())) {
+      return date.toLocaleTimeString("en-CA", { hour12: false, timeZone: "America/Toronto" });
+    }
+  }
+  if (typeof raw === "string" && raw.length >= 19) {
+    const date = new Date(raw);
+    if (!Number.isNaN(date.getTime())) {
+      return date.toLocaleTimeString("en-CA", { hour12: false, timeZone: "America/Toronto" });
+    }
+    return raw.slice(11, 19);
+  }
+  return "";
+}
+
+function logLine(event) {
+  if (!event) return "";
+  const time = formatLogTime(event);
+  const who = event.source === "user" ? "You" : "Agent";
+  const summary = event.summary || [event.tool, event.op].filter(Boolean).join(" ");
+  const suffix = event.ok === false ? " (failed)" : "";
+  return (time ? time + "  " : "") + who + "  " + summary + suffix;
+}
+
+  return { "DEFAULT_WIDTH": DEFAULT_WIDTH, "DEFAULT_HEIGHT": DEFAULT_HEIGHT, "ZEALOS_WIDTH": ZEALOS_WIDTH, "ZEALOS_HEIGHT": ZEALOS_HEIGHT, "CONTROL_MODES": CONTROL_MODES, "GOLDEN_SNAPSHOT": GOLDEN_SNAPSHOT, "FLAVOR_LABELS": FLAVOR_LABELS, "POLL_VISIBLE_MS": POLL_VISIBLE_MS, "POLL_FOCUSED_MS": POLL_FOCUSED_MS, "POLL_IDLE_MS": POLL_IDLE_MS, "POLL_STOPPED_MS": POLL_STOPPED_MS, "POLL_HIDDEN_MS": POLL_HIDDEN_MS, "guestSize": guestSize, "flavorLabel": flavorLabel, "integerScale": integerScale, "mapPointerToGuest": mapPointerToGuest, "modeLabel": modeLabel, "accelLabel": accelLabel, "statusSummary": statusSummary, "drivingChip": drivingChip, "firstCheck": firstCheck, "checkState": checkState, "checkMissing": checkMissing, "needsOnboarding": needsOnboarding, "pollIntervalMs": pollIntervalMs, "isReleaseHatch": isReleaseHatch, "qcodeFor": qcodeFor, "keyEventToPayload": keyEventToPayload, "nextMode": nextMode, "userMayInput": userMayInput, "formatLogTime": formatLogTime, "logLine": logLine };
 })();
 
 // desktop/src/ui/pane.js
@@ -151,167 +423,423 @@ const __m3 = (function () {
   const revokeUrl = __m0["revokeUrl"];
   const errorText = __m0["errorText"];
   const getHostTransport = __m1["getHostTransport"];
+  const GOLDEN_SNAPSHOT = __m2["GOLDEN_SNAPSHOT"];
+  const accelLabel = __m2["accelLabel"];
+  const drivingChip = __m2["drivingChip"];
+  const flavorLabel = __m2["flavorLabel"];
   const guestSize = __m2["guestSize"];
   const integerScale = __m2["integerScale"];
-  const modeLabel = __m2["modeLabel"];
+  const keyEventToPayload = __m2["keyEventToPayload"];
+  const logLine = __m2["logLine"];
+  const mapPointerToGuest = __m2["mapPointerToGuest"];
+  const checkState = __m2["checkState"];
+  const firstCheck = __m2["firstCheck"];
+  const needsOnboarding = __m2["needsOnboarding"];
+  const pollIntervalMs = __m2["pollIntervalMs"];
   const statusSummary = __m2["statusSummary"];
+  const userMayInput = __m2["userMayInput"];
 
-function TempleOSPane() {
-  const transport = getHostTransport() || {};
-  const api = createApi(transport.rest);
-  const [status, setStatus] = useState({
+function documentIsHidden() {
+  return typeof document !== "undefined" && document.visibilityState === "hidden";
+}
+
+function applyStatus(body, setStatus) {
+  if (!body || typeof body !== "object") return;
+  setStatus((prev) => ({ ...prev, ...body }));
+}
+
+function defaultStatus(initial) {
+  return {
     running: false,
     mode: "shared",
     agent_paused: false,
+    agent_busy: false,
     accel: null,
     snapshot: null,
+    snapshots: [GOLDEN_SNAPSHOT],
     flavor: "tinkeros",
+    flavor_name: "TinkerOS 5.20-rc10",
     kvm: false,
-  });
-  const [error, setError] = useState("");
-  const [log, setLog] = useState([]);
-  const [frameUrl, setFrameUrl] = useState("");
-  const prevUrl = useRef("");
+    setup_needed: false,
+    ready: false,
+    checks: {},
+    user_may_input: true,
+    width: 640,
+    height: 480,
+    ...(initial || {}),
+  };
+}
 
-  function note(line) {
-    setLog((rows) => [line, ...rows].slice(0, 20));
+function TempleOSPane({ transport, initial } = {}) {
+  const host = transport || getHostTransport() || {};
+  const skip = !!(initial && initial.skipLoad);
+  const api = createApi(host.rest);
+  const [status, setStatus] = useState(defaultStatus(initial && initial.status));
+  const [error, setError] = useState((initial && initial.error) || "");
+  const [info, setInfo] = useState((initial && initial.info) || "");
+  const [log, setLog] = useState((initial && initial.log) || []);
+  const [frameUrl, setFrameUrl] = useState((initial && initial.frameUrl) || "");
+  const [focused, setFocused] = useState(!!(initial && initial.focused));
+  const [busy, setBusy] = useState((initial && initial.busy) || "");
+  const [hidden, setHidden] = useState(!!(initial && initial.hidden));
+  const [unchanged, setUnchanged] = useState(!!(initial && initial.unchanged));
+  const [viewport] = useState((initial && initial.viewport) || { width: 1280, height: 960 });
+  const prevUrl = useRef((initial && initial.frameUrl) || "");
+  const shaRef = useRef((initial && initial.sha256) || "");
+  const statusRef = useRef(status);
+  const focusedRef = useRef(focused);
+  const unchangedRef = useRef(unchanged);
+  const hiddenRef = useRef(hidden);
+  const lastFrameAt = useRef(0);
+  const screenRef = useRef(null);
+  statusRef.current = status;
+  focusedRef.current = focused;
+  unchangedRef.current = unchanged;
+  hiddenRef.current = hidden;
+
+  function noteError(err) {
+    setError(errorText(err));
   }
 
-  function applyStatus(body) {
-    if (!body || typeof body !== "object") return;
-    setStatus((prev) => ({ ...prev, ...body }));
+  function refreshLog(body) {
+    if (body && Array.isArray(body.events)) setLog(body.events);
   }
 
   useEffect(() => {
+    if (skip) return undefined;
     let cancelled = false;
     const tick = () => {
+      const now = Date.now();
+      const interval = pollIntervalMs({
+        hidden: hiddenRef.current || documentIsHidden(),
+        running: !!(statusRef.current && statusRef.current.running),
+        unchanged: unchangedRef.current,
+        focused: focusedRef.current,
+      });
       api
         .status()
         .then((body) => {
-          if (!cancelled) applyStatus(body);
+          if (!cancelled) {
+            applyStatus(body, setStatus);
+            setError("");
+          }
         })
         .catch((err) => {
-          if (!cancelled) setError(errorText(err));
+          if (!cancelled) noteError(err);
         });
       api
-        .frame()
+        .log()
+        .then((body) => {
+          if (!cancelled) refreshLog(body);
+        })
+        .catch(() => {});
+      if (now - lastFrameAt.current < interval) return;
+      lastFrameAt.current = now;
+      const since = shaRef.current;
+      api
+        .frame(since ? { since } : undefined)
         .then((body) => {
           if (cancelled) return;
+          if (body && body.sha256) shaRef.current = body.sha256;
+          if (body && body.unchanged) {
+            setUnchanged(true);
+            return;
+          }
           const next = blobUrlFromBase64(body && body.data, body && body.mime);
           if (!next) return;
+          setUnchanged(false);
           revokeUrl(prevUrl.current);
           prevUrl.current = next;
           setFrameUrl(next);
         })
         .catch(() => {
-          /* look may be not_implemented; status still drives the chip */
+          /* look may be soft-fail; status still drives the chip */
         });
     };
     tick();
-    const intervalFn =
-      typeof transport.setInterval === "function" ? transport.setInterval : null;
-    const handle = intervalFn ? intervalFn(tick, 200) : null;
+    const intervalFn = typeof host.setInterval === "function" ? host.setInterval : null;
+    const handle = intervalFn ? intervalFn(tick, POLL_TICK) : null;
+    const onVis = () => setHidden(documentIsHidden());
+    if (typeof document !== "undefined" && document.addEventListener) {
+      document.addEventListener("visibilitychange", onVis);
+    }
     return () => {
       cancelled = true;
-      if (handle && typeof transport.clearInterval === "function") {
-        transport.clearInterval(handle);
+      if (handle && typeof host.clearInterval === "function") {
+        host.clearInterval(handle);
+      }
+      if (typeof document !== "undefined" && document.removeEventListener) {
+        document.removeEventListener("visibilitychange", onVis);
       }
       revokeUrl(prevUrl.current);
       prevUrl.current = "";
     };
-  }, []);
+  }, [skip]);
+
+  function run(label, work) {
+    setBusy(label);
+    setError("");
+    setInfo("");
+    return work()
+      .then((body) => {
+        applyStatus(body, setStatus);
+        setBusy("");
+        if (body && Array.isArray(body.events)) refreshLog(body);
+        return body;
+      })
+      .catch((err) => {
+        setBusy("");
+        noteError(err);
+      });
+  }
 
   function setMode(op) {
-    api
-      .control({ op })
-      .then((body) => {
-        applyStatus(body);
-        setError("");
-        note(op === "take" ? "You took control." : op === "watch" ? "Watch only." : "Handed back to shared.");
-      })
-      .catch((err) => setError(errorText(err)));
+    return run("control", () => api.control({ op }));
+  }
+
+  function onSetup() {
+    return run("setup", () => api.setup({ flavor: status.flavor || "tinkeros" }));
+  }
+
+  function onStart() {
+    return run("start", () => api.start({ flavor: status.flavor || "tinkeros", name: status.snapshot || GOLDEN_SNAPSHOT }));
+  }
+
+  function onStop() {
+    return run("stop", () => api.stop());
+  }
+
+  function onReset() {
+    return run("reset", () => api.reset());
+  }
+
+  function onSave() {
+    return run("save", () => api.saveSnapshot(GOLDEN_SNAPSHOT));
+  }
+
+  function onRestore() {
+    return run("restore", () => api.restoreSnapshot(GOLDEN_SNAPSHOT));
   }
 
   function onCanvasClick(event) {
-    if (status.mode === "watch") return;
-    const size = guestSize(status.flavor);
+    if (!userMayInput(status.mode)) return;
+    const size = guestSize(status.flavor, status);
     const box = event.currentTarget;
-    const rect = box.getBoundingClientRect ? box.getBoundingClientRect() : { left: 0, top: 0, width: size.width, height: size.height };
-    const x = Math.floor(((event.clientX - rect.left) / (rect.width || 1)) * size.width);
-    const y = Math.floor(((event.clientY - rect.top) / (rect.height || 1)) * size.height);
+    const rect = box.getBoundingClientRect
+      ? box.getBoundingClientRect()
+      : { left: 0, top: 0, width: size.width, height: size.height };
+    const point = mapPointerToGuest(event.clientX, event.clientY, rect, size.width, size.height);
     api
-      .input({ type: "click", x, y, button: "left" })
-      .then((body) => applyStatus(body))
-      .catch((err) => setError(errorText(err)));
+      .input({ type: "click", x: point.x, y: point.y, button: "left" })
+      .then((body) => applyStatus(body, setStatus))
+      .catch((err) => noteError(err));
   }
 
-  const size = guestSize(status.flavor);
-  const scaled = integerScale(size.width * 2, size.height * 2, size.width, size.height);
+  function onKeyDown(event) {
+    if (!focusedRef.current) return;
+    const payload = keyEventToPayload(event);
+    if (!payload) return;
+    if (payload.hatch) {
+      if (event.preventDefault) event.preventDefault();
+      setFocused(false);
+      if (event.currentTarget && event.currentTarget.blur) event.currentTarget.blur();
+      setInfo("Keyboard released. Click the screen to capture keys again.");
+      return;
+    }
+    if (!userMayInput(statusRef.current.mode)) return;
+    if (event.preventDefault) event.preventDefault();
+    api
+      .input(payload)
+      .then((body) => applyStatus(body, setStatus))
+      .catch((err) => noteError(err));
+  }
+
+  const size = guestSize(status.flavor, status);
+  const forced = initial && initial.scale;
+  const scaled = forced
+    ? { scale: Number(forced), width: size.width * Number(forced), height: size.height * Number(forced) }
+    : integerScale(Math.max(size.width, (viewport.width || 0) - 24), Math.max(size.height, (viewport.height || 0) - 200), size.width, size.height);
   const chip = statusSummary(status);
+  const drive = drivingChip(status);
+  const onboarding = needsOnboarding(status);
+  const flavor = flavorLabel(status.flavor, status.flavor_name);
+  const accel = accelLabel(status.accel, status.kvm);
+  const running = !!status.running;
+  const disabled = !!busy;
 
   return jsxs("div", {
     className: "tos-pane",
     "data-testid": "pane",
+    "data-mode": status.mode,
+    "data-running": running ? "1" : "0",
     children: [
       jsxs("header", {
-        className: "tos-bar",
+        className: "tos-top",
         children: [
-          jsx("div", {
+          jsxs("div", {
+            className: "tos-brand",
+            children: [
+              jsx("span", { className: "tos-mark", "aria-hidden": "true" }),
+              jsxs("div", {
+                children: [
+                  jsx("strong", { children: "TempleOS" }),
+                  jsx("em", { children: "Shared guest" }),
+                ],
+              }),
+            ],
+          }),
+          jsx("span", { className: "tos-badge", "data-testid": "flavor-badge", children: flavor }),
+          jsx("span", { className: "tos-badge tos-badge-accel", "data-testid": "accel-badge", children: accel }),
+          jsx("span", { className: "tos-badge", "data-testid": "snapshot-badge", children: status.snapshot || "no snapshot" }),
+          jsx("span", {
             className: "tos-chip",
             "data-testid": "status-chip",
             "data-mode": status.mode,
             "data-paused": status.agent_paused ? "1" : "0",
             children: chip,
           }),
-          jsx("button", {
-            type: "button",
-            className: "tos-btn",
-            "data-testid": "take-control",
-            onClick: () => setMode("take"),
-            children: "Take control",
+        ],
+      }),
+      jsxs("div", {
+        className: "tos-bar",
+        children: [
+          jsx("button", { type: "button", className: "tos-btn tos-primary", "data-testid": "start", disabled: disabled || running, onClick: onStart, children: busy === "start" ? "Starting…" : "Start" }),
+          jsx("button", { type: "button", className: "tos-btn", "data-testid": "stop", disabled: disabled || !running, onClick: onStop, children: "Stop" }),
+          jsx("button", { type: "button", className: "tos-btn", "data-testid": "reset", disabled: disabled || !running, onClick: onReset, children: "Reset" }),
+          jsx("button", { type: "button", className: "tos-btn", "data-testid": "snapshot-save", disabled: disabled || !running, onClick: onSave, children: "Snapshot golden" }),
+          jsx("button", { type: "button", className: "tos-btn", "data-testid": "snapshot-restore", disabled: disabled, onClick: onRestore, children: "Restore golden" }),
+          jsxs("div", {
+            className: "tos-modes",
+            role: "group",
+            "aria-label": "Control mode",
+            children: [
+              modeButton("watch", "Watch", status.mode, disabled, setMode),
+              modeButton("shared", "Shared", status.mode, disabled, setMode),
+              modeButton("user", "You drive", status.mode, disabled, setMode),
+            ],
           }),
-          jsx("button", {
-            type: "button",
-            className: "tos-btn",
-            "data-testid": "hand-back",
-            onClick: () => setMode("handback"),
-            children: "Hand back",
-          }),
+          jsx("button", { type: "button", className: "tos-btn tos-primary", "data-testid": "take-control", disabled: disabled || status.mode === "user", onClick: () => setMode("take"), children: "Take control" }),
+          jsx("button", { type: "button", className: "tos-btn", "data-testid": "hand-back", disabled: disabled || status.mode === "shared", onClick: () => setMode("handback"), children: "Hand back" }),
         ],
       }),
       jsx("div", {
-        className: "tos-screen",
-        "data-testid": "screen",
-        style: { width: scaled.width, height: scaled.height },
-        onClick: onCanvasClick,
-        children: frameUrl
-          ? jsx("img", {
-              alt: "TempleOS guest",
-              src: frameUrl,
-              width: scaled.width,
-              height: scaled.height,
-            })
-          : jsx("div", {
-              className: "tos-placeholder",
-              "data-testid": "placeholder",
-              children: status.running ? "Waiting for a frame…" : "VM stopped. Ask the agent to start it.",
-            }),
+        className: "tos-drive tos-drive-" + drive.kind,
+        "data-testid": "agent-paused",
+        "data-kind": drive.kind,
+        children: drive.label,
       }),
-      status.agent_paused
-        ? jsx("div", { className: "tos-paused", "data-testid": "agent-paused", children: modeLabel(status.mode, true) })
+      onboarding
+        ? jsxs("section", {
+            className: "tos-onboard",
+            "data-testid": "onboarding",
+            children: [
+              jsx("h2", { children: "Set up the guest" }),
+              jsx("p", { children: "TempleOS runs in a local QEMU VM. QEMU and the pinned ISO stay on this machine and are never bundled with the plugin. Networking stays off." }),
+              jsxs("ul", {
+                className: "tos-checks",
+                children: [
+                  checkRow("QEMU", firstCheck(status.checks, ["qemu", "qemu_present"])),
+                  checkRow("ISO", firstCheck(status.checks, ["iso", "iso_ok", "iso_present"])),
+                  checkRow("KVM", status.kvm === true ? true : firstCheck(status.checks, ["kvm"])),
+                ],
+              }),
+              jsx("button", { type: "button", className: "tos-btn tos-primary", "data-testid": "setup", disabled: disabled, onClick: onSetup, children: busy === "setup" ? "Setting up…" : "Set up" }),
+              jsx("p", { className: "tos-hint", children: "Set up fetches the official pin, verifies SHA-256, and reports whether /dev/kvm can be opened. Then press Start." }),
+            ],
+          })
         : null,
-      error ? jsx("div", { className: "tos-error", "data-testid": "error", children: error }) : null,
-      jsxs("section", {
-        className: "tos-log",
-        "data-testid": "agent-log",
+      jsxs("div", {
+        className: "tos-body",
         children: [
-          jsx("h2", { children: "Agent log" }),
-          log.length
-            ? log.map((line, i) => jsx("p", { children: line }, String(i)))
-            : jsx("p", { children: "The agent has not injected input yet." }),
+          jsxs("div", {
+            className: "tos-stage",
+            children: [
+              jsxs("div", {
+                className: "tos-screen" + (focused ? " is-focused" : ""),
+                "data-testid": "screen",
+                "data-focused": focused ? "1" : "0",
+                ref: screenRef,
+                tabIndex: 0,
+                role: "application",
+                "aria-label": "TempleOS guest screen",
+                style: { width: scaled.width, height: scaled.height },
+                onClick: (event) => {
+                  setFocused(true);
+                  onCanvasClick(event);
+                },
+                onFocus: () => setFocused(true),
+                onBlur: () => setFocused(false),
+                onKeyDown: onKeyDown,
+                children: [
+                  frameUrl
+                    ? jsx("img", {
+                        alt: "TempleOS guest",
+                        src: frameUrl,
+                        width: scaled.width,
+                        height: scaled.height,
+                        draggable: false,
+                      })
+                    : jsx("div", {
+                        className: "tos-placeholder",
+                        "data-testid": "placeholder",
+                        children: running ? "Waiting for a frame…" : "VM stopped. Press Start, or ask the agent to start it.",
+                      }),
+                ],
+              }),
+              focused
+                ? jsx("p", { className: "tos-hatch", "data-testid": "keyboard-hatch", children: "Keyboard captured. Press Esc to release." })
+                : jsx("p", { className: "tos-hatch tos-hatch-idle", "data-testid": "keyboard-hatch", children: "Click the screen to type. Esc releases the keyboard." }),
+            ],
+          }),
+          jsxs("section", {
+            className: "tos-log",
+            "data-testid": "agent-log",
+            children: [
+              jsx("h2", { children: "Agent log" }),
+              log.length
+                ? log.map((event, i) =>
+                    jsx(
+                      "p",
+                      {
+                        className: "tos-log-line tos-log-" + (event.source || "agent") + (event.ok === false ? " is-failed" : ""),
+                        children: typeof event === "string" ? event : logLine(event),
+                      },
+                      String((event && event.id) || i)
+                    )
+                  )
+                : jsx("p", { className: "tos-log-empty", children: "The agent has not injected input yet." }),
+            ],
+          }),
         ],
       }),
+      error ? jsx("div", { className: "tos-error", "data-testid": "error", children: error }) : null,
+      info ? jsx("div", { className: "tos-info", "data-testid": "info", children: info }) : null,
     ],
+  });
+}
+
+const POLL_TICK = 80;
+
+function modeButton(mode, label, current, disabled, setMode) {
+  const op = mode === "user" ? "take" : mode === "shared" ? "handback" : "watch";
+  return jsx("button", {
+    type: "button",
+    className: "tos-btn" + (current === mode ? " is-on" : ""),
+    "data-testid": "mode-" + mode,
+    "aria-pressed": current === mode ? "true" : "false",
+    disabled: disabled,
+    onClick: () => setMode(op),
+    children: label,
+  });
+}
+
+function checkRow(label, value) {
+  const state = checkState(value);
+  const mark = state === "ok" ? "ok" : state === "no" ? "missing" : "unknown";
+  return jsxs("li", {
+    className: "tos-check tos-check-" + state,
+    "data-testid": "check-" + label.toLowerCase(),
+    children: [jsxs("span", { children: [label, " — ", mark] })],
   });
 }
 
@@ -333,7 +861,7 @@ function createPaneContribution() {
     title: PANE_TITLE,
     area: "panes",
     order: 45,
-    data: { placement: "right", width: "720px" },
+    data: { placement: "right", width: "920px" },
     render: function renderTempleOS() {
       return jsx(TempleOSPane, {});
     },
@@ -376,11 +904,11 @@ function createDesktopPlugin() {
 // desktop/src/ui/index.js
 const __m5 = (function () {
 
-  return { "TempleOSPane": __m3["TempleOSPane"], "PANE_ID": __m4["PANE_ID"], "PANE_TITLE": __m4["PANE_TITLE"], "createPaneContribution": __m4["createPaneContribution"], "registerTempleOSPane": __m4["registerTempleOSPane"], "createDesktopPlugin": __m4["createDesktopPlugin"], "DEFAULT_WIDTH": __m2["DEFAULT_WIDTH"], "DEFAULT_HEIGHT": __m2["DEFAULT_HEIGHT"], "CONTROL_MODES": __m2["CONTROL_MODES"], "guestSize": __m2["guestSize"], "integerScale": __m2["integerScale"], "modeLabel": __m2["modeLabel"], "accelLabel": __m2["accelLabel"], "statusSummary": __m2["statusSummary"] };
+  return { "TempleOSPane": __m3["TempleOSPane"], "PANE_ID": __m4["PANE_ID"], "PANE_TITLE": __m4["PANE_TITLE"], "createPaneContribution": __m4["createPaneContribution"], "registerTempleOSPane": __m4["registerTempleOSPane"], "createDesktopPlugin": __m4["createDesktopPlugin"], "DEFAULT_WIDTH": __m2["DEFAULT_WIDTH"], "DEFAULT_HEIGHT": __m2["DEFAULT_HEIGHT"], "CONTROL_MODES": __m2["CONTROL_MODES"], "GOLDEN_SNAPSHOT": __m2["GOLDEN_SNAPSHOT"], "guestSize": __m2["guestSize"], "integerScale": __m2["integerScale"], "mapPointerToGuest": __m2["mapPointerToGuest"], "modeLabel": __m2["modeLabel"], "accelLabel": __m2["accelLabel"], "statusSummary": __m2["statusSummary"], "drivingChip": __m2["drivingChip"], "needsOnboarding": __m2["needsOnboarding"], "firstCheck": __m2["firstCheck"], "checkState": __m2["checkState"], "pollIntervalMs": __m2["pollIntervalMs"], "isReleaseHatch": __m2["isReleaseHatch"], "qcodeFor": __m2["qcodeFor"], "keyEventToPayload": __m2["keyEventToPayload"], "nextMode": __m2["nextMode"], "userMayInput": __m2["userMayInput"], "logLine": __m2["logLine"], "flavorLabel": __m2["flavorLabel"] };
 })();
 
 const TEMPLEOS_STYLE_ID = "templeos-desktop-styles";
-const TEMPLEOS_STYLES = ".tos-pane {\n  display: flex;\n  flex-direction: column;\n  gap: 12px;\n  padding: 12px;\n  color: #f5e6a3;\n  background: #101010;\n  font-family: \"IBM Plex Mono\", ui-monospace, monospace;\n  min-height: 100%;\n  box-sizing: border-box;\n}\n.tos-bar {\n  display: flex;\n  flex-wrap: wrap;\n  gap: 8px;\n  align-items: center;\n}\n.tos-chip {\n  padding: 4px 10px;\n  border: 1px solid #c8a427;\n  border-radius: 999px;\n  font-size: 12px;\n  letter-spacing: 0.02em;\n}\n.tos-btn {\n  background: #1c1c1c;\n  color: #f5e6a3;\n  border: 1px solid #c8a427;\n  border-radius: 6px;\n  padding: 4px 10px;\n  cursor: pointer;\n  font: inherit;\n}\n.tos-btn:hover {\n  background: #2a2408;\n}\n.tos-screen {\n  background: #000;\n  border: 1px solid #c8a427;\n  image-rendering: pixelated;\n  overflow: hidden;\n}\n.tos-screen img {\n  display: block;\n  image-rendering: pixelated;\n}\n.tos-placeholder,\n.tos-paused,\n.tos-error,\n.tos-log {\n  font-size: 13px;\n}\n.tos-placeholder {\n  display: flex;\n  align-items: center;\n  justify-content: center;\n  width: 100%;\n  height: 100%;\n  color: #c8a427;\n}\n.tos-paused {\n  color: #ffd35a;\n}\n.tos-error {\n  color: #ff8a7a;\n}\n.tos-log h2 {\n  margin: 0 0 6px;\n  font-size: 13px;\n  font-weight: 600;\n  color: #c8a427;\n}\n.tos-log p {\n  margin: 0 0 4px;\n}\n";
+const TEMPLEOS_STYLES = "/* TempleOS pane. 16-color accents on Hermes chrome variables. */\n\n.tos-pane {\n  --tos-black: #000000;\n  --tos-navy: #0000aa;\n  --tos-yellow: #ffff55;\n  --tos-white: #ffffff;\n  --tos-ltgray: #aaaaaa;\n  --tos-dkgray: #555555;\n  --tos-cyan: #55ffff;\n  --tos-green: #55ff55;\n  --tos-red: #ff5555;\n  --tos-blue: #5555ff;\n  --tos-brown: #aa5500;\n  display: flex;\n  flex-direction: column;\n  gap: 10px;\n  padding: 12px 14px 16px;\n  color: var(--ui-text-primary, var(--tos-yellow));\n  background:\n    linear-gradient(180deg, color-mix(in srgb, var(--tos-navy) 35%, var(--tos-black)) 0 52px, var(--tos-black) 52px);\n  font-family: \"IBM Plex Mono\", \"Lucida Console\", ui-monospace, monospace;\n  min-height: 100%;\n  box-sizing: border-box;\n}\n\n.tos-top,\n.tos-bar {\n  display: flex;\n  flex-wrap: wrap;\n  gap: 8px;\n  align-items: center;\n}\n\n.tos-brand {\n  display: flex;\n  gap: 8px;\n  align-items: center;\n  margin-right: 6px;\n}\n\n.tos-brand strong {\n  display: block;\n  font-size: 14px;\n  letter-spacing: 0.08em;\n  text-transform: uppercase;\n  color: var(--tos-yellow);\n}\n\n.tos-brand em {\n  display: block;\n  font-style: normal;\n  font-size: 10px;\n  letter-spacing: 0.16em;\n  text-transform: uppercase;\n  color: var(--ui-text-tertiary, var(--tos-ltgray));\n}\n\n.tos-mark {\n  width: 22px;\n  height: 22px;\n  background:\n    linear-gradient(180deg, var(--tos-navy), #000055);\n  box-shadow: inset 0 0 0 1px var(--tos-yellow);\n}\n\n.tos-badge,\n.tos-chip,\n.tos-btn {\n  font: inherit;\n  color: var(--tos-yellow);\n  background: transparent;\n  border: 1px solid color-mix(in srgb, var(--tos-yellow) 55%, var(--tos-dkgray));\n  border-radius: 2px;\n  padding: 3px 9px;\n  letter-spacing: 0.02em;\n}\n\n.tos-badge,\n.tos-chip {\n  font-size: 11px;\n  text-transform: uppercase;\n}\n\n.tos-badge-accel {\n  color: var(--tos-cyan);\n  border-color: color-mix(in srgb, var(--tos-cyan) 50%, var(--tos-dkgray));\n}\n\n.tos-chip {\n  margin-left: auto;\n  border-radius: 999px;\n  color: var(--ui-text-secondary, var(--tos-ltgray));\n  text-transform: none;\n}\n\n.tos-btn {\n  cursor: pointer;\n  background: color-mix(in srgb, var(--tos-navy) 40%, transparent);\n}\n\n.tos-btn:hover:not(:disabled) {\n  background: color-mix(in srgb, var(--tos-navy) 80%, var(--tos-black));\n  border-color: var(--tos-yellow);\n}\n\n.tos-btn:disabled {\n  opacity: 0.4;\n  cursor: default;\n  color: var(--tos-ltgray);\n  border-color: var(--tos-dkgray);\n  background: transparent;\n}\n\n.tos-btn.is-on,\n.tos-primary {\n  background: color-mix(in srgb, var(--tos-navy) 85%, var(--tos-black));\n  border-color: var(--tos-yellow);\n  color: var(--tos-yellow);\n  font-weight: 650;\n}\n\n.tos-modes {\n  display: flex;\n  gap: 0;\n  margin-left: 4px;\n}\n\n.tos-modes .tos-btn {\n  border-radius: 0;\n}\n\n.tos-modes .tos-btn:first-child {\n  border-top-left-radius: 2px;\n  border-bottom-left-radius: 2px;\n}\n\n.tos-modes .tos-btn:last-child {\n  border-top-right-radius: 2px;\n  border-bottom-right-radius: 2px;\n}\n\n.tos-drive {\n  align-self: flex-start;\n  padding: 4px 12px;\n  border: 1px solid var(--tos-yellow);\n  background: color-mix(in srgb, var(--tos-navy) 70%, var(--tos-black));\n  color: var(--tos-yellow);\n  font-size: 12px;\n  letter-spacing: 0.04em;\n  text-transform: uppercase;\n}\n\n.tos-drive-agent {\n  border-color: var(--tos-cyan);\n  color: var(--tos-cyan);\n}\n\n.tos-drive-user {\n  border-color: var(--tos-green);\n  color: var(--tos-green);\n}\n\n.tos-onboard {\n  padding: 12px 14px;\n  border: 1px solid color-mix(in srgb, var(--tos-yellow) 50%, var(--tos-dkgray));\n  background: color-mix(in srgb, var(--tos-navy) 22%, var(--tos-black));\n}\n\n.tos-onboard h2,\n.tos-log h2 {\n  margin: 0 0 8px;\n  font-size: 13px;\n  font-weight: 650;\n  letter-spacing: 0.08em;\n  text-transform: uppercase;\n  color: var(--tos-yellow);\n}\n\n.tos-onboard p,\n.tos-hint,\n.tos-hatch,\n.tos-error,\n.tos-info,\n.tos-log,\n.tos-placeholder {\n  font-size: 13px;\n  line-height: 1.45;\n}\n\n.tos-onboard p,\n.tos-hint {\n  margin: 0 0 10px;\n  color: var(--ui-text-secondary, var(--tos-ltgray));\n  max-width: 62ch;\n}\n\n.tos-checks {\n  display: flex;\n  flex-wrap: wrap;\n  gap: 8px 18px;\n  margin: 0 0 12px;\n  padding: 0;\n  list-style: none;\n}\n\n.tos-check-ok { color: var(--tos-green); }\n.tos-check-no { color: var(--tos-red); }\n.tos-check-unknown { color: var(--tos-ltgray); }\n\n.tos-body {\n  display: grid;\n  grid-template-columns: max-content minmax(260px, 1fr);\n  gap: 12px;\n  align-items: start;\n  min-height: 0;\n}\n\n.tos-stage {\n  min-width: 0;\n}\n\n.tos-screen {\n  background: var(--tos-black);\n  border: 1px solid var(--tos-dkgray);\n  image-rendering: pixelated;\n  overflow: hidden;\n  outline: none;\n  cursor: crosshair;\n  box-shadow: 0 0 0 1px var(--tos-black);\n}\n\n.tos-screen img {\n  display: block;\n  image-rendering: pixelated;\n  image-rendering: crisp-edges;\n}\n\n.tos-screen.is-focused {\n  border-color: var(--tos-cyan);\n  box-shadow: 0 0 0 2px var(--tos-cyan);\n}\n\n.tos-placeholder {\n  display: flex;\n  align-items: center;\n  justify-content: center;\n  width: 100%;\n  height: 100%;\n  color: var(--tos-yellow);\n  text-align: center;\n  padding: 16px;\n  box-sizing: border-box;\n}\n\n.tos-hatch {\n  margin: 6px 0 0;\n  color: var(--tos-cyan);\n  font-size: 11px;\n  letter-spacing: 0.04em;\n}\n\n.tos-hatch-idle {\n  color: var(--ui-text-tertiary, var(--tos-ltgray));\n}\n\n.tos-log {\n  min-height: 160px;\n  max-height: 520px;\n  overflow: auto;\n  padding: 10px 12px;\n  border: 1px solid color-mix(in srgb, var(--tos-yellow) 35%, var(--tos-dkgray));\n  background: color-mix(in srgb, var(--tos-navy) 18%, var(--tos-black));\n}\n\n.tos-log-line,\n.tos-log p {\n  margin: 0 0 6px;\n  color: var(--tos-ltgray);\n  white-space: nowrap;\n  overflow: hidden;\n  text-overflow: ellipsis;\n}\n\n.tos-log-agent { color: var(--tos-cyan); }\n.tos-log-user { color: var(--tos-yellow); }\n.tos-log-line.is-failed { color: var(--tos-red); }\n.tos-log-empty { color: var(--ui-text-tertiary, var(--tos-dkgray)); }\n\n.tos-error { color: var(--tos-red); }\n.tos-info { color: var(--tos-cyan); }\n\n@media (max-width: 900px) {\n  .tos-body {\n    grid-template-columns: 1fr;\n  }\n  .tos-chip {\n    margin-left: 0;\n  }\n}\n";
 
 function injectTempleOSStyles() {
   if (typeof document === "undefined") return false;
@@ -417,17 +945,31 @@ __tosPlugin.register = register;
 export const CONTROL_MODES = __m5["CONTROL_MODES"];
 export const DEFAULT_HEIGHT = __m5["DEFAULT_HEIGHT"];
 export const DEFAULT_WIDTH = __m5["DEFAULT_WIDTH"];
+export const GOLDEN_SNAPSHOT = __m5["GOLDEN_SNAPSHOT"];
 export const PANE_ID = __m5["PANE_ID"];
 export const PANE_TITLE = __m5["PANE_TITLE"];
 export const TempleOSPane = __m5["TempleOSPane"];
 export const accelLabel = __m5["accelLabel"];
+export const checkState = __m5["checkState"];
 export const createDesktopPlugin = __m5["createDesktopPlugin"];
 export const createPaneContribution = __m5["createPaneContribution"];
+export const drivingChip = __m5["drivingChip"];
+export const firstCheck = __m5["firstCheck"];
+export const flavorLabel = __m5["flavorLabel"];
 export const guestSize = __m5["guestSize"];
 export const integerScale = __m5["integerScale"];
+export const isReleaseHatch = __m5["isReleaseHatch"];
+export const keyEventToPayload = __m5["keyEventToPayload"];
+export const logLine = __m5["logLine"];
+export const mapPointerToGuest = __m5["mapPointerToGuest"];
 export const modeLabel = __m5["modeLabel"];
+export const needsOnboarding = __m5["needsOnboarding"];
+export const nextMode = __m5["nextMode"];
+export const pollIntervalMs = __m5["pollIntervalMs"];
+export const qcodeFor = __m5["qcodeFor"];
 export const registerTempleOSPane = __m5["registerTempleOSPane"];
 export const statusSummary = __m5["statusSummary"];
+export const userMayInput = __m5["userMayInput"];
 
 export { injectTempleOSStyles as injectStyles };
 export default __tosPlugin;

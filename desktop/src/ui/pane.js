@@ -1,163 +1,424 @@
 import { jsx, jsxs, useEffect, useRef, useState } from "react/jsx-runtime";
 import { createApi, blobUrlFromBase64, revokeUrl, errorText } from "./api.js";
 import { getHostTransport } from "./host.js";
-import { guestSize, integerScale, modeLabel, statusSummary } from "./logic.js";
+import {
+  GOLDEN_SNAPSHOT,
+  accelLabel,
+  drivingChip,
+  flavorLabel,
+  guestSize,
+  integerScale,
+  keyEventToPayload,
+  logLine,
+  mapPointerToGuest,
+  checkState,
+  firstCheck,
+  needsOnboarding,
+  pollIntervalMs,
+  statusSummary,
+  userMayInput,
+} from "./logic.js";
 
-export function TempleOSPane() {
-  const transport = getHostTransport() || {};
-  const api = createApi(transport.rest);
-  const [status, setStatus] = useState({
+function documentIsHidden() {
+  return typeof document !== "undefined" && document.visibilityState === "hidden";
+}
+
+function applyStatus(body, setStatus) {
+  if (!body || typeof body !== "object") return;
+  setStatus((prev) => ({ ...prev, ...body }));
+}
+
+function defaultStatus(initial) {
+  return {
     running: false,
     mode: "shared",
     agent_paused: false,
+    agent_busy: false,
     accel: null,
     snapshot: null,
+    snapshots: [GOLDEN_SNAPSHOT],
     flavor: "tinkeros",
+    flavor_name: "TinkerOS 5.20-rc10",
     kvm: false,
-  });
-  const [error, setError] = useState("");
-  const [log, setLog] = useState([]);
-  const [frameUrl, setFrameUrl] = useState("");
-  const prevUrl = useRef("");
+    setup_needed: false,
+    ready: false,
+    checks: {},
+    user_may_input: true,
+    width: 640,
+    height: 480,
+    ...(initial || {}),
+  };
+}
 
-  function note(line) {
-    setLog((rows) => [line, ...rows].slice(0, 20));
+export function TempleOSPane({ transport, initial } = {}) {
+  const host = transport || getHostTransport() || {};
+  const skip = !!(initial && initial.skipLoad);
+  const api = createApi(host.rest);
+  const [status, setStatus] = useState(defaultStatus(initial && initial.status));
+  const [error, setError] = useState((initial && initial.error) || "");
+  const [info, setInfo] = useState((initial && initial.info) || "");
+  const [log, setLog] = useState((initial && initial.log) || []);
+  const [frameUrl, setFrameUrl] = useState((initial && initial.frameUrl) || "");
+  const [focused, setFocused] = useState(!!(initial && initial.focused));
+  const [busy, setBusy] = useState((initial && initial.busy) || "");
+  const [hidden, setHidden] = useState(!!(initial && initial.hidden));
+  const [unchanged, setUnchanged] = useState(!!(initial && initial.unchanged));
+  const [viewport] = useState((initial && initial.viewport) || { width: 1280, height: 960 });
+  const prevUrl = useRef((initial && initial.frameUrl) || "");
+  const shaRef = useRef((initial && initial.sha256) || "");
+  const statusRef = useRef(status);
+  const focusedRef = useRef(focused);
+  const unchangedRef = useRef(unchanged);
+  const hiddenRef = useRef(hidden);
+  const lastFrameAt = useRef(0);
+  const screenRef = useRef(null);
+  statusRef.current = status;
+  focusedRef.current = focused;
+  unchangedRef.current = unchanged;
+  hiddenRef.current = hidden;
+
+  function noteError(err) {
+    setError(errorText(err));
   }
 
-  function applyStatus(body) {
-    if (!body || typeof body !== "object") return;
-    setStatus((prev) => ({ ...prev, ...body }));
+  function refreshLog(body) {
+    if (body && Array.isArray(body.events)) setLog(body.events);
   }
 
   useEffect(() => {
+    if (skip) return undefined;
     let cancelled = false;
     const tick = () => {
+      const now = Date.now();
+      const interval = pollIntervalMs({
+        hidden: hiddenRef.current || documentIsHidden(),
+        running: !!(statusRef.current && statusRef.current.running),
+        unchanged: unchangedRef.current,
+        focused: focusedRef.current,
+      });
       api
         .status()
         .then((body) => {
-          if (!cancelled) applyStatus(body);
+          if (!cancelled) {
+            applyStatus(body, setStatus);
+            setError("");
+          }
         })
         .catch((err) => {
-          if (!cancelled) setError(errorText(err));
+          if (!cancelled) noteError(err);
         });
       api
-        .frame()
+        .log()
+        .then((body) => {
+          if (!cancelled) refreshLog(body);
+        })
+        .catch(() => {});
+      if (now - lastFrameAt.current < interval) return;
+      lastFrameAt.current = now;
+      const since = shaRef.current;
+      api
+        .frame(since ? { since } : undefined)
         .then((body) => {
           if (cancelled) return;
+          if (body && body.sha256) shaRef.current = body.sha256;
+          if (body && body.unchanged) {
+            setUnchanged(true);
+            return;
+          }
           const next = blobUrlFromBase64(body && body.data, body && body.mime);
           if (!next) return;
+          setUnchanged(false);
           revokeUrl(prevUrl.current);
           prevUrl.current = next;
           setFrameUrl(next);
         })
         .catch(() => {
-          /* look may be not_implemented; status still drives the chip */
+          /* look may be soft-fail; status still drives the chip */
         });
     };
     tick();
-    const intervalFn =
-      typeof transport.setInterval === "function" ? transport.setInterval : null;
-    const handle = intervalFn ? intervalFn(tick, 200) : null;
+    const intervalFn = typeof host.setInterval === "function" ? host.setInterval : null;
+    const handle = intervalFn ? intervalFn(tick, POLL_TICK) : null;
+    const onVis = () => setHidden(documentIsHidden());
+    if (typeof document !== "undefined" && document.addEventListener) {
+      document.addEventListener("visibilitychange", onVis);
+    }
     return () => {
       cancelled = true;
-      if (handle && typeof transport.clearInterval === "function") {
-        transport.clearInterval(handle);
+      if (handle && typeof host.clearInterval === "function") {
+        host.clearInterval(handle);
+      }
+      if (typeof document !== "undefined" && document.removeEventListener) {
+        document.removeEventListener("visibilitychange", onVis);
       }
       revokeUrl(prevUrl.current);
       prevUrl.current = "";
     };
-  }, []);
+  }, [skip]);
+
+  function run(label, work) {
+    setBusy(label);
+    setError("");
+    setInfo("");
+    return work()
+      .then((body) => {
+        applyStatus(body, setStatus);
+        setBusy("");
+        if (body && Array.isArray(body.events)) refreshLog(body);
+        return body;
+      })
+      .catch((err) => {
+        setBusy("");
+        noteError(err);
+      });
+  }
 
   function setMode(op) {
-    api
-      .control({ op })
-      .then((body) => {
-        applyStatus(body);
-        setError("");
-        note(op === "take" ? "You took control." : op === "watch" ? "Watch only." : "Handed back to shared.");
-      })
-      .catch((err) => setError(errorText(err)));
+    return run("control", () => api.control({ op }));
+  }
+
+  function onSetup() {
+    return run("setup", () => api.setup({ flavor: status.flavor || "tinkeros" }));
+  }
+
+  function onStart() {
+    return run("start", () => api.start({ flavor: status.flavor || "tinkeros", name: status.snapshot || GOLDEN_SNAPSHOT }));
+  }
+
+  function onStop() {
+    return run("stop", () => api.stop());
+  }
+
+  function onReset() {
+    return run("reset", () => api.reset());
+  }
+
+  function onSave() {
+    return run("save", () => api.saveSnapshot(GOLDEN_SNAPSHOT));
+  }
+
+  function onRestore() {
+    return run("restore", () => api.restoreSnapshot(GOLDEN_SNAPSHOT));
   }
 
   function onCanvasClick(event) {
-    if (status.mode === "watch") return;
-    const size = guestSize(status.flavor);
+    if (!userMayInput(status.mode)) return;
+    const size = guestSize(status.flavor, status);
     const box = event.currentTarget;
-    const rect = box.getBoundingClientRect ? box.getBoundingClientRect() : { left: 0, top: 0, width: size.width, height: size.height };
-    const x = Math.floor(((event.clientX - rect.left) / (rect.width || 1)) * size.width);
-    const y = Math.floor(((event.clientY - rect.top) / (rect.height || 1)) * size.height);
+    const rect = box.getBoundingClientRect
+      ? box.getBoundingClientRect()
+      : { left: 0, top: 0, width: size.width, height: size.height };
+    const point = mapPointerToGuest(event.clientX, event.clientY, rect, size.width, size.height);
     api
-      .input({ type: "click", x, y, button: "left" })
-      .then((body) => applyStatus(body))
-      .catch((err) => setError(errorText(err)));
+      .input({ type: "click", x: point.x, y: point.y, button: "left" })
+      .then((body) => applyStatus(body, setStatus))
+      .catch((err) => noteError(err));
   }
 
-  const size = guestSize(status.flavor);
-  const scaled = integerScale(size.width * 2, size.height * 2, size.width, size.height);
+  function onKeyDown(event) {
+    if (!focusedRef.current) return;
+    const payload = keyEventToPayload(event);
+    if (!payload) return;
+    if (payload.hatch) {
+      if (event.preventDefault) event.preventDefault();
+      setFocused(false);
+      if (event.currentTarget && event.currentTarget.blur) event.currentTarget.blur();
+      setInfo("Keyboard released. Click the screen to capture keys again.");
+      return;
+    }
+    if (!userMayInput(statusRef.current.mode)) return;
+    if (event.preventDefault) event.preventDefault();
+    api
+      .input(payload)
+      .then((body) => applyStatus(body, setStatus))
+      .catch((err) => noteError(err));
+  }
+
+  const size = guestSize(status.flavor, status);
+  const forced = initial && initial.scale;
+  const scaled = forced
+    ? { scale: Number(forced), width: size.width * Number(forced), height: size.height * Number(forced) }
+    : integerScale(Math.max(size.width, (viewport.width || 0) - 24), Math.max(size.height, (viewport.height || 0) - 200), size.width, size.height);
   const chip = statusSummary(status);
+  const drive = drivingChip(status);
+  const onboarding = needsOnboarding(status);
+  const flavor = flavorLabel(status.flavor, status.flavor_name);
+  const accel = accelLabel(status.accel, status.kvm);
+  const running = !!status.running;
+  const disabled = !!busy;
 
   return jsxs("div", {
     className: "tos-pane",
     "data-testid": "pane",
+    "data-mode": status.mode,
+    "data-running": running ? "1" : "0",
     children: [
       jsxs("header", {
-        className: "tos-bar",
+        className: "tos-top",
         children: [
-          jsx("div", {
+          jsxs("div", {
+            className: "tos-brand",
+            children: [
+              jsx("span", { className: "tos-mark", "aria-hidden": "true" }),
+              jsxs("div", {
+                children: [
+                  jsx("strong", { children: "TempleOS" }),
+                  jsx("em", { children: "Shared guest" }),
+                ],
+              }),
+            ],
+          }),
+          jsx("span", { className: "tos-badge", "data-testid": "flavor-badge", children: flavor }),
+          jsx("span", { className: "tos-badge tos-badge-accel", "data-testid": "accel-badge", children: accel }),
+          jsx("span", { className: "tos-badge", "data-testid": "snapshot-badge", children: status.snapshot || "no snapshot" }),
+          jsx("span", {
             className: "tos-chip",
             "data-testid": "status-chip",
             "data-mode": status.mode,
             "data-paused": status.agent_paused ? "1" : "0",
             children: chip,
           }),
-          jsx("button", {
-            type: "button",
-            className: "tos-btn",
-            "data-testid": "take-control",
-            onClick: () => setMode("take"),
-            children: "Take control",
+        ],
+      }),
+      jsxs("div", {
+        className: "tos-bar",
+        children: [
+          jsx("button", { type: "button", className: "tos-btn tos-primary", "data-testid": "start", disabled: disabled || running, onClick: onStart, children: busy === "start" ? "Starting…" : "Start" }),
+          jsx("button", { type: "button", className: "tos-btn", "data-testid": "stop", disabled: disabled || !running, onClick: onStop, children: "Stop" }),
+          jsx("button", { type: "button", className: "tos-btn", "data-testid": "reset", disabled: disabled || !running, onClick: onReset, children: "Reset" }),
+          jsx("button", { type: "button", className: "tos-btn", "data-testid": "snapshot-save", disabled: disabled || !running, onClick: onSave, children: "Snapshot golden" }),
+          jsx("button", { type: "button", className: "tos-btn", "data-testid": "snapshot-restore", disabled: disabled, onClick: onRestore, children: "Restore golden" }),
+          jsxs("div", {
+            className: "tos-modes",
+            role: "group",
+            "aria-label": "Control mode",
+            children: [
+              modeButton("watch", "Watch", status.mode, disabled, setMode),
+              modeButton("shared", "Shared", status.mode, disabled, setMode),
+              modeButton("user", "You drive", status.mode, disabled, setMode),
+            ],
           }),
-          jsx("button", {
-            type: "button",
-            className: "tos-btn",
-            "data-testid": "hand-back",
-            onClick: () => setMode("handback"),
-            children: "Hand back",
-          }),
+          jsx("button", { type: "button", className: "tos-btn tos-primary", "data-testid": "take-control", disabled: disabled || status.mode === "user", onClick: () => setMode("take"), children: "Take control" }),
+          jsx("button", { type: "button", className: "tos-btn", "data-testid": "hand-back", disabled: disabled || status.mode === "shared", onClick: () => setMode("handback"), children: "Hand back" }),
         ],
       }),
       jsx("div", {
-        className: "tos-screen",
-        "data-testid": "screen",
-        style: { width: scaled.width, height: scaled.height },
-        onClick: onCanvasClick,
-        children: frameUrl
-          ? jsx("img", {
-              alt: "TempleOS guest",
-              src: frameUrl,
-              width: scaled.width,
-              height: scaled.height,
-            })
-          : jsx("div", {
-              className: "tos-placeholder",
-              "data-testid": "placeholder",
-              children: status.running ? "Waiting for a frame…" : "VM stopped. Ask the agent to start it.",
-            }),
+        className: "tos-drive tos-drive-" + drive.kind,
+        "data-testid": "agent-paused",
+        "data-kind": drive.kind,
+        children: drive.label,
       }),
-      status.agent_paused
-        ? jsx("div", { className: "tos-paused", "data-testid": "agent-paused", children: modeLabel(status.mode, true) })
+      onboarding
+        ? jsxs("section", {
+            className: "tos-onboard",
+            "data-testid": "onboarding",
+            children: [
+              jsx("h2", { children: "Set up the guest" }),
+              jsx("p", { children: "TempleOS runs in a local QEMU VM. QEMU and the pinned ISO stay on this machine and are never bundled with the plugin. Networking stays off." }),
+              jsxs("ul", {
+                className: "tos-checks",
+                children: [
+                  checkRow("QEMU", firstCheck(status.checks, ["qemu", "qemu_present"])),
+                  checkRow("ISO", firstCheck(status.checks, ["iso", "iso_ok", "iso_present"])),
+                  checkRow("KVM", status.kvm === true ? true : firstCheck(status.checks, ["kvm"])),
+                ],
+              }),
+              jsx("button", { type: "button", className: "tos-btn tos-primary", "data-testid": "setup", disabled: disabled, onClick: onSetup, children: busy === "setup" ? "Setting up…" : "Set up" }),
+              jsx("p", { className: "tos-hint", children: "Set up fetches the official pin, verifies SHA-256, and reports whether /dev/kvm can be opened. Then press Start." }),
+            ],
+          })
         : null,
-      error ? jsx("div", { className: "tos-error", "data-testid": "error", children: error }) : null,
-      jsxs("section", {
-        className: "tos-log",
-        "data-testid": "agent-log",
+      jsxs("div", {
+        className: "tos-body",
         children: [
-          jsx("h2", { children: "Agent log" }),
-          log.length
-            ? log.map((line, i) => jsx("p", { children: line }, String(i)))
-            : jsx("p", { children: "The agent has not injected input yet." }),
+          jsxs("div", {
+            className: "tos-stage",
+            children: [
+              jsxs("div", {
+                className: "tos-screen" + (focused ? " is-focused" : ""),
+                "data-testid": "screen",
+                "data-focused": focused ? "1" : "0",
+                ref: screenRef,
+                tabIndex: 0,
+                role: "application",
+                "aria-label": "TempleOS guest screen",
+                style: { width: scaled.width, height: scaled.height },
+                onClick: (event) => {
+                  setFocused(true);
+                  onCanvasClick(event);
+                },
+                onFocus: () => setFocused(true),
+                onBlur: () => setFocused(false),
+                onKeyDown: onKeyDown,
+                children: [
+                  frameUrl
+                    ? jsx("img", {
+                        alt: "TempleOS guest",
+                        src: frameUrl,
+                        width: scaled.width,
+                        height: scaled.height,
+                        draggable: false,
+                      })
+                    : jsx("div", {
+                        className: "tos-placeholder",
+                        "data-testid": "placeholder",
+                        children: running ? "Waiting for a frame…" : "VM stopped. Press Start, or ask the agent to start it.",
+                      }),
+                ],
+              }),
+              focused
+                ? jsx("p", { className: "tos-hatch", "data-testid": "keyboard-hatch", children: "Keyboard captured. Press Esc to release." })
+                : jsx("p", { className: "tos-hatch tos-hatch-idle", "data-testid": "keyboard-hatch", children: "Click the screen to type. Esc releases the keyboard." }),
+            ],
+          }),
+          jsxs("section", {
+            className: "tos-log",
+            "data-testid": "agent-log",
+            children: [
+              jsx("h2", { children: "Agent log" }),
+              log.length
+                ? log.map((event, i) =>
+                    jsx(
+                      "p",
+                      {
+                        className: "tos-log-line tos-log-" + (event.source || "agent") + (event.ok === false ? " is-failed" : ""),
+                        children: typeof event === "string" ? event : logLine(event),
+                      },
+                      String((event && event.id) || i)
+                    )
+                  )
+                : jsx("p", { className: "tos-log-empty", children: "The agent has not injected input yet." }),
+            ],
+          }),
         ],
       }),
+      error ? jsx("div", { className: "tos-error", "data-testid": "error", children: error }) : null,
+      info ? jsx("div", { className: "tos-info", "data-testid": "info", children: info }) : null,
     ],
+  });
+}
+
+const POLL_TICK = 80;
+
+function modeButton(mode, label, current, disabled, setMode) {
+  const op = mode === "user" ? "take" : mode === "shared" ? "handback" : "watch";
+  return jsx("button", {
+    type: "button",
+    className: "tos-btn" + (current === mode ? " is-on" : ""),
+    "data-testid": "mode-" + mode,
+    "aria-pressed": current === mode ? "true" : "false",
+    disabled: disabled,
+    onClick: () => setMode(op),
+    children: label,
+  });
+}
+
+function checkRow(label, value) {
+  const state = checkState(value);
+  const mark = state === "ok" ? "ok" : state === "no" ? "missing" : "unknown";
+  return jsxs("li", {
+    className: "tos-check tos-check-" + state,
+    "data-testid": "check-" + label.toLowerCase(),
+    children: [jsxs("span", { children: [label, " — ", mark] })],
   });
 }

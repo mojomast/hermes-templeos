@@ -6,6 +6,8 @@ through ctx.rest only.
 
 from __future__ import annotations
 
-from templeos.api import router
+from templeos.api import install_tool_log_hooks, router
+
+install_tool_log_hooks()
 
 __all__ = ["router"]
