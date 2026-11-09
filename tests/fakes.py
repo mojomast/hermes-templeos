@@ -101,6 +101,20 @@ class FakeQMP:
 
     def input_send_event(self, events: list[dict[str, Any]]) -> None:
         self.cmd("input-send-event", events=events)
+        # Mirror send-key recording so type_text / send_keys tests that assert
+        # qmp.keys still work when chords go through input-send-event.
+        downs: list[str] = []
+        for ev in events:
+            if ev.get("type") != "key":
+                continue
+            data = ev.get("data") or {}
+            if not data.get("down"):
+                continue
+            key = data.get("key") or {}
+            if key.get("type") == "qcode" and key.get("data"):
+                downs.append(str(key["data"]))
+        if downs:
+            self.keys.append(downs)
 
 
 def _is_abs(event: dict[str, Any]) -> bool:
@@ -160,6 +174,7 @@ class FakeCtx:
         self.schemas: dict[str, dict[str, Any]] = {}
         self.skills: dict[str, Path] = {}
         self.hooks: dict[str, Any] = {}
+        self.prompt_sections: dict[str, dict[str, Any]] = {}
 
     def register_tool(
         self,
@@ -184,3 +199,10 @@ class FakeCtx:
 
     def register_hook(self, name, fn):
         self.hooks[name] = fn
+
+    def register_system_prompt_section(self, id, content, *, position="after_memory", max_chars=4000):
+        self.prompt_sections[id] = {
+            "content": content,
+            "position": position,
+            "max_chars": max_chars,
+        }

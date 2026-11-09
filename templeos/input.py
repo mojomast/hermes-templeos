@@ -4,9 +4,9 @@ Slice B (feat/screen-input) implements this module.
 
 click uses QMP absolute events when VMMouse is current (TinkerOS default).
 On stock TempleOS or ZealOS, absolute events error with 'input handler not
-found'; use MsSet plus a button, or relative PS/2. holyc types source, or
-writes it to COM1 when Comm* is live (TinkerOS after CommInit + CommInit8n1).
-Cap HolyC source size.
+found'; use MsSet plus a button, or relative PS/2. holyc types source at the
+prompt by default; writes COM1 only when via=serial or guest_serial_ready
+(TinkerOS after CommInit + CommInit8n1). Cap HolyC source size.
 """
 
 from __future__ import annotations
@@ -205,8 +205,33 @@ def _require_qmp() -> Any:
     return require_runtime().qmp
 
 
+_MODIFIER_QCODES = frozenset({"shift", "shift_r", "shift_l", "ctrl", "ctrl_r", "alt", "alt_r", "altgr"})
+
+
 def _send_key(qmp: Any, codes: Sequence[str], *, hold_ms: int = DEFAULT_HOLD_MS) -> None:
+    """Press qcodes. Modifier chords use input-send-event down, a short hold, then up.
+
+    TinkerOS under TCG often drops Shift when send-key fires the chord in one
+    packet, so Shift+apostrophe becomes a bare apostrophe.
+    """
     names = [str(c) for c in codes]
+    use_events = len(names) > 1 or any(c in _MODIFIER_QCODES for c in names)
+    if use_events and (hasattr(qmp, "input_send_event") or hasattr(qmp, "cmd")):
+        downs = [
+            {"type": "key", "data": {"down": True, "key": {"type": "qcode", "data": c}}}
+            for c in names
+        ]
+        ups = [
+            {"type": "key", "data": {"down": False, "key": {"type": "qcode", "data": c}}}
+            for c in reversed(names)
+        ]
+        _input_events(qmp, downs)
+        if hold_ms > 0:
+            time.sleep(min(0.05, hold_ms / 1000.0))
+        _input_events(qmp, ups)
+        if any(c in {"shift", "shift_r", "shift_l"} for c in names):
+            _unstick_shift(qmp)
+        return
     if hasattr(qmp, "send_key"):
         qmp.send_key(list(names), hold_ms=hold_ms)
     else:
@@ -271,9 +296,11 @@ def type_text(text: str, *, delay_s: float = DEFAULT_DELAY_S) -> dict[str, Any]:
         with arbiter.queue():
             qmp = _require_qmp()
             typed = 0
+            # delay_s=0 is the unit-test seam: skip the TCG hold as well.
+            key_hold = 0 if delay_s <= 0 else DEFAULT_HOLD_MS
             for i, ch in enumerate(text):
                 codes = qcodes_for(ch)
-                _send_key(qmp, codes)
+                _send_key(qmp, codes, hold_ms=key_hold)
                 typed += 1
                 if delay_s > 0:
                     time.sleep(delay_s)
@@ -513,9 +540,13 @@ def _serial_ready(serial: Any) -> bool:
 
 
 def holyc(source: str, *, via: str = "auto") -> dict[str, Any]:
-    """Send HolyC. Prefer COM1 when Comm* is live, else type it.
+    """Send HolyC. Type at the prompt unless guest Comm* is known live.
 
-    ``via`` is auto, serial, or type. Reject sources larger than HOLYC_MAX_BYTES.
+    ``via`` is auto, serial, or type. ``auto`` prefers keyboard typing because a
+    host-open COM1 socket does not mean the guest ran CommInit — serial writes
+    are silently dropped until then. Use ``via=serial`` only after CommInit +
+    CommInit8n1 (or when Runtime.guest_serial_ready is set). Reject sources
+    larger than HOLYC_MAX_BYTES.
     """
     if not isinstance(source, str) or source == "":
         raise ValueError("holyc requires a non-empty source string")
@@ -534,7 +565,10 @@ def holyc(source: str, *, via: str = "auto") -> dict[str, Any]:
         with arbiter.queue():
             rt = require_runtime()
             serial = rt.serial
-            use_serial = via == "serial" or (via == "auto" and _serial_ready(serial))
+            guest_ready = bool(getattr(rt, "guest_serial_ready", False))
+            use_serial = via == "serial" or (
+                via == "auto" and _serial_ready(serial) and guest_ready
+            )
             if via == "serial" and not _serial_ready(serial):
                 return _fail(
                     "COM1 is not open. Keep the serial socket connected and, on TinkerOS, call CommInit then CommInit8n1.",
@@ -547,7 +581,13 @@ def holyc(source: str, *, via: str = "auto") -> dict[str, Any]:
                 except Exception as exc:
                     return _fail(str(exc) or "Serial write failed.", Code.SERIAL_NOT_READY, via="serial")
                 return _ok(via="serial", bytes=len(payload.encode("utf-8")))
-            typed = type_text(payload, delay_s=0.0 if rt.type_delay_s == 0.09 else rt.type_delay_s)
+            # Live guests need a short inter-key delay so Shift chords stick under TCG.
+            # Unit tests bind type_delay_s=0 and stay instantaneous.
+            if not rt.type_delay_s:
+                delay = 0.0
+            else:
+                delay = max(0.02, min(float(rt.type_delay_s), 0.05))
+            typed = type_text(payload, delay_s=delay)
             if typed.get("ok") is False:
                 return typed
             return _ok(via="type", typed=typed.get("typed"), bytes=len(payload.encode("utf-8")))

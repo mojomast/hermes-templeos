@@ -74,8 +74,13 @@ def start(*, flavor: str = "tinkeros", snapshot: str = GOLDEN, skip_prompts: boo
     (to clear AutoComplete focus) then ``n`` + Enter via the existing input
     path. No new tool is required.
 
+    If QEMU is already running in this state directory (including an orphan
+    left after a gateway restart), reconnect QMP/COM1 and bind screen/input
+    instead of failing with vm_already_running.
+
     Returns a status dict: running, flavor, accel, snapshot, pid (never tokens
-    or socket contents; socket paths only as existence flags).
+    or socket contents; socket paths only as existence flags). A successful
+    reconnect sets attached=True.
     """
     with _LOCK:
         return _start(flavor=flavor, snapshot=snapshot, skip_prompts=skip_prompts)
@@ -176,10 +181,13 @@ def _start(*, flavor: str, snapshot: str, skip_prompts: bool = True) -> dict[str
     root = ensure_layout()
     alive = _cleanup_stale(root)
     if alive or _process_is_up():
+        attached = _attach_existing(root)
+        if attached.get("ok"):
+            return attached
         return _fail(
-            "A TempleOS VM is already running in this state directory.",
-            "vm_already_running",
-            "Call templeos_vm op=status, or stop first.",
+            str(attached.get("error") or "A TempleOS VM is already running in this state directory."),
+            str(attached.get("code") or "vm_already_running"),
+            str(attached.get("fix") or "Call templeos_vm op=status, or stop first."),
         )
 
     qemu = doctor_mod.qemu_version()
@@ -410,6 +418,88 @@ def _restore(name: str) -> dict[str, Any]:
     return body
 
 
+def _attach_existing(root: Path) -> dict[str, Any]:
+    """Reconnect QMP/COM1 to a live QEMU (same process, or after a gateway restart)."""
+    global _runtime
+    if _runtime is not None and _process_is_up():
+        return _status()
+    if _runtime is not None:
+        _close_quietly(_runtime.qmp, _runtime.serial)
+        _runtime = None
+        _unbind_screen()
+
+    pid = _read_pidfile(root)
+    if not (pid and _pid_is_qemu(pid)):
+        return _fail(
+            "The TempleOS VM is not running.",
+            "vm_not_running",
+            "Call templeos_vm op=start, then retry.",
+        )
+
+    socks = socket_paths(root)
+    if not socks["qmp"].exists():
+        return _fail(
+            "QEMU is running but the QMP socket is missing.",
+            "doctor_failed",
+            "Call templeos_vm op=stop, then start again.",
+        )
+
+    state = _read_state(root) or {}
+    flavor = str(state.get("flavor") or "tinkeros")
+    try:
+        rec = get_flavor(flavor)
+        flavor_id = rec["id"]
+        iso_name = str(state.get("iso") or rec["iso_filename"])
+        default_disk = disks_dir(root) / f"{rec['id']}.qcow2"
+    except FlavorError as exc:
+        return _fail(str(exc), getattr(exc, "code", "unknown_flavor"))
+
+    iso = isos_dir(root) / iso_name
+    disk_s = state.get("disk")
+    disk = Path(disk_s) if disk_s else default_disk
+    accel = str(state.get("accel") or ("kvm" if doctor_mod.kvm_usable() else "tcg"))
+    snapshot = state.get("snapshot")
+
+    qmp = qmp_factory()
+    serial = serial_factory()
+    try:
+        qmp.connect(socks["qmp"])
+        if socks["com1"].exists():
+            serial.open(socks["com1"])
+    except Exception as exc:
+        _close_quietly(qmp, serial)
+        return _fail(
+            f"QEMU is running but QMP or COM1 could not be reattached: {exc}",
+            "doctor_failed",
+            "Call templeos_vm op=stop, then start again.",
+        )
+
+    _runtime = Runtime(
+        proc=None,
+        qmp=qmp,
+        serial=serial,
+        flavor=flavor_id,
+        accel=accel,
+        snapshot=snapshot if isinstance(snapshot, str) or snapshot is None else str(snapshot),
+        pid=pid,
+        home=root,
+        iso=iso,
+        disk=disk,
+        sockets=socks,
+    )
+    _write_state(root, _runtime)
+    _bind_screen(_runtime)
+    try:
+        from templeos.frame_cache import get_frame_cache
+
+        get_frame_cache().poke()
+    except Exception:
+        pass
+    body = _status()
+    body["attached"] = True
+    return body
+
+
 def _status() -> dict[str, Any]:
     root = home()
     rt = _runtime
@@ -462,13 +552,18 @@ def _process_is_up() -> bool:
 
 
 def _require_running() -> Runtime | dict[str, Any]:
-    if _runtime is None or not _process_is_up():
-        return _fail(
-            "The TempleOS VM is not running.",
-            "vm_not_running",
-            "Call templeos_vm op=start, then retry.",
-        )
-    return _runtime
+    if _runtime is not None and _process_is_up():
+        return _runtime
+    root = home()
+    if _cleanup_stale(root) or _process_is_up():
+        attached = _attach_existing(root)
+        if attached.get("ok") and _runtime is not None:
+            return _runtime
+    return _fail(
+        "The TempleOS VM is not running.",
+        "vm_not_running",
+        "Call templeos_vm op=start, then retry.",
+    )
 
 
 def _eject_non_qcow2_writables(qmp: Any) -> None:

@@ -89,11 +89,12 @@ CODE_FIX = {
 SCHEMA_VM = {
     "name": "templeos_vm",
     "description": (
-        "Start, stop, reset, snapshot, restore, status, or doctor the local TempleOS "
-        "QEMU VM. Network is always off. snapshot ejects non-qcow2 writables first. "
-        "restore issues cont if loadvm leaves the VM paused. doctor reports QEMU, "
-        "ISO pins, and whether /dev/kvm can be opened (not just whether it exists). "
-        "Sockets are existence flags only, never tokens."
+        "TempleOS/TinkerOS/ZealOS local QEMU guest lifecycle (start stop reset "
+        "snapshot restore status doctor). THE supported boot path — never dial "
+        "VNC/QMP sockets yourself. Network always off. snapshot ejects non-qcow2 "
+        "writables first; restore issues cont if loadvm left the VM paused. doctor "
+        "checks QEMU, ISO pins, and /dev/kvm openability. Sockets are existence "
+        "flags only. If deferred behind tool_search, search for templeos vm first."
     ),
     "parameters": {
         "type": "object",
@@ -121,10 +122,11 @@ SCHEMA_VM = {
 SCHEMA_SCREEN = {
     "name": "templeos_screen",
     "description": (
-        "Look at the guest as a PNG, read text (serial if COM1 is already open, "
-        "else 8x8 glyphs), wait until a cropped frame is idle, or hash that crop. "
-        "Full-frame hashes never stabilize because of the clock. Default 640x480 PNG, "
-        "not JPEG. ZealOS frames are 1024x768 and cost more tokens."
+        "TempleOS/TinkerOS guest screen: look (PNG), read_text (serial or 8x8 glyphs), "
+        "wait_idle, or hash. Prefer read_text before look. Do NOT write VNC clients or "
+        "screendump scripts — those time out; this tool is the supported path. "
+        "Full-frame hashes never stabilize (clock/FPS); wait_idle uses a crop. "
+        "Default 640x480 PNG. If deferred, tool_search for templeos screen read_text."
     ),
     "parameters": {
         "type": "object",
@@ -147,11 +149,12 @@ SCHEMA_SCREEN = {
 SCHEMA_INPUT = {
     "name": "templeos_input",
     "description": (
-        "Type text, send QEMU key names, click or move the pointer, or send HolyC. "
-        "click uses QMP absolute events when VMMouse is active (TinkerOS); otherwise "
-        "MsSet plus a button, or relative PS/2. holyc types source or writes COM1 when "
-        "Comm* is live. Returns agent_paused when the user has control or during the "
-        "shared-mode hold-off of about two seconds."
+        "TempleOS/TinkerOS input: type, keys, click, move, or holyc. For a HolyC "
+        "one-liner at the T:/Home> prompt, prefer op=holyc with source that prints a "
+        "string then an expression (e.g. Hello from Hermes and 6*7). Esc first if "
+        "AutoComplete stole focus. click uses VMMouse absolute on TinkerOS. Returns "
+        "agent_paused when the user drives or during the ~2s shared hold-off. Never "
+        "inject via raw VNC. If deferred, tool_search for templeos holyc input."
     ),
     "parameters": {
         "type": "object",
@@ -584,13 +587,20 @@ def _call_register_tool(register: Callable, **kwargs: Any) -> None:
 
 def register_tools(ctx) -> None:
     """Register the four tools. Names must match plugin.yaml provides_tools."""
+    try:
+        from templeos.api import install_tool_log_hooks
+
+        install_tool_log_hooks()
+    except Exception:
+        pass
     register = ctx.register_tool
     for spec in tool_specs():
+        handler = HANDLERS.get(spec["name"], spec["handler"])
         _call_register_tool(
             register,
             name=spec["name"],
             toolset=TOOLSET,
             schema=spec["schema"],
-            handler=spec["handler"],
+            handler=handler,
             description=spec["description"],
         )

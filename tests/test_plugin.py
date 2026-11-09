@@ -35,6 +35,13 @@ def test_manifest_matches_registered_tools_and_skill():
     assert "templeos-operator" in ctx.skills
     skill = ctx.skills["templeos-operator"].read_text()
     assert SKILL_ID in skill and skill.startswith("---")
+    # Tool Search hides tool schemas; the system prompt section is the visible steer.
+    assert "templeos-operator" in ctx.prompt_sections
+    section = ctx.prompt_sections["templeos-operator"]["content"]
+    assert "tool_search" in section
+    assert "VNC" in section
+    assert "templeos_input" in section
+    assert "op=holyc" in section
     py = (ROOT / "pyproject.toml").read_text()
     assert f'version = "{manifest["version"]}"' in py
     for dep in manifest.get("python_dependencies") or []:

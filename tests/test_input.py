@@ -95,6 +95,20 @@ def test_type_text_records_send_key_chords(tos_home):
     assert qmp.keys[9] == ["semicolon"]
 
 
+def test_shift_chords_send_down_then_up_events(tos_home):
+    qmp = _bind(tos_home)
+    result = type_text('"', delay_s=0)
+    assert result["ok"] is True
+    key_batches = [batch for batch in qmp.events if batch and batch[0].get("type") == "key"]
+    assert len(key_batches) >= 2
+    downs, ups = key_batches[0], key_batches[1]
+    assert [ev["data"]["key"]["data"] for ev in downs] == ["shift", "apostrophe"]
+    assert all(ev["data"]["down"] for ev in downs)
+    assert [ev["data"]["key"]["data"] for ev in ups] == ["apostrophe", "shift"]
+    assert all(not ev["data"]["down"] for ev in ups)
+    assert qmp.keys[0] == ["shift", "apostrophe"]
+
+
 def test_send_keys_parses_combos_and_esc(tos_home):
     qmp = _bind(tos_home)
     result = send_keys(["ctrl+alt+x", "esc"], hold_ms=0)
@@ -158,14 +172,31 @@ def test_msset_and_relative_strategies(tos_home):
     assert rel[1]["data"]["value"] == 20
 
 
-def test_holyc_prefers_serial_and_caps_source(tos_home):
+def test_holyc_auto_prefers_type_until_guest_serial_ready(tos_home):
+    # Host COM1 open alone must NOT make auto choose serial — guest Comm* is
+    # required (Runtime.guest_serial_ready) or an explicit via=serial.
     serial = FakeSerial()
     serial.open(tos_home / "com1.sock")
-    _bind(tos_home, serial=serial)
+    qmp = _bind(tos_home, serial=serial)
     result = holyc("Dir;", via="auto")
     assert result["ok"] is True
-    assert result["via"] == "serial"
-    assert serial.tx.endswith(b"Dir;\n")
+    assert result["via"] == "type"
+    assert serial.tx == b""
+    assert qmp.keys  # typed at the HolyC prompt
+
+    from templeos.screen import get_runtime
+
+    rt = get_runtime()
+    assert rt is not None
+    rt.guest_serial_ready = True
+    serial2 = FakeSerial()
+    serial2.open(tos_home / "com1.sock")
+    _bind(tos_home, serial=serial2)
+    get_runtime().guest_serial_ready = True
+    ready = holyc("Dir;", via="auto")
+    assert ready["ok"] is True
+    assert ready["via"] == "serial"
+    assert serial2.tx.endswith(b"Dir;\n")
 
     missing = FakeSerial()
     _bind(tos_home, serial=missing)

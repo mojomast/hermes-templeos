@@ -10,6 +10,22 @@ if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
 
 
+# Injected via ctx.register_system_prompt_section so the agent can find the
+# four templeos_* tools when Hermes Tool Search defers them. Keep this short.
+TEMPLEOS_SYSTEM_PROMPT_SECTION = (
+    "TempleOS/TinkerOS is driven ONLY with templeos_vm, templeos_screen, "
+    "templeos_input, and templeos_files (toolset templeos). Hermes Tool Search "
+    "defers plugin tools — if those four are not in your visible tool list, "
+    'call tool_search(["templeos"]) or skill_view("templeos:templeos-operator"), '
+    "then use them. Never write a VNC client, dial plugin-data sockets, or run "
+    "qemu/screendump yourself.\n\n"
+    "HolyC one-liner at the T:/Home> prompt: templeos_vm op=status (start if "
+    "needed), templeos_screen op=wait_idle then read_text, Esc if AutoComplete "
+    "stole focus, templeos_input op=holyc with the source, then wait_idle and "
+    "read_text. Report the printed text and the numeric result."
+)
+
+
 def register(ctx) -> None:
     """Register skills/<name>/SKILL.md and the templeos_* tools.
 
@@ -25,3 +41,20 @@ def register(ctx) -> None:
     from templeos.tools import register_tools
 
     register_tools(ctx)
+    if hasattr(ctx, "register_system_prompt_section"):
+        # Tool Search defers plugin tools, so the model never sees their
+        # descriptions unless we put a short reminder in the system prompt.
+        try:
+            ctx.register_system_prompt_section(
+                "templeos-operator",
+                TEMPLEOS_SYSTEM_PROMPT_SECTION,
+            )
+        except Exception:
+            pass
+    # Pane agent log: wrap handlers even when the dashboard router is not imported.
+    try:
+        from templeos.api import install_tool_log_hooks
+
+        install_tool_log_hooks()
+    except Exception:
+        pass

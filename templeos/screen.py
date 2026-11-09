@@ -212,6 +212,9 @@ class Runtime:
     state_dir: Path | None = None
     last_pointer: tuple[int, int] | None = None
     type_delay_s: float = 0.09
+    # Host COM1 open != guest CommInit. holyc via=auto types until this is True
+    # (set after a successful Comm* / files protocol exchange).
+    guest_serial_ready: bool = False
 
 
 _RUNTIME: Runtime | None = None

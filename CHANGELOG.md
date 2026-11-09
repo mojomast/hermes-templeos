@@ -1,7 +1,10 @@
 # Changelog
 
 ## Unreleased
-
+- Steer agents to the four `templeos_*` tools when Hermes Tool Search defers them: a system prompt section, skill v0.1.2, and tool descriptions require `tool_search`/`skill_view` and forbid VNC/socket workarounds. Prefer `templeos_input op=holyc` for HolyC one-liners. `register()` also installs pane agent-log hooks.
+- `templeos_vm op=start` (and other running-VM ops) reattach QMP/COM1 if QEMU is still alive after a gateway restart, instead of returning `vm_already_running` with no in-process binding.
+- holyc `via=auto` types at the prompt unless `Runtime.guest_serial_ready` (host COM1 open no longer selects serial; silent drop fixed).
+- Modifier chords (e.g. `"`) use QMP `input-send-event` down, a short hold, then up so TinkerOS TCG does not turn Shift+apostrophe into `'`.
 - Pane `/frame` served from a background frame cache (≤5 fps, no OCR on the
   request path) so the Hermes gateway is not starved while the pane is open.
 - Pane polling capped (~4–5 fps visible; backs off when idle, hidden, or slow).
