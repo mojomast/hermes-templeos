@@ -157,3 +157,46 @@ def test_clip_respects_off_switch(monkeypatch):
     monkeypatch.setenv("TEMPLEOS_COMPANION", "off")
     assert companion.clips_manifest()["code"] == "companion_off"
     assert companion.clip_payload("dance")["code"] == "companion_off"
+
+
+def test_config_companion_off_and_hide_toggle(monkeypatch, tmp_path):
+    monkeypatch.setenv("TEMPLEOS_HOME", str(tmp_path))
+    monkeypatch.delenv("TEMPLEOS_COMPANION", raising=False)
+    ctx = FakeCtx()
+    ctx.config = {"companion": "off"}
+    assert companion.apply_config(ctx) is False
+    assert companion.companion_enabled() is False
+    assert companion.atlas_payload("base")["code"] == "companion_off"
+
+    # The pane Hide Terry toggle is independent of the off switch: it only
+    # conceals the sprite and persists through the plugin data dir.
+    assert companion.set_hidden(True) is True
+    assert companion.snapshot()["hidden"] is True
+    assert companion.set_hidden(False) is False
+    assert companion.snapshot()["hidden"] is False
+
+    # The env switch wins over the config file.
+    monkeypatch.setenv("TEMPLEOS_COMPANION", "terry")
+    assert companion.companion_enabled() is True
+
+
+def test_prefs_reload_after_restart_and_config_wins(monkeypatch, tmp_path):
+    monkeypatch.setenv("TEMPLEOS_HOME", str(tmp_path))
+    monkeypatch.delenv("TEMPLEOS_COMPANION", raising=False)
+    companion.set_hidden(True)
+    companion.set_costume("wizard")
+    companion.reset_state()  # simulate a fresh process state
+    assert companion.snapshot()["hidden"] is False
+
+    ctx = FakeCtx()
+    companion.register_hooks(ctx)
+    snap = companion.snapshot()
+    assert snap["hidden"] is True
+    assert snap["costume"] == "wizard"
+
+    # An explicit companion: off config still wins over the persisted prefs.
+    companion.reset_state()
+    ctx_off = FakeCtx()
+    ctx_off.config = {"companion": "off"}
+    companion.register_hooks(ctx_off)
+    assert companion.companion_enabled() is False

@@ -111,8 +111,8 @@ ISO boot are required for the pane screenshots.
 | Check | Command | Result |
 | --- | --- | --- |
 | Desktop bundle is current | `node scripts/build_desktop.mjs --check` | pass |
-| Desktop JS tests | `node --import ./tests/js/register-mocks.mjs --test tests/js/*.test.mjs` | 16/16 pass |
-| Python suite | `PYTHONPATH=. python -m pytest -q tests` | 129 passed, 4 skipped, 1 pre-existing failure |
+| Desktop JS tests | `node --import ./tests/js/register-mocks.mjs --test tests/js/*.test.mjs` | 22/22 pass |
+| Python suite | `python3 -m pytest -q tests` | 141 passed, 4 skipped |
 | Tool schema budget | `python3 evals/measure_schemas.py` | `892` tokens |
 | Tool count | `python3 -c "from templeos.tools import tool_specs; print(len(tool_specs()))"` | `4` |
 | Secret / host-path scan | scan changed files for loopback hosts, browser storage, user-home paths, workspace paths, user-profile paths, and private-key markers | no matches |
@@ -121,10 +121,9 @@ ISO boot are required for the pane screenshots.
 
 ## Open issues
 
-- `tests/test_api.py::test_router_mounts_when_fastapi_is_available` fails on
-  the base code because its local `inp.click` stub does not accept the
-  `settle_s` keyword used by `templeos/api.py`. That module is outside this
-  slice and was not edited.
+- The `tests/test_api.py` click stub now accepts `settle_s`/`hold_s`, so the
+  former base-code failure is gone on `feat/terry-p2`; see
+  `docs/evidence/TERRY-P2.md` for the reconciled full-suite counts.
 - The theme embeds PNG data URIs in `desktop/plugin.js` (about 156 KB) so the
   built pane is self-contained inside the Hermes host document. No external
   asset fetch is required.

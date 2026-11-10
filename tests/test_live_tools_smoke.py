@@ -207,6 +207,27 @@ def test_tools_and_pane_api_live_tinkeros(tmp_path, monkeypatch):
         assert look["width"] == 640 and look["height"] == 480
         assert "home>" in boot_text.lower(), boot_text[-1500:]
 
+        # Companion observer hooks must fire against the live guest: greet on
+        # session start, typing while a templeos_* tool call is in flight, and
+        # celebrate once the same call reports success. The hooks are the same
+        # callbacks Hermes registers through plugin.yaml.
+        from templeos import companion
+
+        companion.reset_state()
+        hooks = companion._make_hooks()
+        hooks["on_session_start"]()
+        assert companion.resolve_animation() == "greet"
+        assert companion.snapshot()["reason"] == "session_start"
+        hooks["pre_tool_call"](tool="templeos_screen", args={"op": "look"})
+        assert companion.resolve_animation() == "typing"
+        hooked_look = _parse(handle_screen({"op": "look"}))
+        assert hooked_look["ok"] is True, hooked_look
+        assert hooked_look["width"] == 640 and hooked_look["height"] == 480
+        assert companion.resolve_animation() == "typing", "typing must hold while the tool is in flight"
+        hooks["post_tool_call"](tool="templeos_screen", ok=hooked_look["ok"])
+        assert companion.resolve_animation() == "celebrate_short"
+        assert companion.snapshot()["reason"] == "tool_ok"
+
         text = _parse(handle_screen({"op": "read_text"}))
         assert text["ok"] is True, text
         assert text.get("text") is not None
@@ -270,7 +291,14 @@ def test_tools_and_pane_api_live_tinkeros(tmp_path, monkeypatch):
         from fastapi import FastAPI
         from fastapi.testclient import TestClient
 
-        from templeos.api import ROUTE_FRAME, ROUTE_INPUT, ROUTE_STATUS, create_router, reset_activity_log
+        from templeos.api import (
+            ROUTE_COMPANION,
+            ROUTE_FRAME,
+            ROUTE_INPUT,
+            ROUTE_STATUS,
+            create_router,
+            reset_activity_log,
+        )
 
         reset_activity_log()
         app = FastAPI()
@@ -281,6 +309,22 @@ def test_tools_and_pane_api_live_tinkeros(tmp_path, monkeypatch):
         assert status["ok"] is True
         assert status["running"] is True
         assert status["mode"] == "shared"
+        assert status["companion"]["enabled"] is True
+        assert status["companion"]["character"] == "terry"
+        assert status["companion"]["tribute"] is True
+
+        # Pane speech: POST /companion with a caller-supplied line. The dock
+        # reserves a bubble lane wide enough for this text; the pane renders it
+        # in shots/terry/terry-hermes-dark.png without clipping.
+        said = client.post(ROUTE_COMPANION, json={"say": "Hello from Hermes"}).json()
+        assert said["ok"] is True, said
+        assert said["companion"]["speech"]["active"] is True
+        assert said["companion"]["speech"]["text"] == "Hello from Hermes"
+        echoed = client.get(ROUTE_COMPANION).json()
+        assert echoed["companion"]["speech"]["text"] == "Hello from Hermes"
+        spoken_status = client.get(ROUTE_STATUS).json()
+        assert spoken_status["companion"]["speech"]["active"] is True
+        assert spoken_status["companion"]["speech"]["text"] == "Hello from Hermes"
 
         frame = client.get(ROUTE_FRAME).json()
         assert frame["ok"] is True

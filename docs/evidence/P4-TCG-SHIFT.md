@@ -54,9 +54,9 @@ per-key QMP events instead of overlapping `send-key` timers.
 
 | Check | Command | Result |
 | --- | --- | --- |
-| Full pytest with live smoke | `TEMPLEOS_SMOKE=1 python3 -m pytest -q tests` | 131 passed, 3 skipped |
-| Full pytest without live smoke | `python3 -m pytest -q tests` | 130 passed, 4 skipped |
-| JS pane tests | `node --import ./tests/js/register-mocks.mjs --test tests/js/*.test.mjs` | 16 passed, 0 failed |
+| Full pytest with live smoke | `TEMPLEOS_SMOKE=1 python3 -m pytest -q tests` | 142 passed, 3 skipped |
+| Full pytest without live smoke | `python3 -m pytest -q tests` | 141 passed, 4 skipped |
+| JS pane tests | `node --import ./tests/js/register-mocks.mjs --test tests/js/*.test.mjs` | 22 passed, 0 failed |
 | Desktop bundle | `node scripts/build_desktop.mjs --check` | `desktop/plugin.js is up to date` |
 | Schema measure | `python3 evals/measure_schemas.py` | `892` (unchanged) |
 | Tool surface | four handlers | `templeos_files`, `templeos_input`, `templeos_screen`, `templeos_vm` |
@@ -65,3 +65,7 @@ The live smoke boots TCG, waits for the prompt, types the one-liner through the
 production input path, verifies both expected strings by glyph OCR, saves the
 PNG, and then completes the existing snapshot/restore, pane API, and cleanup
 checks. QEMU is stopped at the end of the run.
+
+On `feat/terry-p2` the same live smoke also asserts the companion hooks
+(greet, typing during a `templeos_screen` call, celebrate on success) and the
+`POST /companion` speech bubble. See `docs/evidence/TERRY-P2.md`.

@@ -758,6 +758,9 @@ def register_hooks(ctx: Any) -> list[str]:
     """
     if not hasattr(ctx, "register_hook"):
         return []
+    # Restore the pane's Hide Terry / costume choice, then let explicit config
+    # (and later the env switch inside companion_enabled) override it.
+    load_prefs()
     apply_config(ctx)
     registered: list[str] = []
     for name, fn in _make_hooks().items():
