@@ -179,6 +179,13 @@ def test_tools_and_pane_api_live_tinkeros(tmp_path, monkeypatch):
         assert vm_mod.get_runtime() is not None
         assert vm_mod.get_serial() is not None
 
+        modem = _parse(handle_vm({"op": "modem", "mode": "status"}))
+        assert modem["ok"] is True, modem
+        assert modem["transport"] == "serial"
+        assert modem["network"] == "off"
+        lore = _parse(handle_screen({"op": "lore"}))
+        assert lore["ok"] is True and "T:/Home>" in lore["text"], lore
+
         from templeos.screen import capture_image, glyph_read_ex
 
         # TinkerOS desktop is typically up around 14 s; wait_idle may timeout
@@ -245,6 +252,9 @@ def test_tools_and_pane_api_live_tinkeros(tmp_path, monkeypatch):
             typed = _parse(handle_input({"op": "holyc", "text": HOLYC_ONE_LINER, "via": "type"}))
             assert typed["ok"] is True, typed
             assert typed.get("via") == "type", typed
+            assert typed.get("per_key") is True, typed
+            assert typed.get("accel") == "tcg", typed
+            assert typed.get("delay_s", 0) >= 0.12, typed
             deadline = time.monotonic() + 45
             while time.monotonic() < deadline:
                 _wait_idle(timeout_s=5)
@@ -276,6 +286,9 @@ def test_tools_and_pane_api_live_tinkeros(tmp_path, monkeypatch):
         listed = _parse(handle_files({"op": "list", "path": "T:/"}))
         if listed.get("ok"):
             files_note = "list succeeded over serial"
+            rpc = _parse(handle_files({"op": "rpc", "method": "ping", "path": "T:/"}))
+            assert rpc["ok"] is True, rpc
+            assert rpc["count"] >= 0
             dest = home / "exchange" / "Smoke.HC"
             dest.parent.mkdir(parents=True, exist_ok=True)
             pulled = _parse(

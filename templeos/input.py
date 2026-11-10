@@ -41,11 +41,14 @@ CLICK_VIA = ("auto", "vmmouse", "msset", "relative")
 HOLYC_VIA = ("auto", "serial", "type")
 DEFAULT_DELAY_S = 0.09
 DEFAULT_HOLD_MS = 80
-# P5 evidence (feat/p5-webapp-demo 53ded9d): under TCG the old <=50 ms HolyC
-# key cadence garbled a long one-liner; ~90 ms per key printed "Hello from
-# Hermes" and 42. KVM keeps the snappy cap.
-HOLYC_TCG_DELAY_S = 0.09
-HOLYC_MAX_DELAY_S = 0.12
+# P5 evidence (feat/p5-webapp-demo 53ded9d): default-speed HolyC typing garbled
+# under TCG. op=holyc keeps the proven P4 per-key route and uses P3's slower
+# inter-key gap unless the accel is KVM. HOLYC_* names stay as aliases so the
+# PINT tests keep importing them.
+TCG_HOLYC_DELAY_S = 0.12
+TCG_HOLYC_DELAY_MAX_S = 0.30
+HOLYC_TCG_DELAY_S = TCG_HOLYC_DELAY_S
+HOLYC_MAX_DELAY_S = TCG_HOLYC_DELAY_MAX_S
 CHUNK_CHARS = 32
 ABS_MAX = 32767
 # Bake-off: a click on 'Cmd Line' at this pixel opened Command Line Overview.
@@ -240,15 +243,15 @@ def _typing_delay(rt: Any, accel: str) -> float:
     """Inter-key delay for HolyC typed at the prompt.
 
     A zero ``type_delay_s`` remains the instantaneous unit-test seam. On live
-    guests KVM stays at the old <=50 ms cap; TCG takes the slower P5 cadence
-    (>=90 ms) because batched fast typing garbles a long HolyC line there.
+    guests KVM stays at the old <=50 ms cap; TCG takes the slower P3/P5 cadence
+    (>=120 ms, cap 300 ms) because batched fast typing garbles a long HolyC line there.
     """
     base = float(getattr(rt, "type_delay_s", 0.0) or 0.0)
     if base <= 0:
         return 0.0
-    if accel and accel != "kvm":
-        return max(HOLYC_TCG_DELAY_S, min(base, HOLYC_MAX_DELAY_S))
-    return max(0.02, min(base, 0.05))
+    if accel == "kvm":
+        return max(0.02, min(base, 0.05))
+    return min(TCG_HOLYC_DELAY_MAX_S, max(TCG_HOLYC_DELAY_S, base))
 
 
 def _send_key_cmd(qmp: Any, names: Sequence[str], *, hold_ms: int) -> None:
@@ -662,9 +665,10 @@ def holyc(source: str, *, via: str = "auto") -> dict[str, Any]:
                 except Exception as exc:
                     return _fail(str(exc) or "Serial write failed.", Code.SERIAL_NOT_READY, via="serial")
                 return _ok(via="serial", bytes=len(payload.encode("utf-8")))
-            # Live guests need an inter-key delay so Shift chords stick and a
-            # long HolyC line is not garbled. TCG uses the slower P5 cadence
-            # (feat/p5-webapp-demo 53ded9d); zero stays the unit-test seam.
+            # P5: default-speed HolyC typing garbled under TCG ("6*7;" -> "67;",
+            # Shift-quoted text reordered). P4 already sends TCG keys one at a
+            # time; P3's slower inter-key gap is used on TCG. KVM and the
+            # type_delay_s=0 unit seam keep their existing speed.
             accel = _accel(rt.qmp)
             delay = _typing_delay(rt, accel)
             typed = type_text(payload, delay_s=delay)
@@ -674,9 +678,11 @@ def holyc(source: str, *, via: str = "auto") -> dict[str, Any]:
                 via="type",
                 typed=typed.get("typed"),
                 bytes=len(payload.encode("utf-8")),
-                accel=accel or None,
+                delay_s=delay,
                 key_delay_s=delay,
+                accel=accel or "unknown",
                 tcg_slow=bool(delay and accel != "kvm"),
+                per_key=bool(delay and accel != "kvm"),
             )
     except ScreenError as exc:
         return exc.envelope
