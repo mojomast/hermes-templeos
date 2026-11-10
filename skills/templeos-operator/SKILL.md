@@ -1,12 +1,13 @@
 ---
 name: templeos-operator
 description: >-
-  Skill id templeos:templeos-operator. Load it with
-  skill_view("templeos:templeos-operator"). Drive a local TempleOS-family
-  QEMU guest (default TinkerOS 5.20-rc10) with the four templeos_* tools,
-  then look or read_text. Open the TempleOS Desktop pane so the user can
-  watch and Take control or Hand back. Networking is always off.
-version: "0.1.0"
+  Skill id templeos:templeos-operator. Load with
+  skill_view("templeos:templeos-operator") whenever the user mentions TempleOS,
+  TinkerOS, ZealOS, HolyC, or the TempleOS pane. Drive the local QEMU guest
+  ONLY with templeos_vm / templeos_screen / templeos_input / templeos_files
+  (discover via tool_search if deferred). Never write VNC clients or dial
+  plugin-data sockets. Prefer templeos_input op=holyc for HolyC one-liners.
+version: "0.1.2"
 author: mojomast
 license: MIT
 compatibility: >-
@@ -15,15 +16,30 @@ compatibility: >-
   opened; otherwise TCG. No secrets. The plugin does not open a dotenv file.
 metadata:
   hermes:
-    tags: [templeos, qemu, desktop]
+    tags: [templeos, qemu, desktop, holyc, tinkeros]
     category: tools
     related_skills: []
 ---
 
 # TempleOS operator
 
-Drive the local guest with the four tools. Prefer text over screenshots.
-Respect the user when they Take control. Networking stays off.
+Drive the local guest with the four **templeos_*** tools. Prefer text over
+screenshots. Respect Take control. Networking stays off.
+
+## Critical: Tool Search and forbidden workarounds
+
+Hermes **Tool Search** defers plugin tools by default. At the start of any
+TempleOS / TinkerOS / HolyC task:
+
+1. `skill_view("templeos:templeos-operator")` if this skill is not already loaded.
+2. If `templeos_vm` / `templeos_screen` / `templeos_input` / `templeos_files` are
+   not in your visible tool list, call
+   `tool_search(["templeos HolyC TinkerOS", "templeos_input holyc", "templeos_screen read_text"])`
+   (or `tool_call` / `tool_describe` for those names), then use them.
+3. **Never** write a VNC client, dial `~/.hermes/plugin-data/templeos/sockets/*`,
+   run `screendump`/`qemu-img` by hand, or invent a Python framebuffer grab.
+   Those paths time out, race the pane, and bypass the arbiter. The four tools
+   are the only supported API.
 
 ## Tools
 
@@ -36,13 +52,33 @@ Respect the user when they Take control. Networking stays off.
 
 Every call returns a JSON string `{ok, error, code, fix, ...}`.
 
+## HolyC one-liner (the usual ask)
+
+When the user wants the guest to print a string and compute an expression:
+
+1. `templeos_vm op=status` (start if not running).
+2. `templeos_screen op=wait_idle` then `op=read_text` to confirm a `T:/Home>` prompt.
+3. If AutoComplete / System Keys stole focus, `templeos_input op=keys keys=["esc"]`.
+4. **`templeos_input op=holyc`** with the source, e.g.
+   `source: "\"Hello from Hermes\n\"; 6*7;"`.
+   Prefer `holyc` over raw `type`. Default `via=auto` **types** at the prompt
+   (host COM1 open ≠ guest CommInit — serial drops bytes until Comm*). Only
+   pass `via=serial` after `CommInit; CommInit8n1(1,115200);`.
+5. `templeos_screen op=wait_idle` then `op=read_text`. Report the printed line
+   and the numeric result from the text (e.g. Hello from Hermes and 42).
+   Finish in a few tool calls — do not write VNC clients.
+
 ## Loop (do this every time)
 
-1. `templeos_vm op=doctor` if QEMU or the ISO may be missing.
-2. `templeos_vm op=start` (default flavor `tinkeros`).
-3. `templeos_screen op=wait_idle`, then **`read_text` before `look`**.
-4. Act with `templeos_input`. After any consequential `type`, `keys`, `click`, or `holyc`, call **`wait_idle`**, then `read_text` (or one `look` if graphics matter).
-5. If you get `agent_paused`, stop injecting. Tell the user the pane is in Take control or the shared hold-off (~2 s), and wait or ask them to click **Hand back**.
+1. Discover tools (see Tool Search above) if needed.
+2. `templeos_vm op=doctor` if QEMU or the ISO may be missing.
+3. `templeos_vm op=start` (default flavor `tinkeros`).
+4. `templeos_screen op=wait_idle`, then **`read_text` before `look`**.
+5. Act with `templeos_input` (prefer **`holyc`** for HolyC). After any
+   consequential `type`, `keys`, `click`, or `holyc`, call **`wait_idle`**,
+   then `read_text` (or one `look` if graphics matter).
+6. If you get `agent_paused`, stop injecting. Tell the user the pane is in Take
+   control or the shared hold-off (~2 s), and wait or ask them to click **Hand back**.
 
 ### Budgets (per session)
 
@@ -82,7 +118,7 @@ Push `skills/templeos-operator/guest/Xfer.HC` with `templeos_files op=push` once
 ### Keys and menus
 
 - `ret` Enter, `esc` Esc, `f1`–`f10`, arrows as QEMU qcodes.
-- AutoComplete and the System Keys overlay can swallow typing — `wait_idle` + `read_text` after surprises.
+- First-boot "Install onto hard drive" / "Take Tour" prompts are auto-answered **n** after `op=start` (Esc clears AutoComplete focus first). AutoComplete and the System Keys overlay can still swallow typing — `wait_idle` + `read_text` after surprises.
 - Clicks: TinkerOS uses absolute VMMouse (`via=auto`). Stock TempleOS / ZealOS need `MsSet` or relative; absolute QMP events error there.
 
 ## Snapshots before risk

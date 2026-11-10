@@ -29,12 +29,22 @@ def test_manifest_matches_registered_tools_and_skill():
     assert manifest["version"] == __version__ == "0.1.0"
     assert manifest["requires_hermes"] == ">=0.23.0"
     assert manifest["requires_env"] == []
-    assert manifest["provides_hooks"] == []
+    from templeos.companion import HOOK_NAMES
+
+    assert sorted(manifest["provides_hooks"]) == sorted(HOOK_NAMES)
+    assert sorted(ctx.hooks) == sorted(HOOK_NAMES)
     assert sorted(ctx.tools) == sorted(manifest["provides_tools"]) == sorted(TOOL_NAMES)
     assert len(TOOL_NAMES) == 4
     assert "templeos-operator" in ctx.skills
     skill = ctx.skills["templeos-operator"].read_text()
     assert SKILL_ID in skill and skill.startswith("---")
+    # Tool Search hides tool schemas; the system prompt section is the visible steer.
+    assert "templeos-operator" in ctx.prompt_sections
+    section = ctx.prompt_sections["templeos-operator"]["content"]
+    assert "tool_search" in section
+    assert "VNC" in section
+    assert "templeos_input" in section
+    assert "op=holyc" in section
     py = (ROOT / "pyproject.toml").read_text()
     assert f'version = "{manifest["version"]}"' in py
     for dep in manifest.get("python_dependencies") or []:

@@ -103,7 +103,9 @@ def test_start_stop_reset_and_argv(vm_clean, monkeypatch):
     assert (vm_clean / "qemu.pid").read_text().strip() == str(proc.pid)
     assert (vm_clean / "disks" / "tinkeros.qcow2").is_file()
     again = vm.start(flavor="tinkeros")
-    assert again["ok"] is False and again["code"] == "vm_already_running"
+    assert again["ok"] is True and again["running"] is True
+    assert again["pid"] == proc.pid
+    assert again.get("attached") is not True
     reset = vm.reset()
     assert reset["ok"] is True
     assert any(cmd[0] == "system_reset" for cmd in qmp.commands)
@@ -111,6 +113,41 @@ def test_start_stop_reset_and_argv(vm_clean, monkeypatch):
     assert stopped["ok"] is True and stopped["running"] is False
     assert not qemu.is_running(proc)
     assert not (vm_clean / "qemu.pid").exists()
+
+
+def test_start_reattaches_after_runtime_drop(vm_clean, monkeypatch):
+    """A gateway restart drops _runtime but leaves QEMU running; start must rebind."""
+    _pin_iso(vm_clean, monkeypatch)
+    qmp, serial, proc, _captured = _wire(monkeypatch)
+    body = vm.start(flavor="tinkeros")
+    assert body["ok"] is True and body["running"] is True
+
+    from templeos.paths import socket_paths
+    from templeos.screen import get_runtime, unbind
+
+    socks = socket_paths(vm_clean)
+    socks["qmp"].parent.mkdir(parents=True, exist_ok=True)
+    for path in socks.values():
+        if not path.exists():
+            path.write_bytes(b"")
+
+    vm._runtime = None
+    unbind()
+    monkeypatch.setattr(vm, "_pid_is_qemu", lambda pid: pid == proc.pid)
+    monkeypatch.setattr(vm, "_pid_alive", lambda pid: pid == proc.pid)
+
+    qmp2, serial2 = FakeQMP(), FakeSerial()
+    monkeypatch.setattr(vm, "qmp_factory", lambda: qmp2)
+    monkeypatch.setattr(vm, "serial_factory", lambda: serial2)
+    attached = vm.start(flavor="tinkeros")
+    assert attached["ok"] is True
+    assert attached["running"] is True
+    assert attached.get("attached") is True
+    assert attached["pid"] == proc.pid
+    assert qmp2.connected is True
+    assert serial2.connected is True
+    assert get_runtime() is not None
+    assert vm.get_runtime() is not None
 
 
 def test_start_without_iso_is_iso_missing(vm_clean, monkeypatch):

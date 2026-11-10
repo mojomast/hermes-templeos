@@ -1,7 +1,9 @@
 import { jsx, jsxs } from "react/jsx-runtime";
 import { useEffect, useRef, useState } from "react";
-import { createApi, blobUrlFromBase64, revokeUrl, errorText } from "./api.js";
+import { createApi, blobUrlFromBase64, revokeUrl, errorText, isAbortError } from "./api.js";
 import { getHostTransport } from "./host.js";
+import { CompanionControls, TerryCompanionOverlay } from "./companion.js";
+import { HERMES_ASSETS, nextTheme } from "./theme.js";
 import {
   GOLDEN_SNAPSHOT,
   accelLabel,
@@ -22,6 +24,18 @@ import {
 
 function documentIsHidden() {
   return typeof document !== "undefined" && document.visibilityState === "hidden";
+}
+
+function themeStyle(theme) {
+  if (theme !== "hermes") return undefined;
+  return {
+    "--tos-hermes-header": `url("${HERMES_ASSETS.paneHeader}")`,
+    "--tos-hermes-wallpaper": `url("${HERMES_ASSETS.wallpaper}")`,
+    "--tos-hermes-mark": `url("${HERMES_ASSETS.mark}")`,
+    "--tos-hermes-chat": `url("${HERMES_ASSETS.iconChat}")`,
+    "--tos-hermes-nous": `url("${HERMES_ASSETS.iconNous}")`,
+    "--tos-hermes-capy": `url("${HERMES_ASSETS.iconCapy}")`,
+  };
 }
 
 function applyStatus(body, setStatus) {
@@ -47,6 +61,7 @@ function defaultStatus(initial) {
     user_may_input: true,
     width: 640,
     height: 480,
+    companion: { enabled: true, character: "terry", animation: "idle", costume: "base" },
     ...(initial || {}),
   };
 }
@@ -63,6 +78,15 @@ export function TempleOSPane({ transport, initial } = {}) {
   const [focused, setFocused] = useState(!!(initial && initial.focused));
   const [busy, setBusy] = useState((initial && initial.busy) || "");
   const [hidden, setHidden] = useState(!!(initial && initial.hidden));
+  const [companionHidden, setCompanionHidden] = useState(
+    !!(initial && (initial.companionHidden || (initial.status && initial.status.companion && initial.status.companion.hidden)))
+  );
+  const [companionCostume, setCompanionCostume] = useState(
+    (initial && initial.companionCostume) ||
+      (initial && initial.status && initial.status.companion && initial.status.companion.costume) ||
+      "base"
+  );
+  const [theme, setTheme] = useState((initial && initial.theme) || "hermes");
   const [unchanged, setUnchanged] = useState(!!(initial && initial.unchanged));
   const [viewport] = useState((initial && initial.viewport) || { width: 1280, height: 960 });
   const prevUrl = useRef((initial && initial.frameUrl) || "");
@@ -79,12 +103,17 @@ export function TempleOSPane({ transport, initial } = {}) {
   hiddenRef.current = hidden;
 
   function noteError(err) {
-    setError(errorText(err));
+    if (isAbortError(err)) return;
+    const text = errorText(err);
+    if (!text) return;
+    setError(text);
   }
 
   function refreshLog(body) {
     if (body && Array.isArray(body.events)) setLog(body.events);
   }
+
+  const slowRef = useRef(false);
 
   useEffect(() => {
     if (skip) return undefined;
@@ -96,12 +125,17 @@ export function TempleOSPane({ transport, initial } = {}) {
         running: !!(statusRef.current && statusRef.current.running),
         unchanged: unchangedRef.current,
         focused: focusedRef.current,
+        slow: slowRef.current,
       });
       api
         .status()
         .then((body) => {
           if (!cancelled) {
             applyStatus(body, setStatus);
+            if (body && body.companion) {
+              if (typeof body.companion.hidden === "boolean") setCompanionHidden(!!body.companion.hidden);
+              if (body.companion.costume) setCompanionCostume(body.companion.costume);
+            }
             setError("");
           }
         })
@@ -113,14 +147,20 @@ export function TempleOSPane({ transport, initial } = {}) {
         .then((body) => {
           if (!cancelled) refreshLog(body);
         })
-        .catch(() => {});
+        .catch((err) => {
+          if (isAbortError(err)) return;
+        });
       if (now - lastFrameAt.current < interval) return;
       lastFrameAt.current = now;
       const since = shaRef.current;
+      const frameStarted = Date.now();
       api
         .frame(since ? { since } : undefined)
         .then((body) => {
           if (cancelled) return;
+          const elapsed = Date.now() - frameStarted;
+          // Back off when the host is slow so we never stampede /frame.
+          slowRef.current = elapsed >= 500;
           if (body && body.sha256) shaRef.current = body.sha256;
           if (body && body.unchanged) {
             setUnchanged(true);
@@ -133,8 +173,10 @@ export function TempleOSPane({ transport, initial } = {}) {
           prevUrl.current = next;
           setFrameUrl(next);
         })
-        .catch(() => {
-          /* look may be soft-fail; status still drives the chip */
+        .catch((err) => {
+          if (isAbortError(err)) return;
+          slowRef.current = true;
+          /* soft-fail; status still drives the chip */
         });
     };
     tick();
@@ -237,9 +279,16 @@ export function TempleOSPane({ transport, initial } = {}) {
 
   const size = guestSize(status.flavor, status);
   const forced = initial && initial.scale;
+  const companionVisible = !companionHidden && !(status.companion && status.companion.enabled === false);
+  // Reserve the dock column (and its speech-bubble lane) plus the log column
+  // before picking an integer scale, so Terry and the bubble never push the
+  // guest display or the log off-screen.
+  const dockPx = companionVisible ? 220 : 0;
+  const logPx = 272;
+  const widthRoom = (viewport.width || 0) - 28 - dockPx - logPx;
   const scaled = forced
     ? { scale: Number(forced), width: size.width * Number(forced), height: size.height * Number(forced) }
-    : integerScale(Math.max(size.width, (viewport.width || 0) - 24), Math.max(size.height, (viewport.height || 0) - 200), size.width, size.height);
+    : integerScale(Math.max(size.width, widthRoom), Math.max(size.height, (viewport.height || 0) - 200), size.width, size.height);
   const chip = statusSummary(status);
   const drive = drivingChip(status);
   const onboarding = needsOnboarding(status);
@@ -253,6 +302,8 @@ export function TempleOSPane({ transport, initial } = {}) {
     "data-testid": "pane",
     "data-mode": status.mode,
     "data-running": running ? "1" : "0",
+    "data-theme": theme,
+    style: themeStyle(theme),
     children: [
       jsxs("header", {
         className: "tos-top",
@@ -264,7 +315,7 @@ export function TempleOSPane({ transport, initial } = {}) {
               jsxs("div", {
                 children: [
                   jsx("strong", { children: "TempleOS" }),
-                  jsx("em", { children: "Shared guest" }),
+                  jsx("em", { children: theme === "hermes" ? "Temple of Hermes" : "Shared guest" }),
                 ],
               }),
             ],
@@ -278,6 +329,15 @@ export function TempleOSPane({ transport, initial } = {}) {
             "data-mode": status.mode,
             "data-paused": status.agent_paused ? "1" : "0",
             children: chip,
+          }),
+          jsx("button", {
+            type: "button",
+            className: "tos-btn tos-theme",
+            "data-testid": "theme-toggle",
+            "aria-label": "Switch pane theme",
+            title: theme === "hermes" ? "Switch to VGA chrome" : "Switch to Temple of Hermes theme",
+            onClick: () => setTheme(nextTheme(theme)),
+            children: theme === "hermes" ? "Temple" : "VGA",
           }),
         ],
       }),
@@ -301,6 +361,23 @@ export function TempleOSPane({ transport, initial } = {}) {
           }),
           jsx("button", { type: "button", className: "tos-btn tos-primary", "data-testid": "take-control", disabled: disabled || status.mode === "user", onClick: () => setMode("take"), children: "Take control" }),
           jsx("button", { type: "button", className: "tos-btn", "data-testid": "hand-back", disabled: disabled || status.mode === "shared", onClick: () => setMode("handback"), children: "Hand back" }),
+          jsx(CompanionControls, {
+            hidden: companionHidden,
+            enabled: !(status.companion && status.companion.enabled === false),
+            costume: companionCostume,
+            costumes: (status.companion && status.companion.costumes) || ["base", "cowboy", "wizard", "chef"],
+            onToggleHidden: () => {
+              setCompanionHidden((prev) => {
+                const next = !prev;
+                api.companionSet({ hidden: next }).catch(() => {});
+                return next;
+              });
+            },
+            onCostume: (name) => {
+              setCompanionCostume(name);
+              api.companionSet({ costume: name }).catch(() => {});
+            },
+          }),
         ],
       }),
       jsx("div", {
@@ -332,6 +409,10 @@ export function TempleOSPane({ transport, initial } = {}) {
       jsxs("div", {
         className: "tos-body",
         children: [
+          jsxs("div", {
+            className: "tos-stage-row",
+            "data-testid": "stage-row",
+            children: [
           jsxs("div", {
             className: "tos-stage",
             children: [
@@ -372,6 +453,18 @@ export function TempleOSPane({ transport, initial } = {}) {
                 : jsx("p", { className: "tos-hatch tos-hatch-idle", "data-testid": "keyboard-hatch", children: "Click the screen to type. Esc releases the keyboard." }),
             ],
           }),
+              jsx(TerryCompanionOverlay, {
+                api: api,
+                animation: (status.companion && status.companion.animation) || "idle",
+                costume: companionCostume,
+                hidden: companionHidden,
+                enabled: !(status.companion && status.companion.enabled === false),
+                speech: (status.companion && status.companion.speech) || null,
+                sprite: (initial && initial.companionSprite) || "",
+                spriteRow: (initial && initial.companionSpriteRow) || 0,
+              }),
+            ],
+          }),
           jsxs("section", {
             className: "tos-log",
             "data-testid": "agent-log",
@@ -399,7 +492,7 @@ export function TempleOSPane({ transport, initial } = {}) {
   });
 }
 
-const POLL_TICK = 80;
+const POLL_TICK = 100;
 
 function modeButton(mode, label, current, disabled, setMode) {
   const op = mode === "user" ? "take" : mode === "shared" ? "handback" : "watch";

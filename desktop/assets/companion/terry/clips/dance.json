@@ -1,0 +1,11 @@
+{
+  "image": "dance.png",
+  "cell": [
+    192,
+    208
+  ],
+  "duration_ms": 7200,
+  "loop": true,
+  "count": 72,
+  "frame_ms": 100.0
+}

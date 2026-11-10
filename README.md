@@ -98,6 +98,8 @@ No secrets. No `requires_env`. No dotenv.
 
 ## Tools
 
+Hermes **Tool Search** defers plugin tools by default, so their schemas are not in the first tool list. The plugin registers a short system prompt section that tells the agent to `tool_search(["templeos"])` or `skill_view("templeos:templeos-operator")` and never to write a VNC client or dial plugin-data sockets. Desktop/web app and `api_server` sessions should have the `templeos` toolset enabled (`platform_toolsets.cli` already lists it; `api_server` gets plugin toolsets by default unless a saved list omitted them). Prefer `templeos_input op=holyc` for HolyC one-liners. If QEMU is still running after a gateway restart, `templeos_vm op=start` reattaches instead of failing with `vm_already_running`.
+
 Four tools, registered from `templeos/tools.py` under toolset `templeos`. Every handler returns a JSON string `{ok, error, code, fix, ...}`.
 
 | Tool | Ops | Role |
@@ -121,7 +123,9 @@ The Hermes Desktop pane (`desktop/plugin.js`, needs Hermes `>=0.23.0`) talks onl
 | Shared (default) | Both can type. Your key/click pauses the agent ~2 s. |
 | Take control | Agent tools return `agent_paused` until **Hand back**. |
 
-Frames are PNG, integer-scaled from 640×480 (ZealOS may present 1024×768). About 10–15 fps is enough. Blob URLs are revoked when the next frame arrives.
+Frames are PNG, integer-scaled from 640×480 (ZealOS may present 1024×768). The pane polls at most ~4–5 fps (slower when idle, hidden, or the host is slow); `/frame` is served from a background cache so capture never blocks the Hermes gateway. Blob URLs are revoked when the next frame arrives.
+
+On a fresh ISO boot (no `golden` snapshot), `templeos_vm op=start` auto-dismisses the first-boot **Install onto hard drive** and **Take Tour** prompts in the background (Esc clears AutoComplete focus, then `n` + Enter). Restore a snapshot to skip them.
 
 <p>
 <img src="docs/images/pane-shared.png" alt="Shared mode: TinkerOS desktop in the TempleOS pane" width="800">
@@ -211,7 +215,7 @@ node scripts/build_desktop.mjs --check
 python3 evals/measure_schemas.py
 ```
 
-`evals/measure_schemas.py` prints one integer: o200k tokens of the four tool schemas. Keep them under about 2,000. The baseline for this tree is **825** o200k; the delta vs that baseline should stay **0** (still four tools).
+`evals/measure_schemas.py` prints one integer: o200k tokens of the four tool schemas. Keep them under about 2,000. This tree measures **892** o200k (**+67** vs the 0.1.0 baseline of 825) from longer tool descriptions that steer Tool Search; still four tools.
 
 Live QEMU tests are marked `@pytest.mark.smoke` and skipped unless `TEMPLEOS_SMOKE=1` and a pinned ISO already exists. Do not download ISOs in CI by default. The box `/dev/kvm` is often unusable, so smokes run in TCG.
 

@@ -28,7 +28,7 @@ from templeos.tools import CODE_FIX, Code
 
 try:
     from PIL import Image
-except ImportError:  # pragma: no cover - add pillow>=10,<12 to the plugin pin
+except ImportError:  # pragma: no cover - add pillow>=10,<14 to the plugin pin
     Image = None  # type: ignore[assignment]
 
 
@@ -121,7 +121,13 @@ ZEAL_FONT: dict[int, int] = {
     48: 0x001e23252931211e,
     49: 0x001f040404040604,
     50: 0x003f02040810211e,
+    51: 0x001e21201c20211e,
+    52: 0x0010103f11121418,
     53: 0x001e2120201f013f,
+    54: 0x001e21211f01021c,
+    55: 0x000202020408101f,
+    56: 0x001e21211e21211e,
+    57: 0x000e10203e21211e,
     58: 0x000c0c00000c0c00,
     59: 0x060c0c00000c0c00,
     62: 0x00060c1830180c06,
@@ -130,18 +136,24 @@ ZEAL_FONT: dict[int, int] = {
     67: 0x001e21010101211e,
     68: 0x001f21212121211f,
     69: 0x003f01011f01013f,
+    70: 0x000101011f01013f,
     72: 0x002121213f212121,
     73: 0x001f04040404041f,
     77: 0x00414141495d7763,
     78: 0x0021213129252321,
     79: 0x003e41414141413e,
+    80: 0x000101011f21211f,
     81: 0x002e19312921211e,
+    82: 0x002121111f21211f,
     83: 0x001e21201e01211e,
     84: 0x000404040404041f,
+    85: 0x001e212121212121,
+    86: 0x000c122121212121,
     90: 0x003f01020c10203f,
     92: 0x00406030180c0603,
     95: 0x00ff000000000000,
     97: 0x003e213e201e0000,
+    98: 0x001f2121211f0101,
     99: 0x001e0101011e0000,
     100: 0x003e2121213e2020,
     101: 0x003e013f211e0000,
@@ -163,8 +175,6 @@ ZEAL_FONT: dict[int, int] = {
     119: 0x0036494949410000,
     120: 0x0021120c12210000,
     121: 0x1e203e2121210000,
-    80: 0x000101011f21211f,
-    98: 0x001f2121211f0101,
 }
 ZEAL_ORIGIN = (8, 0)
 
@@ -202,6 +212,9 @@ class Runtime:
     state_dir: Path | None = None
     last_pointer: tuple[int, int] | None = None
     type_delay_s: float = 0.09
+    # Host COM1 open != guest CommInit. holyc via=auto types until this is True
+    # (set after a successful Comm* / files protocol exchange).
+    guest_serial_ready: bool = False
 
 
 _RUNTIME: Runtime | None = None
@@ -306,7 +319,7 @@ def _require_pil() -> Any:
         raise ScreenError(
             "Pillow is required to decode screendumps and encode PNG frames.",
             Code.DOCTOR_FAILED,
-            "Install pillow>=10,<12 (add it to the plugin's pyproject pin).",
+            "Install pillow>=10,<14 (add it to the plugin's pyproject pin).",
         )
     return Image
 

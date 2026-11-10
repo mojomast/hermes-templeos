@@ -11,12 +11,32 @@ import { TempleOSPane } from "./src/ui/pane.js";
 import { resetFiber, rerender } from "../tests/js/shims/jsx-runtime.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const OUT = path.join(ROOT, "desktop", "screenshots");
+const OUT = process.env.TEMPLEOS_SHOT_DIR
+  ? path.resolve(process.env.TEMPLEOS_SHOT_DIR)
+  : path.join(ROOT, "desktop", "screenshots");
 const CSS = readFileSync(path.join(ROOT, "desktop", "src", "ui", "styles.css"), "utf8");
-const BAKEOFF = process.env.TEMPLEOS_SHOTS || "/workspace/templeos-bakeoff/shots";
+const FRAMES = process.env.TEMPLEOS_SHOTS || path.join(ROOT, "tests", "fixtures", "frames");
+const ONLY = (process.env.TEMPLEOS_SHOT_ONLY || "")
+  .split(",")
+  .map((name) => name.trim())
+  .filter(Boolean);
+
+function assetDataUrl(relative) {
+  const bytes = readFileSync(path.join(ROOT, relative));
+  return "data:image/png;base64," + bytes.toString("base64");
+}
+
+function findChrome() {
+  if (process.env.CHROME) return process.env.CHROME;
+  for (const name of ["google-chrome", "chromium", "chromium-browser"]) {
+    const probe = spawnSync("which", [name], { encoding: "utf8" });
+    if (probe.status === 0) return name;
+  }
+  return "google-chrome";
+}
 
 function frameDataUrl(name) {
-  const file = path.join(BAKEOFF, name);
+  const file = path.join(FRAMES, name);
   const bytes = readFileSync(file);
   return "data:image/png;base64," + bytes.toString("base64");
 }
@@ -103,6 +123,7 @@ function render(initial) {
 
 const tinkeros = frameDataUrl("tinkeros-mouse-click.png");
 const prompt = frameDataUrl("tinkeros-holyc-prompt.png");
+const terryAtlas = assetDataUrl("desktop/assets/companion/terry/atlas.png");
 
 const ready = {
   running: true,
@@ -220,11 +241,150 @@ const shots = {
       log,
     }),
   },
+  "pane-theme-hermes-running.png": {
+    size: "1680,1180",
+    html: render({
+      theme: "hermes",
+      scale: 2,
+      viewport: { width: 1680, height: 1180 },
+      frameUrl: tinkeros,
+      status: ready,
+    }),
+  },
+  "pane-theme-hermes-onboarding.png": {
+    size: "1280,1100",
+    html: render({
+      theme: "hermes",
+      status: {
+        running: false,
+        mode: "shared",
+        agent_paused: false,
+        setup_needed: true,
+        ready: false,
+        flavor: "tinkeros",
+        flavor_name: "TinkerOS 5.20-rc10",
+        accel: null,
+        kvm: false,
+        snapshot: null,
+        checks: { qemu: false, iso: false, kvm: "unknown" },
+      },
+    }),
+  },
+  "pane-theme-hermes-user-driving.png": {
+    size: "1680,1180",
+    html: render({
+      theme: "hermes",
+      scale: 2,
+      focused: true,
+      viewport: { width: 1680, height: 1180 },
+      frameUrl: prompt,
+      status: {
+        ...ready,
+        mode: "user",
+        agent_paused: true,
+        user_may_input: true,
+      },
+    }),
+  },
+  "pane-theme-hermes-agent-log.png": {
+    size: "1680,1180",
+    html: render({
+      theme: "hermes",
+      scale: 2,
+      viewport: { width: 1680, height: 1180 },
+      frameUrl: tinkeros,
+      status: {
+        ...ready,
+        agent_busy: true,
+        accel: "kvm",
+        kvm: true,
+      },
+      log,
+    }),
+  },
+  "pane-theme-vga-running.png": {
+    size: "1680,1180",
+    html: render({
+      theme: "vga",
+      scale: 2,
+      viewport: { width: 1680, height: 1180 },
+      frameUrl: tinkeros,
+      status: ready,
+    }),
+  },
+  "terry-hermes-dark.png": {
+    size: "1920,1240",
+    html: render({
+      theme: "hermes",
+      scale: 2,
+      viewport: { width: 1920, height: 1240 },
+      frameUrl: tinkeros,
+      companionSprite: terryAtlas,
+      companionSpriteRow: 3,
+      status: {
+        ...ready,
+        companion: {
+          enabled: true,
+          hidden: false,
+          character: "terry",
+          animation: "greet",
+          costume: "base",
+          speech: { active: true, text: "Hello from Hermes" },
+        },
+      },
+    }),
+  },
+  "terry-hermes-typing.png": {
+    size: "1920,1240",
+    html: render({
+      theme: "hermes",
+      scale: 2,
+      viewport: { width: 1920, height: 1240 },
+      frameUrl: tinkeros,
+      companionSprite: terryAtlas,
+      companionSpriteRow: 3,
+      status: {
+        ...ready,
+        agent_busy: true,
+        companion: {
+          enabled: true,
+          hidden: false,
+          character: "terry",
+          animation: "typing",
+          costume: "base",
+          speech: { active: false, text: "" },
+        },
+      },
+      log,
+    }),
+  },
+  "terry-hermes-hidden.png": {
+    size: "1920,1240",
+    html: render({
+      theme: "hermes",
+      scale: 2,
+      viewport: { width: 1920, height: 1240 },
+      frameUrl: tinkeros,
+      companionHidden: true,
+      status: {
+        ...ready,
+        companion: {
+          enabled: true,
+          hidden: true,
+          character: "terry",
+          animation: "idle",
+          costume: "base",
+          speech: { active: false, text: "" },
+        },
+      },
+    }),
+  },
 };
 
 mkdirSync(OUT, { recursive: true });
-const chrome = process.env.CHROME || "google-chrome";
+const chrome = findChrome();
 for (const [name, shot] of Object.entries(shots)) {
+  if (ONLY.length && !ONLY.includes(name)) continue;
   const file = path.join("/tmp", name.replace(".png", ".html"));
   writeFileSync(file, shot.html);
   const dest = path.join(OUT, name);

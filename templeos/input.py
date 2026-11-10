@@ -4,9 +4,9 @@ Slice B (feat/screen-input) implements this module.
 
 click uses QMP absolute events when VMMouse is current (TinkerOS default).
 On stock TempleOS or ZealOS, absolute events error with 'input handler not
-found'; use MsSet plus a button, or relative PS/2. holyc types source, or
-writes it to COM1 when Comm* is live (TinkerOS after CommInit + CommInit8n1).
-Cap HolyC source size.
+found'; use MsSet plus a button, or relative PS/2. holyc types source at the
+prompt by default; writes COM1 only when via=serial or guest_serial_ready
+(TinkerOS after CommInit + CommInit8n1). Cap HolyC source size.
 """
 
 from __future__ import annotations
@@ -205,15 +205,101 @@ def _require_qmp() -> Any:
     return require_runtime().qmp
 
 
-def _send_key(qmp: Any, codes: Sequence[str], *, hold_ms: int = DEFAULT_HOLD_MS) -> None:
-    names = [str(c) for c in codes]
+_MODIFIER_QCODES = frozenset({"shift", "shift_r", "shift_l", "ctrl", "ctrl_r", "alt", "alt_r", "altgr"})
+_SHIFT_QCODES = frozenset({"shift", "shift_r", "shift_l"})
+
+
+def _accel(qmp: Any) -> str:
+    """Best-effort accel name for the live guest ('' when unknown)."""
+    try:
+        from templeos import vm as vm_mod
+
+        rt = vm_mod.get_runtime()
+        accel = getattr(rt, "accel", None)
+        if accel:
+            return str(accel).lower()
+    except Exception:
+        pass
+    accel = getattr(qmp, "accel", None)
+    return str(accel).lower() if accel else ""
+
+
+def _shifted_chord(names: Sequence[str]) -> bool:
+    """A Shift modifier plus at least one real key (e.g. shift+apostrophe)."""
+    has_shift = any(c in _SHIFT_QCODES for c in names)
+    has_key = any(c not in _MODIFIER_QCODES for c in names)
+    return has_shift and has_key
+
+
+def _send_key_cmd(qmp: Any, names: Sequence[str], *, hold_ms: int) -> None:
     if hasattr(qmp, "send_key"):
         qmp.send_key(list(names), hold_ms=hold_ms)
     else:
         keys = [{"type": "qcode", "data": c} for c in names]
-        qmp.cmd("send-key", keys=keys, **{"hold-time": hold_ms})
+        qmp.cmd("send-key", keys=keys, **{"hold-time": int(hold_ms)})
+
+
+def _send_key_sequential(qmp: Any, names: Sequence[str], *, hold_s: float) -> None:
+    """Press keys down in order, hold, then release in reverse order.
+
+    Under TCG batched QMP key events can reach the guest out of order, with
+    Shift already released (``"`` becomes a bare apostrophe and ``*`` a bare
+    8). Sending every down/up as its own QMP event and holding the chord long
+    enough gives the slow guest time to register modifiers before the character.
+    This is the production slow-TCG path; no test hook is involved.
+    """
+    for code in names:
+        _input_events(
+            qmp,
+            [{"type": "key", "data": {"down": True, "key": {"type": "qcode", "data": code}}}],
+        )
+    if hold_s > 0:
+        time.sleep(hold_s)
+    for code in reversed(names):
+        _input_events(
+            qmp,
+            [{"type": "key", "data": {"down": False, "key": {"type": "qcode", "data": code}}}],
+        )
+
+
+def _send_key(qmp: Any, codes: Sequence[str], *, hold_ms: int = DEFAULT_HOLD_MS) -> None:
+    """Press qcodes. Modifier chords use input-send-event down, a short hold, then up.
+
+    TinkerOS under TCG can drop Shift from a batched input-send-event chord, so
+    slow TCG falls back to per-key key events with an adaptive hold. Fast hosts
+    (KVM) and the zero-hold unit seam keep the one-packet down/up event path.
+    """
+    names = [str(c) for c in codes]
+    if hold_ms > 0 and _accel(qmp) != "kvm":
+        # Slow TCG: deterministic per-key events beat send-key's async holds.
+        if _shifted_chord(names):
+            hold_s = max(0.12, min(0.30, float(hold_ms) / 1000.0))
+        else:
+            hold_s = max(0.02, min(0.06, float(hold_ms) / 1000.0))
+        _send_key_sequential(qmp, names, hold_s=hold_s)
+        if any(c in _SHIFT_QCODES for c in names):
+            _unstick_shift(qmp)
+        return
+    use_events = len(names) > 1 or any(c in _MODIFIER_QCODES for c in names)
+    if use_events and (hasattr(qmp, "input_send_event") or hasattr(qmp, "cmd")):
+        downs = [
+            {"type": "key", "data": {"down": True, "key": {"type": "qcode", "data": c}}}
+            for c in names
+        ]
+        ups = [
+            {"type": "key", "data": {"down": False, "key": {"type": "qcode", "data": c}}}
+            for c in reversed(names)
+        ]
+        _input_events(qmp, downs)
+        if hold_ms > 0:
+            time.sleep(min(0.05, hold_ms / 1000.0))
+        _input_events(qmp, ups)
+        if any(c in _SHIFT_QCODES for c in names):
+            _unstick_shift(qmp)
+        return
+    _send_key_cmd(qmp, names, hold_ms=hold_ms)
     # send-key can leave Shift latched on TinkerOS; release both shift keys.
-    if any(c in {"shift", "shift_r", "shift_l"} for c in names):
+    if any(c in _SHIFT_QCODES for c in names):
         _unstick_shift(qmp)
 
 
@@ -271,9 +357,11 @@ def type_text(text: str, *, delay_s: float = DEFAULT_DELAY_S) -> dict[str, Any]:
         with arbiter.queue():
             qmp = _require_qmp()
             typed = 0
+            # delay_s=0 is the unit-test seam: skip the TCG hold as well.
+            key_hold = 0 if delay_s <= 0 else DEFAULT_HOLD_MS
             for i, ch in enumerate(text):
                 codes = qcodes_for(ch)
-                _send_key(qmp, codes)
+                _send_key(qmp, codes, hold_ms=key_hold)
                 typed += 1
                 if delay_s > 0:
                     time.sleep(delay_s)
@@ -410,8 +498,14 @@ def click(
     button: str = "left",
     via: str = "auto",
     flavor: str | None = None,
+    settle_s: float | None = None,
+    hold_s: float | None = None,
 ) -> dict[str, Any]:
-    """Click guest coordinates. via=auto picks vmmouse, MsSet, or relative."""
+    """Click guest coordinates. via=auto picks vmmouse, MsSet, or relative.
+
+    settle_s/hold_s override the live defaults. The pane passes short values so
+    /input never blocks the Hermes gateway behind a 250 ms sleep.
+    """
     if button not in BUTTONS:
         raise ValueError("button must be left, right, or middle.")
     if not isinstance(x, int) or not isinstance(y, int):
@@ -444,9 +538,15 @@ def click(
                 return info
             # Bake-off: wait after the absolute move, then a short button hold.
             # Keep this at zero when type_delay_s is 0 so unit tests stay fast.
-            # Live clicks (type_delay_s > 0) settle, then hold ~150 ms.
-            settle = 0.0 if not rt.type_delay_s else max(0.25, float(rt.type_delay_s) * 3)
-            hold = 0.0 if not rt.type_delay_s else 0.15
+            # Live agent clicks (type_delay_s > 0) settle, then hold ~150 ms.
+            if settle_s is None:
+                settle = 0.0 if not rt.type_delay_s else max(0.25, float(rt.type_delay_s) * 3)
+            else:
+                settle = max(0.0, float(settle_s))
+            if hold_s is None:
+                hold = 0.0 if not rt.type_delay_s else 0.15
+            else:
+                hold = max(0.0, float(hold_s))
             if settle:
                 time.sleep(settle)
             _click_button(qmp, button, hold_s=hold)
@@ -501,9 +601,13 @@ def _serial_ready(serial: Any) -> bool:
 
 
 def holyc(source: str, *, via: str = "auto") -> dict[str, Any]:
-    """Send HolyC. Prefer COM1 when Comm* is live, else type it.
+    """Send HolyC. Type at the prompt unless guest Comm* is known live.
 
-    ``via`` is auto, serial, or type. Reject sources larger than HOLYC_MAX_BYTES.
+    ``via`` is auto, serial, or type. ``auto`` prefers keyboard typing because a
+    host-open COM1 socket does not mean the guest ran CommInit — serial writes
+    are silently dropped until then. Use ``via=serial`` only after CommInit +
+    CommInit8n1 (or when Runtime.guest_serial_ready is set). Reject sources
+    larger than HOLYC_MAX_BYTES.
     """
     if not isinstance(source, str) or source == "":
         raise ValueError("holyc requires a non-empty source string")
@@ -522,7 +626,10 @@ def holyc(source: str, *, via: str = "auto") -> dict[str, Any]:
         with arbiter.queue():
             rt = require_runtime()
             serial = rt.serial
-            use_serial = via == "serial" or (via == "auto" and _serial_ready(serial))
+            guest_ready = bool(getattr(rt, "guest_serial_ready", False))
+            use_serial = via == "serial" or (
+                via == "auto" and _serial_ready(serial) and guest_ready
+            )
             if via == "serial" and not _serial_ready(serial):
                 return _fail(
                     "COM1 is not open. Keep the serial socket connected and, on TinkerOS, call CommInit then CommInit8n1.",
@@ -535,7 +642,13 @@ def holyc(source: str, *, via: str = "auto") -> dict[str, Any]:
                 except Exception as exc:
                     return _fail(str(exc) or "Serial write failed.", Code.SERIAL_NOT_READY, via="serial")
                 return _ok(via="serial", bytes=len(payload.encode("utf-8")))
-            typed = type_text(payload, delay_s=0.0 if rt.type_delay_s == 0.09 else rt.type_delay_s)
+            # Live guests need a short inter-key delay so Shift chords stick under TCG.
+            # Unit tests bind type_delay_s=0 and stay instantaneous.
+            if not rt.type_delay_s:
+                delay = 0.0
+            else:
+                delay = max(0.02, min(float(rt.type_delay_s), 0.05))
+            typed = type_text(payload, delay_s=delay)
             if typed.get("ok") is False:
                 return typed
             return _ok(via="type", typed=typed.get("typed"), bytes=len(payload.encode("utf-8")))

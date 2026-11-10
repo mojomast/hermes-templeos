@@ -32,6 +32,7 @@ from templeos.api import (
     vm_action,
 )
 from templeos.arbiter import reset_arbiter
+from templeos.frame_cache import reset_frame_cache
 
 TINY_PNG = (
     "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=="
@@ -43,6 +44,7 @@ TINY_SHA = hashlib.sha256(base64.b64decode(TINY_PNG)).hexdigest()
 def fresh(tos_home):
     reset_arbiter()
     reset_activity_log()
+    reset_frame_cache()
     return tos_home
 
 
@@ -151,12 +153,14 @@ def test_user_input_records_hold_off_and_watch_only(fresh):
 def test_user_input_injects_and_marks_arbiter(fresh, monkeypatch):
     seen = {}
 
-    def click(x, y, button="left"):
+    def click(x, y, button="left", **kwargs):
         seen["point"] = (x, y, button)
+        seen["click_kwargs"] = kwargs
         return {"ok": True, "x": x, "y": y}
 
-    def type_text(text):
+    def type_text(text, delay_s=0.0, **kwargs):
         seen["text"] = text
+        seen["delay_s"] = delay_s
         return {"ok": True, "text": text}
 
     monkeypatch.setattr("templeos.input.click", click)
@@ -307,7 +311,10 @@ def test_router_mounts_when_fastapi_is_available(fresh, monkeypatch):
     )
     monkeypatch.setattr("templeos.vm.status", lambda: _running_status())
     monkeypatch.setattr("templeos.vm.start", lambda **k: _running_status())
-    monkeypatch.setattr("templeos.input.click", lambda x, y, button="left": {"ok": True, "x": x, "y": y})
+    monkeypatch.setattr(
+        "templeos.input.click",
+        lambda x, y, button="left", **kwargs: {"ok": True, "x": x, "y": y},
+    )
 
     app = FastAPI()
     app.include_router(create_router())

@@ -1,0 +1,11 @@
+{
+  "image": "talking.png",
+  "cell": [
+    192,
+    208
+  ],
+  "duration_ms": 2600,
+  "loop": true,
+  "count": 24,
+  "frame_ms": 108.33333333333333
+}

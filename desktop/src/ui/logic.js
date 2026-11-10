@@ -13,12 +13,13 @@ export const FLAVOR_LABELS = {
   zealos: "ZealOS",
 };
 
-/** Visible running: ~10–15 fps. Idle or hidden backs off. */
-export const POLL_VISIBLE_MS = 80;
-export const POLL_FOCUSED_MS = 70;
-export const POLL_IDLE_MS = 400;
-export const POLL_STOPPED_MS = 800;
-export const POLL_HIDDEN_MS = 2000;
+/** Cap pane polls so /frame never starves the Hermes gateway (≤5 fps). */
+export const POLL_VISIBLE_MS = 250;
+export const POLL_FOCUSED_MS = 200;
+export const POLL_IDLE_MS = 1000;
+export const POLL_STOPPED_MS = 1500;
+export const POLL_HIDDEN_MS = 5000;
+export const POLL_SLOW_MS = 2000;
 
 export function guestSize(flavor, status) {
   if (status && Number(status.width) > 0 && Number(status.height) > 0) {
@@ -147,8 +148,10 @@ export function pollIntervalMs(state) {
   const running = !!(state && state.running);
   const unchanged = !!(state && state.unchanged);
   const focused = !!(state && state.focused);
+  const slow = !!(state && state.slow);
   if (hidden) return POLL_HIDDEN_MS;
   if (!running) return POLL_STOPPED_MS;
+  if (slow) return Math.max(POLL_SLOW_MS, POLL_IDLE_MS);
   if (unchanged && !focused) return POLL_IDLE_MS;
   if (focused) return POLL_FOCUSED_MS;
   return POLL_VISIBLE_MS;

@@ -9,7 +9,7 @@ description: >-
   plugin data dir, and may fetch a pinned ISO from its official URL (SHA-256
   verified). Networking is always off (-nic none). The Desktop pane talks only
   through ctx.rest. HolyC and serial input can drive the guest. QEMU and ISOs
-  are not bundled. This is a child hypervisor, not an OS sandbox.
+  are not bundled. This is a child hypervisor, not an OS sandbox. Includes an optional Terry companion sprite (fan tribute to Terry A. Davis; enabled by default; hide in the pane or set companion: off / TEMPLEOS_COMPANION=off). No official TempleOS affiliation.
 author: mojomast
 license: MIT
 requires_hermes: ">=0.23.0"
@@ -26,9 +26,38 @@ provides_tools:
   - templeos_screen
   - templeos_input
   - templeos_files
-provides_hooks: []
+provides_hooks:
+  - pre_tool_call
+  - post_tool_call
+  - pre_llm_call
+  - post_llm_call
+  - on_stream_start
+  - on_stream_delta
+  - on_stream_end
+  - api_request_error
+  - pre_approval_request
+  - post_approval_response
+  - on_human_input_request
+  - on_human_input_resolved
+  - on_session_start
+  - on_session_end
+  - agent_loop_stopped
+  - subagent_start
+  - subagent_stop
 requires_env: []
 # Pillow is required for screendumps and PNG frames. qemu-system-x86_64 and
 # qemu-img must be on PATH (system package). pyproject.toml wins if both lists exist.
+config_schema:
+  companion:
+    type: str
+    default: terry
+    description: >-
+      Terry companion sprite. "terry" (default) enables the tribute overlay;
+      "off" disables it. TEMPLEOS_COMPANION env overrides. Pane hide toggle
+      only conceals the sprite.
+  companion_costume:
+    type: str
+    default: base
+    description: Optional costume — base, cowboy, wizard, or chef.
 python_dependencies:
-  - "pillow>=10,<12"
+  - "pillow>=10,<14"
