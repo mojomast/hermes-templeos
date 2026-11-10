@@ -13,3 +13,7 @@ product and invent no quotes.
 
 Enabled by default in the plugin. Hide in the pane, or set `companion: off` /
 `TEMPLEOS_COMPANION=off`.
+
+Revision 2 adds stronger chin/jaw stubble, a cleaner fallback smoke layer, a
+cushioned success jump and a smoother failure recovery. Optional rich presets
+from the art handoff are not wired into the plugin yet.

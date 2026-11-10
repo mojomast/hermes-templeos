@@ -1,5 +1,5 @@
 {
-  "version": 1,
+  "version": 2,
   "image": "atlas.png",
   "width": 1536,
   "height": 1872,
@@ -435,5 +435,6 @@
         }
       ]
     }
-  ]
+  ],
+  "revision": "v2: shared stubble, success motion and smoke layer order"
 }
