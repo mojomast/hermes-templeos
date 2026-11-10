@@ -1,3 +1,3 @@
-import { useEffect, useRef, useState } from "./jsx-runtime.mjs";
+import { useEffect, useMemo, useRef, useState } from "./jsx-runtime.mjs";
 
-export { useEffect, useRef, useState };
+export { useEffect, useMemo, useRef, useState };

@@ -6,6 +6,7 @@ import { useRef as __ext1 } from "react";
 import { useState as __ext2 } from "react";
 import { jsx as __ext3 } from "react/jsx-runtime";
 import { jsxs as __ext4 } from "react/jsx-runtime";
+import { useMemo as __ext5 } from "react";
 
 // desktop/src/ui/api.js
 const __m0 = (function () {
@@ -385,6 +386,86 @@ function hostClip(name) {
   return HOST_MAP[name] || name || "idle";
 }
 
+/** One decoded v4 bundle for this page. Identity changes of ctx.rest must not
+ *  refetch it, and a hide/show cycle reuses the same images. */
+let sessionBundle = null;
+let sessionInflight = null;
+let sessionEpoch = 0;
+
+function resetTerrySession() {
+  sessionEpoch += 1;
+  sessionBundle = null;
+  sessionInflight = null;
+}
+
+function loadPartImages(parts) {
+  const images = new Map();
+  const entries = Object.entries(parts || {});
+  return Promise.all(
+    entries.map(
+      ([path, data]) =>
+        new Promise((resolve) => {
+          if (typeof Image === "undefined" || !data) {
+            resolve();
+            return;
+          }
+          const image = new Image();
+          image.onload = () => {
+            images.set(path, image);
+            resolve();
+          };
+          image.onerror = () => resolve();
+          image.src = "data:image/png;base64," + data;
+        })
+    )
+  ).then(() => images);
+}
+
+function bundleFromBody(body) {
+  if (!body || body.ok === false || !body.registry) {
+    const error = new Error((body && body.error) || "Could not load the Terry v4 rig.");
+    error.fix = (body && body.fix) || "";
+    throw error;
+  }
+  return loadPartImages(body.parts).then((images) => ({
+    registry: body.registry,
+    speech: body.speech || { events: [], duration_ms: 2600 },
+    smoke: body.smoke || {},
+    costumes: body.costumes || {},
+    images: images,
+  }));
+}
+
+function failText(err) {
+  const message = (err && err.message) || "Terry v4 request failed.";
+  const fix = err && err.fix;
+  return fix ? message + " " + fix : message;
+}
+
+function fetchBundle(api) {
+  if (sessionBundle) return Promise.resolve(sessionBundle);
+  if (sessionInflight) return sessionInflight;
+  if (!api || typeof api.companionClip !== "function") {
+    return Promise.reject(new Error("Terry v4 is not available in this host."));
+  }
+  const epoch = sessionEpoch;
+  const pending = Promise.resolve(api.companionClip({ name: "v4:bundle" }))
+    .then((body) => bundleFromBody(body))
+    .then((bundle) => {
+      if (epoch === sessionEpoch) {
+        sessionBundle = bundle;
+        sessionInflight = null;
+      }
+      return bundle;
+    })
+    .catch((err) => {
+      if (epoch === sessionEpoch) sessionInflight = null;
+      throw err;
+    });
+  sessionInflight = pending;
+  return pending;
+}
+
 /** Canvas rig that plays baked v4 clips via requestAnimationFrame. */
 function TerryCompanionOverlay({ api, animation, costume, hidden, enabled, speech }) {
   const canvasRef = useRef(null);
@@ -402,8 +483,10 @@ function TerryCompanionOverlay({ api, animation, costume, hidden, enabled, speec
   const lastNameRef = useRef("");
   const clicksRef = useRef([]);
   const bubbleRef = useRef(bubble);
+  const apiRef = useRef(api);
 
   const hostAnim = animation || "idle";
+  apiRef.current = api;
   bubbleRef.current = bubble;
 
   useEffect(() => {
@@ -415,15 +498,16 @@ function TerryCompanionOverlay({ api, animation, costume, hidden, enabled, speec
     TerryCompanion._say = (text, opts) => {
       const raw = String(text || "").trim();
       setBubble(raw);
-      if (typeof api.companionSay === "function") {
-        return Promise.resolve(api.companionSay({ say: raw, hold_s: opts && opts.hold_s })).catch(() => {});
+      const live = apiRef.current;
+      if (live && typeof live.companionSay === "function") {
+        return Promise.resolve(live.companionSay({ say: raw, hold_s: opts && opts.hold_s })).catch(() => {});
       }
       return Promise.resolve();
     };
     return () => {
       if (TerryCompanion._say) TerryCompanion._say = null;
     };
-  }, [api]);
+  }, []);
 
   function ensureClip(name) {
     const token = hostClip(name);
@@ -431,8 +515,9 @@ function TerryCompanionOverlay({ api, animation, costume, hidden, enabled, speec
     const cached = clipsRef.current.get(token);
     if (cached && cached.clip) return Promise.resolve(cached.clip);
     if (cached && cached.pending) return cached.pending;
-    if (typeof api.companionClip !== "function") return Promise.resolve(null);
-    const pending = Promise.resolve(api.companionClip({ name: "v4:" + token }))
+    const live = apiRef.current;
+    if (!live || typeof live.companionClip !== "function") return Promise.resolve(null);
+    const pending = Promise.resolve(live.companionClip({ name: "v4:" + token }))
       .then((body) => {
         if (!body || body.ok === false || !body.clip) {
           clipsRef.current.delete(token);
@@ -477,68 +562,27 @@ function TerryCompanionOverlay({ api, animation, costume, hidden, enabled, speec
       setReady(false);
       return undefined;
     }
-    if (bundleRef.current) {
-      setReady(true);
-      return undefined;
-    }
-    if (typeof api.companionClip !== "function") {
-      setError("Terry v4 is not available in this host.");
-      setReady(false);
-      return undefined;
-    }
     let cancelled = false;
-    Promise.resolve(api.companionClip({ name: "v4:bundle" }))
-      .then((body) => {
-        if (cancelled) return null;
-        if (!body || body.ok === false || !body.registry) {
-          setError((body && body.error) || "Could not load the Terry v4 rig.");
-          setReady(false);
-          return null;
-        }
-        const images = new Map();
-        const entries = Object.entries(body.parts || {});
-        return Promise.all(
-          entries.map(
-            ([path, data]) =>
-              new Promise((resolve) => {
-                if (typeof Image === "undefined") {
-                  resolve();
-                  return;
-                }
-                const image = new Image();
-                image.onload = () => {
-                  images.set(path, image);
-                  resolve();
-                };
-                image.onerror = () => resolve();
-                image.src = "data:image/png;base64," + data;
-              })
-          )
-        ).then(() => {
-          if (cancelled) return;
-          bundleRef.current = {
-            registry: body.registry,
-            speech: body.speech || { events: [], duration_ms: 2600 },
-            smoke: body.smoke || {},
-            costumes: body.costumes || {},
-            images,
-          };
-          setError("");
-          setReady(true);
-          ensureClip("idle");
-          ensureClip(hostClip(hostAnim));
-        });
+    // api is read from a ref. A new host object must not cancel the in-flight
+    // GET /companion/clip?name=v4:bundle or start another one.
+    fetchBundle(apiRef.current)
+      .then((bundle) => {
+        if (cancelled || !bundle) return;
+        bundleRef.current = bundle;
+        setError("");
+        setReady(true);
+        ensureClip("idle");
+        ensureClip(hostClip(hostAnim));
       })
       .catch((err) => {
-        if (!cancelled) {
-          setError((err && err.message) || "Terry v4 request failed.");
-          setReady(false);
-        }
+        if (cancelled) return;
+        setError(failText(err));
+        setReady(false);
       });
     return () => {
       cancelled = true;
     };
-  }, [api, hidden, enabled]);
+  }, [hidden, enabled]);
 
   useEffect(() => {
     if (ready) ensureClip(hostClip(hostAnim));
@@ -655,10 +699,13 @@ function TerryCompanionOverlay({ api, animation, costume, hidden, enabled, speec
   if (enabled === false) return null;
   if (hidden) return null;
 
+  const statusText = error ? error : ready ? "" : "Summoning Terry…";
+
   return jsxs("aside", {
     className: "tos-companion-dock",
     "data-testid": "companion-dock",
     "data-animation": animRef.current || hostAnim || "idle",
+    "data-ready": ready ? "1" : "0",
     "aria-label": "Terry companion",
     children: [
       bubble
@@ -686,11 +733,12 @@ function TerryCompanionOverlay({ api, animation, costume, hidden, enabled, speec
             height: 208,
             "aria-hidden": "true",
           }),
-          error
+          statusText
             ? jsx("div", {
                 className: "tos-companion-loading",
                 "data-testid": "companion-loading",
-                children: error,
+                "data-state": error ? "error" : "loading",
+                children: statusText,
               })
             : null,
         ],
@@ -731,7 +779,7 @@ function CompanionControls({ hidden, onToggleHidden, costume, onCostume, costume
   });
 }
 
-  return { "TerryCompanion": TerryCompanion, "TerryCompanionOverlay": TerryCompanionOverlay, "CompanionControls": CompanionControls };
+  return { "TerryCompanion": TerryCompanion, "resetTerrySession": resetTerrySession, "TerryCompanionOverlay": TerryCompanionOverlay, "CompanionControls": CompanionControls };
 })();
 
 // desktop/src/ui/theme.js
@@ -823,6 +871,164 @@ function integerScale(innerWidth, innerHeight, guestWidth, guestHeight) {
   const raw = Math.min(w / gw, h / gh);
   const scale = Math.max(1, Math.floor(raw || 1));
   return { scale, width: gw * scale, height: gh * scale };
+}
+
+const SCREEN_SIZE_KEY = "templeos.screenSize";
+
+function positive(value, fallback) {
+  const number = Number(value);
+  if (Number.isFinite(number) && number > 0) return number;
+  return fallback;
+}
+
+/** Largest aspect-preserving scale that fits in the viewport after the right rail.
+ *  Fractional CSS scales are allowed. A zero measurement falls back to 1x. */
+function fitGuestDisplay(viewport, guest, railWidth, gap = 12) {
+  const gw = positive(guest && guest.width, DEFAULT_WIDTH);
+  const gh = positive(guest && guest.height, DEFAULT_HEIGHT);
+  const rail = Math.max(0, Number(railWidth) || 0);
+  const gutter = Math.max(0, Number(gap) || 0);
+  const availableWidth = Math.max(0, (Number(viewport && viewport.width) || 0) - rail - gutter);
+  const availableHeight = Math.max(0, Number(viewport && viewport.height) || 0);
+  if (availableWidth <= 0 || availableHeight <= 0) {
+    return { scale: 1, width: gw, height: gh, availableWidth: availableWidth, availableHeight: availableHeight };
+  }
+  const scale = Math.min(availableWidth / gw, availableHeight / gh);
+  return { scale: scale, width: gw * scale, height: gh * scale, availableWidth: availableWidth, availableHeight: availableHeight };
+}
+
+/** Decide whether the rail sits beside the stage. A stacked layout must not
+ *  subtract the rail width from the screen. */
+function measureScreenSpace(metrics, gap = 12) {
+  const gutter = Math.max(0, Number(gap) || 0);
+  const hatch = Math.max(0, Number(metrics && metrics.hatchHeight) || 0);
+  const height = Math.max(0, (Number(metrics && metrics.stageHeight) || 0) - hatch);
+  const railW = Math.max(0, Number(metrics && metrics.railWidth) || 0);
+  const railLeft = metrics ? metrics.railLeft : null;
+  const stageRight = metrics ? metrics.stageRight : null;
+  const sideBySide =
+    railW > 0 &&
+    railLeft != null &&
+    stageRight != null &&
+    Number.isFinite(Number(railLeft)) &&
+    Number.isFinite(Number(stageRight)) &&
+    Number(railLeft) + 1 >= Number(stageRight);
+  if (sideBySide) {
+    const body = Number(metrics && metrics.bodyWidth) || 0;
+    const stage = Number(metrics && metrics.stageWidth) || 0;
+    const width = body > 0 ? body : stage + railW + gutter;
+    return { width: width, height: height, rail: railW, gap: gutter };
+  }
+  const stage = Number(metrics && metrics.stageWidth) || 0;
+  const body = Number(metrics && metrics.bodyWidth) || 0;
+  return { width: stage > 0 ? stage : body, height: height, rail: 0, gap: gutter };
+}
+
+function maxScreenWidth(availableWidth, availableHeight, guestWidth, guestHeight) {
+  const gw = positive(guestWidth, DEFAULT_WIDTH);
+  const gh = positive(guestHeight, DEFAULT_HEIGHT);
+  const byW = Number(availableWidth) || 0;
+  const byH = Number(availableHeight) || 0;
+  if (byW <= 0 || byH <= 0) return Math.max(gw, byW, (byH / gh) * gw);
+  return Math.max(gw, Math.min(byW, (byH / gh) * gw));
+}
+
+function clampScreenWidth(width, guestWidth, maxWidth) {
+  const min = positive(guestWidth, DEFAULT_WIDTH);
+  let max = Number(maxWidth);
+  if (!Number.isFinite(max) || max <= 0) max = min;
+  max = Math.max(min, max);
+  const next = Number(width);
+  if (!Number.isFinite(next)) return min;
+  return Math.min(max, Math.max(min, next));
+}
+
+function parseScreenPref(raw) {
+  const fallback = { mode: "fit", width: 0 };
+  if (raw == null || raw === "") return fallback;
+  let parsed = raw;
+  if (typeof raw === "string") {
+    try {
+      parsed = JSON.parse(raw);
+    } catch (err) {
+      return fallback;
+    }
+  }
+  if (!parsed || typeof parsed !== "object") return fallback;
+  const width = Number(parsed.width);
+  return {
+    mode: parsed.mode === "manual" ? "manual" : "fit",
+    width: Number.isFinite(width) && width > 0 ? width : 0,
+  };
+}
+
+function serializeScreenPref(pref) {
+  const mode = pref && pref.mode === "manual" ? "manual" : "fit";
+  const width = Math.max(0, Math.round(Number(pref && pref.width) || 0));
+  return JSON.stringify({ mode: mode, width: width });
+}
+
+function screenDisplay(pref, viewport, guest, railWidth, gap = 12, forcedScale) {
+  const gw = positive(guest && guest.width, DEFAULT_WIDTH);
+  const gh = positive(guest && guest.height, DEFAULT_HEIGHT);
+  const mode = pref && pref.mode === "manual" ? "manual" : "fit";
+  if (Number(forcedScale) > 0) {
+    const scale = Number(forcedScale);
+    return {
+      mode: mode,
+      scale: scale,
+      width: gw * scale,
+      height: gh * scale,
+      availableWidth: gw * scale,
+      availableHeight: gh * scale,
+    };
+  }
+  const fit = fitGuestDisplay(viewport, { width: gw, height: gh }, railWidth, gap);
+  if (mode !== "manual") return { mode: "fit", ...fit };
+  const known = fit.availableWidth > 0 && fit.availableHeight > 0;
+  const max = known
+    ? maxScreenWidth(fit.availableWidth, fit.availableHeight, gw, gh)
+    : Math.max(gw, Number(pref && pref.width) || gw);
+  const width = clampScreenWidth(pref && pref.width, gw, max);
+  const scale = width / gw;
+  return {
+    mode: "manual",
+    scale: scale,
+    width: width,
+    height: gh * scale,
+    availableWidth: fit.availableWidth,
+    availableHeight: fit.availableHeight,
+  };
+}
+
+function browserStorage() {
+  try {
+    if (typeof localStorage === "undefined" || !localStorage) return null;
+    return localStorage;
+  } catch (err) {
+    return null;
+  }
+}
+
+function readStoredScreenPref(storage) {
+  const box = storage || browserStorage();
+  if (!box || typeof box.getItem !== "function") return { mode: "fit", width: 0 };
+  try {
+    return parseScreenPref(box.getItem(SCREEN_SIZE_KEY));
+  } catch (err) {
+    return { mode: "fit", width: 0 };
+  }
+}
+
+function writeStoredScreenPref(pref, storage) {
+  const box = storage || browserStorage();
+  if (!box || typeof box.setItem !== "function") return false;
+  try {
+    box.setItem(SCREEN_SIZE_KEY, serializeScreenPref(pref));
+    return true;
+  } catch (err) {
+    return false;
+  }
 }
 
 function mapPointerToGuest(clientX, clientY, rect, guestWidth, guestHeight) {
@@ -1068,7 +1274,7 @@ function logLine(event) {
   return (time ? time + "  " : "") + who + "  " + summary + suffix;
 }
 
-  return { "DEFAULT_WIDTH": DEFAULT_WIDTH, "DEFAULT_HEIGHT": DEFAULT_HEIGHT, "ZEALOS_WIDTH": ZEALOS_WIDTH, "ZEALOS_HEIGHT": ZEALOS_HEIGHT, "CONTROL_MODES": CONTROL_MODES, "GOLDEN_SNAPSHOT": GOLDEN_SNAPSHOT, "FLAVOR_LABELS": FLAVOR_LABELS, "POLL_VISIBLE_MS": POLL_VISIBLE_MS, "POLL_FOCUSED_MS": POLL_FOCUSED_MS, "POLL_IDLE_MS": POLL_IDLE_MS, "POLL_STOPPED_MS": POLL_STOPPED_MS, "POLL_HIDDEN_MS": POLL_HIDDEN_MS, "POLL_SLOW_MS": POLL_SLOW_MS, "guestSize": guestSize, "flavorLabel": flavorLabel, "integerScale": integerScale, "mapPointerToGuest": mapPointerToGuest, "modeLabel": modeLabel, "accelLabel": accelLabel, "statusSummary": statusSummary, "drivingChip": drivingChip, "firstCheck": firstCheck, "checkState": checkState, "checkMissing": checkMissing, "needsOnboarding": needsOnboarding, "pollIntervalMs": pollIntervalMs, "isReleaseHatch": isReleaseHatch, "qcodeFor": qcodeFor, "keyEventToPayload": keyEventToPayload, "nextMode": nextMode, "userMayInput": userMayInput, "formatLogTime": formatLogTime, "logLine": logLine };
+  return { "DEFAULT_WIDTH": DEFAULT_WIDTH, "DEFAULT_HEIGHT": DEFAULT_HEIGHT, "ZEALOS_WIDTH": ZEALOS_WIDTH, "ZEALOS_HEIGHT": ZEALOS_HEIGHT, "CONTROL_MODES": CONTROL_MODES, "GOLDEN_SNAPSHOT": GOLDEN_SNAPSHOT, "FLAVOR_LABELS": FLAVOR_LABELS, "POLL_VISIBLE_MS": POLL_VISIBLE_MS, "POLL_FOCUSED_MS": POLL_FOCUSED_MS, "POLL_IDLE_MS": POLL_IDLE_MS, "POLL_STOPPED_MS": POLL_STOPPED_MS, "POLL_HIDDEN_MS": POLL_HIDDEN_MS, "POLL_SLOW_MS": POLL_SLOW_MS, "guestSize": guestSize, "flavorLabel": flavorLabel, "integerScale": integerScale, "SCREEN_SIZE_KEY": SCREEN_SIZE_KEY, "fitGuestDisplay": fitGuestDisplay, "measureScreenSpace": measureScreenSpace, "maxScreenWidth": maxScreenWidth, "clampScreenWidth": clampScreenWidth, "parseScreenPref": parseScreenPref, "serializeScreenPref": serializeScreenPref, "screenDisplay": screenDisplay, "readStoredScreenPref": readStoredScreenPref, "writeStoredScreenPref": writeStoredScreenPref, "mapPointerToGuest": mapPointerToGuest, "modeLabel": modeLabel, "accelLabel": accelLabel, "statusSummary": statusSummary, "drivingChip": drivingChip, "firstCheck": firstCheck, "checkState": checkState, "checkMissing": checkMissing, "needsOnboarding": needsOnboarding, "pollIntervalMs": pollIntervalMs, "isReleaseHatch": isReleaseHatch, "qcodeFor": qcodeFor, "keyEventToPayload": keyEventToPayload, "nextMode": nextMode, "userMayInput": userMayInput, "formatLogTime": formatLogTime, "logLine": logLine };
 })();
 
 // desktop/src/ui/pane.js
@@ -1076,6 +1282,7 @@ const __m6 = (function () {
   const jsx = __ext3;
   const jsxs = __ext4;
   const useEffect = __ext0;
+  const useMemo = __ext5;
   const useRef = __ext1;
   const useState = __ext2;
   const createApi = __m0["createApi"];
@@ -1091,18 +1298,24 @@ const __m6 = (function () {
   const GOLDEN_SNAPSHOT = __m5["GOLDEN_SNAPSHOT"];
   const accelLabel = __m5["accelLabel"];
   const drivingChip = __m5["drivingChip"];
+  const clampScreenWidth = __m5["clampScreenWidth"];
+  const fitGuestDisplay = __m5["fitGuestDisplay"];
   const flavorLabel = __m5["flavorLabel"];
   const guestSize = __m5["guestSize"];
-  const integerScale = __m5["integerScale"];
   const keyEventToPayload = __m5["keyEventToPayload"];
   const logLine = __m5["logLine"];
   const mapPointerToGuest = __m5["mapPointerToGuest"];
+  const maxScreenWidth = __m5["maxScreenWidth"];
+  const measureScreenSpace = __m5["measureScreenSpace"];
   const checkState = __m5["checkState"];
   const firstCheck = __m5["firstCheck"];
   const needsOnboarding = __m5["needsOnboarding"];
   const pollIntervalMs = __m5["pollIntervalMs"];
+  const readStoredScreenPref = __m5["readStoredScreenPref"];
+  const screenDisplay = __m5["screenDisplay"];
   const statusSummary = __m5["statusSummary"];
   const userMayInput = __m5["userMayInput"];
+  const writeStoredScreenPref = __m5["writeStoredScreenPref"];
 
 function documentIsHidden() {
   return typeof document !== "undefined" && document.visibilityState === "hidden";
@@ -1123,6 +1336,48 @@ function themeStyle(theme) {
 function applyStatus(body, setStatus) {
   if (!body || typeof body !== "object") return;
   setStatus((prev) => ({ ...prev, ...body }));
+}
+
+function rectOf(node) {
+  if (!node || typeof node.getBoundingClientRect !== "function") {
+    return { width: 0, height: 0, left: 0, top: 0, right: 0, bottom: 0 };
+  }
+  const rect = node.getBoundingClientRect();
+  return {
+    width: Number(rect.width) || 0,
+    height: Number(rect.height) || 0,
+    left: Number(rect.left) || 0,
+    top: Number(rect.top) || 0,
+    right: Number(rect.right) || 0,
+    bottom: Number(rect.bottom) || 0,
+  };
+}
+
+function measurePane(stage) {
+  const body = stage && typeof stage.closest === "function" ? stage.closest(".tos-body") : null;
+  const root = body || stage;
+  const bodyRect = rectOf(root);
+  const stageRect = rectOf(stage);
+  let railWidth = 0;
+  let railLeft = Infinity;
+  if (root && typeof root.querySelectorAll === "function") {
+    root.querySelectorAll(".tos-log, .tos-companion-dock").forEach((node) => {
+      const rect = rectOf(node);
+      if (rect.width > railWidth) railWidth = rect.width;
+      if (rect.width > 0 && rect.left < railLeft) railLeft = rect.left;
+    });
+  }
+  const hatch = stage && typeof stage.querySelector === "function" ? stage.querySelector(".tos-hatch") : null;
+  const hatchHeight = hatch ? rectOf(hatch).height + 8 : 28;
+  return measureScreenSpace({
+    bodyWidth: bodyRect.width,
+    stageWidth: stageRect.width,
+    stageHeight: stageRect.height,
+    stageRight: stageRect.right,
+    railWidth: railWidth,
+    railLeft: Number.isFinite(railLeft) ? railLeft : null,
+    hatchHeight: hatchHeight,
+  });
 }
 
 function defaultStatus(initial) {
@@ -1151,7 +1406,9 @@ function defaultStatus(initial) {
 function TempleOSPane({ transport, initial } = {}) {
   const host = transport || getHostTransport() || {};
   const skip = !!(initial && initial.skipLoad);
-  const api = createApi(host.rest);
+  const api = useMemo(() => createApi(host.rest), [host.rest]);
+  const apiRef = useRef(api);
+  apiRef.current = api;
   const [status, setStatus] = useState(defaultStatus(initial && initial.status));
   const [error, setError] = useState((initial && initial.error) || "");
   const [info, setInfo] = useState((initial && initial.info) || "");
@@ -1170,7 +1427,19 @@ function TempleOSPane({ transport, initial } = {}) {
   );
   const [theme, setTheme] = useState((initial && initial.theme) || "hermes");
   const [unchanged, setUnchanged] = useState(!!(initial && initial.unchanged));
-  const [viewport] = useState((initial && initial.viewport) || { width: 1280, height: 960 });
+  const [screenPref, setScreenPref] = useState(() => {
+    if (initial && initial.screenPref) return { mode: initial.screenPref.mode === "manual" ? "manual" : "fit", width: Number(initial.screenPref.width) || 0 };
+    return readStoredScreenPref();
+  });
+  const [box, setBox] = useState(() => {
+    const vp = initial && initial.viewport;
+    if (!vp) return { width: 0, height: 0, rail: 0 };
+    return {
+      width: Number(vp.width) || 0,
+      height: Number(vp.height) || 0,
+      rail: Number(vp.rail) || 0,
+    };
+  });
   const prevUrl = useRef((initial && initial.frameUrl) || "");
   const shaRef = useRef((initial && initial.sha256) || "");
   const statusRef = useRef(status);
@@ -1179,6 +1448,11 @@ function TempleOSPane({ transport, initial } = {}) {
   const hiddenRef = useRef(hidden);
   const lastFrameAt = useRef(0);
   const screenRef = useRef(null);
+  const stageRef = useRef(null);
+  const spaceRef = useRef(box);
+  const sizeRef = useRef({ width: 640, height: 480 });
+  const scaledRef = useRef({ width: 640, height: 480 });
+  spaceRef.current = box;
   statusRef.current = status;
   focusedRef.current = focused;
   unchangedRef.current = unchanged;
@@ -1209,7 +1483,7 @@ function TempleOSPane({ transport, initial } = {}) {
         focused: focusedRef.current,
         slow: slowRef.current,
       });
-      api
+      apiRef.current
         .status()
         .then((body) => {
           if (!cancelled) {
@@ -1224,7 +1498,7 @@ function TempleOSPane({ transport, initial } = {}) {
         .catch((err) => {
           if (!cancelled) noteError(err);
         });
-      api
+      apiRef.current
         .log()
         .then((body) => {
           if (!cancelled) refreshLog(body);
@@ -1236,7 +1510,7 @@ function TempleOSPane({ transport, initial } = {}) {
       lastFrameAt.current = now;
       const since = shaRef.current;
       const frameStarted = Date.now();
-      api
+      apiRef.current
         .frame(since ? { since } : undefined)
         .then((body) => {
           if (cancelled) return;
@@ -1280,6 +1554,84 @@ function TempleOSPane({ transport, initial } = {}) {
       prevUrl.current = "";
     };
   }, [skip]);
+
+  useEffect(() => {
+    writeStoredScreenPref(screenPref);
+  }, [screenPref.mode, screenPref.width]);
+
+  useEffect(() => {
+    const stage = stageRef.current;
+    if (!stage || typeof ResizeObserver === "undefined") return undefined;
+    let frame = 0;
+    const measure = () => {
+      const next = measurePane(stage);
+      if (!next || next.width <= 0 || next.height <= 0) return;
+      setBox((prev) => {
+        if (
+          prev &&
+          Math.abs(prev.width - next.width) < 1 &&
+          Math.abs(prev.height - next.height) < 1 &&
+          Math.abs((prev.rail || 0) - (next.rail || 0)) < 1
+        ) {
+          return prev;
+        }
+        return { width: next.width, height: next.height, rail: next.rail };
+      });
+    };
+    const observer = new ResizeObserver(() => {
+      if (typeof requestAnimationFrame === "function") {
+        if (frame) cancelAnimationFrame(frame);
+        frame = requestAnimationFrame(measure);
+      } else {
+        measure();
+      }
+    });
+    observer.observe(stage);
+    const body = typeof stage.closest === "function" ? stage.closest(".tos-body") : null;
+    if (body) observer.observe(body);
+    const pane = typeof stage.closest === "function" ? stage.closest(".tos-pane") : null;
+    if (pane && pane.parentElement) observer.observe(pane.parentElement);
+    measure();
+    return () => {
+      if (frame && typeof cancelAnimationFrame === "function") cancelAnimationFrame(frame);
+      observer.disconnect();
+    };
+  }, [companionHidden, status.companion && status.companion.enabled]);
+
+  function chooseFit() {
+    setScreenPref((prev) => ({ mode: "fit", width: prev.width || 0 }));
+  }
+
+  function onResizePointerDown(event) {
+    if (event && event.button != null && event.button !== 0) return;
+    if (event && event.preventDefault) event.preventDefault();
+    if (event && event.stopPropagation) event.stopPropagation();
+    const startX = Number(event && event.clientX) || 0;
+    const guest = sizeRef.current;
+    const startWidth = scaledRef.current.width || guest.width;
+    function move(ev) {
+      const dx = (Number(ev && ev.clientX) || 0) - startX;
+      const space = spaceRef.current || { width: 0, height: 0, rail: 0 };
+      const fit = fitGuestDisplay({ width: space.width, height: space.height }, guest, space.rail, 12);
+      const known = fit.availableWidth > 0 && fit.availableHeight > 0;
+      const max = known
+        ? maxScreenWidth(fit.availableWidth, fit.availableHeight, guest.width, guest.height)
+        : Math.max(guest.width, startWidth);
+      const width = clampScreenWidth(startWidth + dx, guest.width, max);
+      setScreenPref({ mode: "manual", width: width });
+    }
+    function detach() {
+      if (typeof window === "undefined") return;
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", detach);
+      window.removeEventListener("pointercancel", detach);
+    }
+    if (typeof window !== "undefined") {
+      window.addEventListener("pointermove", move);
+      window.addEventListener("pointerup", detach);
+      window.addEventListener("pointercancel", detach);
+    }
+  }
 
   function run(label, work) {
     setBusy(label);
@@ -1361,15 +1713,10 @@ function TempleOSPane({ transport, initial } = {}) {
 
   const size = guestSize(status.flavor, status);
   const forced = initial && initial.scale;
-  const companionVisible = !companionHidden && !(status.companion && status.companion.enabled === false);
-  // The wide right rail holds the Agent Log above the huge Terry dock, so
-  // reserve that single rail (not a separate dock + log pair) before picking
-  // an integer scale. This keeps the whole guest display on screen.
-  const railPx = companionVisible ? 600 : 320;
-  const widthRoom = (viewport.width || 0) - 28 - railPx;
-  const scaled = forced
-    ? { scale: Number(forced), width: size.width * Number(forced), height: size.height * Number(forced) }
-    : integerScale(Math.max(size.width, widthRoom), Math.max(size.height, (viewport.height || 0) - 200), size.width, size.height);
+  const scaled = screenDisplay(screenPref, box, size, box.rail, 12, forced);
+  sizeRef.current = size;
+  scaledRef.current = scaled;
+  spaceRef.current = box;
   const chip = statusSummary(status);
   const drive = drivingChip(status);
   const onboarding = needsOnboarding(status);
@@ -1442,6 +1789,15 @@ function TempleOSPane({ transport, initial } = {}) {
           }),
           jsx("button", { type: "button", className: "tos-btn tos-primary", "data-testid": "take-control", disabled: disabled || status.mode === "user", onClick: () => setMode("take"), children: "Take control" }),
           jsx("button", { type: "button", className: "tos-btn", "data-testid": "hand-back", disabled: disabled || status.mode === "shared", onClick: () => setMode("handback"), children: "Hand back" }),
+          jsx("button", {
+            type: "button",
+            className: "tos-btn" + (screenPref.mode === "fit" ? " is-on" : ""),
+            "data-testid": "screen-fit",
+            "aria-pressed": screenPref.mode === "fit" ? "true" : "false",
+            title: "Fit the guest to the pane",
+            onClick: chooseFit,
+            children: "Fit",
+          }),
           jsx(CompanionControls, {
             hidden: companionHidden,
             enabled: !(status.companion && status.companion.enabled === false),
@@ -1496,11 +1852,14 @@ function TempleOSPane({ transport, initial } = {}) {
             children: [
           jsxs("div", {
             className: "tos-stage",
+            ref: stageRef,
             children: [
               jsxs("div", {
                 className: "tos-screen" + (focused ? " is-focused" : ""),
                 "data-testid": "screen",
                 "data-focused": focused ? "1" : "0",
+                "data-screen-mode": scaled.mode,
+                "data-scale": String(Math.round(scaled.scale * 1000) / 1000),
                 ref: screenRef,
                 tabIndex: 0,
                 role: "application",
@@ -1518,15 +1877,31 @@ function TempleOSPane({ transport, initial } = {}) {
                     ? jsx("img", {
                         alt: "TempleOS guest",
                         src: frameUrl,
-                        width: scaled.width,
-                        height: scaled.height,
                         draggable: false,
+                        style: { width: "100%", height: "100%", imageRendering: "pixelated" },
                       })
                     : jsx("div", {
                         className: "tos-placeholder",
                         "data-testid": "placeholder",
                         children: running ? "Waiting for a frame…" : "VM stopped. Press Start, or ask the agent to start it.",
                       }),
+                  jsx("button", {
+                    type: "button",
+                    className: "tos-resize-handle",
+                    "data-testid": "screen-resize",
+                    "aria-label": "Resize guest screen",
+                    title: "Drag to resize. Double-click to fit.",
+                    onPointerDown: onResizePointerDown,
+                    onClick: (event) => {
+                      if (event.preventDefault) event.preventDefault();
+                      if (event.stopPropagation) event.stopPropagation();
+                    },
+                    onDoubleClick: (event) => {
+                      if (event.preventDefault) event.preventDefault();
+                      if (event.stopPropagation) event.stopPropagation();
+                      chooseFit();
+                    },
+                  }),
                 ],
               }),
               focused
@@ -1664,7 +2039,7 @@ const __m8 = (function () {
 })();
 
 const TEMPLEOS_STYLE_ID = "templeos-desktop-styles";
-const TEMPLEOS_STYLES = "/* TempleOS pane. 16-color accents on Hermes chrome variables. */\n\n.tos-pane {\n  color-scheme: dark;\n  --tos-black: #000000;\n  --tos-navy: #0000aa;\n  --tos-yellow: #ffff55;\n  --tos-white: #ffffff;\n  --tos-ltgray: #aaaaaa;\n  --tos-dkgray: #555555;\n  --tos-cyan: #55ffff;\n  --tos-green: #55ff55;\n  --tos-red: #ff5555;\n  --tos-blue: #5555ff;\n  --tos-brown: #aa5500;\n  display: flex;\n  flex-direction: column;\n  gap: 10px;\n  padding: 12px 14px 16px;\n  color: var(--tos-yellow);\n  background:\n    linear-gradient(180deg, color-mix(in srgb, var(--tos-navy) 35%, var(--tos-black)) 0 52px, var(--tos-black) 52px);\n  font-family: \"IBM Plex Mono\", \"Lucida Console\", ui-monospace, monospace;\n  min-height: 100%;\n  box-sizing: border-box;\n}\n\n.tos-top,\n.tos-bar {\n  display: flex;\n  flex-wrap: wrap;\n  gap: 8px;\n  align-items: center;\n}\n\n.tos-brand {\n  display: flex;\n  gap: 8px;\n  align-items: center;\n  margin-right: 6px;\n}\n\n.tos-brand strong {\n  display: block;\n  font-size: 14px;\n  letter-spacing: 0.08em;\n  text-transform: uppercase;\n  color: var(--tos-yellow);\n}\n\n.tos-brand em {\n  display: block;\n  font-style: normal;\n  font-size: 10px;\n  letter-spacing: 0.16em;\n  text-transform: uppercase;\n  color: var(--tos-ltgray);\n}\n\n.tos-mark {\n  width: 22px;\n  height: 22px;\n  background:\n    linear-gradient(180deg, var(--tos-navy), #000055);\n  box-shadow: inset 0 0 0 1px var(--tos-yellow);\n}\n\n.tos-badge,\n.tos-chip,\n.tos-btn {\n  font: inherit;\n  color: var(--tos-yellow);\n  background: transparent;\n  border: 1px solid color-mix(in srgb, var(--tos-yellow) 55%, var(--tos-dkgray));\n  border-radius: 2px;\n  padding: 3px 9px;\n  letter-spacing: 0.02em;\n}\n\n.tos-badge,\n.tos-chip {\n  font-size: 11px;\n  text-transform: uppercase;\n}\n\n.tos-badge-accel {\n  color: var(--tos-cyan);\n  border-color: color-mix(in srgb, var(--tos-cyan) 50%, var(--tos-dkgray));\n}\n\n.tos-chip {\n  margin-left: auto;\n  border-radius: 999px;\n  color: var(--tos-ltgray);\n  text-transform: none;\n}\n\n.tos-btn {\n  cursor: pointer;\n  background: color-mix(in srgb, var(--tos-navy) 40%, transparent);\n}\n\n.tos-btn:hover:not(:disabled) {\n  background: color-mix(in srgb, var(--tos-navy) 80%, var(--tos-black));\n  border-color: var(--tos-yellow);\n}\n\n.tos-btn:disabled {\n  opacity: 0.4;\n  cursor: default;\n  color: var(--tos-ltgray);\n  border-color: var(--tos-dkgray);\n  background: transparent;\n}\n\n.tos-btn.is-on,\n.tos-primary {\n  background: color-mix(in srgb, var(--tos-navy) 85%, var(--tos-black));\n  border-color: var(--tos-yellow);\n  color: var(--tos-yellow);\n  font-weight: 650;\n}\n\n.tos-modes {\n  display: flex;\n  gap: 0;\n  margin-left: 4px;\n}\n\n.tos-modes .tos-btn {\n  border-radius: 0;\n}\n\n.tos-modes .tos-btn:first-child {\n  border-top-left-radius: 2px;\n  border-bottom-left-radius: 2px;\n}\n\n.tos-modes .tos-btn:last-child {\n  border-top-right-radius: 2px;\n  border-bottom-right-radius: 2px;\n}\n\n.tos-drive {\n  align-self: flex-start;\n  padding: 4px 12px;\n  border: 1px solid var(--tos-yellow);\n  background: color-mix(in srgb, var(--tos-navy) 70%, var(--tos-black));\n  color: var(--tos-yellow);\n  font-size: 12px;\n  letter-spacing: 0.04em;\n  text-transform: uppercase;\n}\n\n.tos-drive-agent {\n  border-color: var(--tos-cyan);\n  color: var(--tos-cyan);\n}\n\n.tos-drive-user {\n  border-color: var(--tos-green);\n  color: var(--tos-green);\n}\n\n.tos-onboard {\n  padding: 12px 14px;\n  border: 1px solid color-mix(in srgb, var(--tos-yellow) 50%, var(--tos-dkgray));\n  background: color-mix(in srgb, var(--tos-navy) 22%, var(--tos-black));\n}\n\n.tos-onboard h2,\n.tos-log h2 {\n  margin: 0 0 8px;\n  font-size: 13px;\n  font-weight: 650;\n  letter-spacing: 0.08em;\n  text-transform: uppercase;\n  color: var(--tos-yellow);\n}\n\n.tos-onboard p,\n.tos-hint,\n.tos-hatch,\n.tos-error,\n.tos-info,\n.tos-log,\n.tos-placeholder {\n  font-size: 13px;\n  line-height: 1.45;\n}\n\n.tos-onboard p,\n.tos-hint {\n  margin: 0 0 10px;\n  color: var(--tos-ltgray);\n  max-width: 62ch;\n}\n\n.tos-checks {\n  display: flex;\n  flex-wrap: wrap;\n  gap: 8px 18px;\n  margin: 0 0 12px;\n  padding: 0;\n  list-style: none;\n}\n\n.tos-check-ok { color: var(--tos-green); }\n.tos-check-no { color: var(--tos-red); }\n.tos-check-unknown { color: var(--tos-ltgray); }\n\n.tos-body {\n  display: grid;\n  grid-template-columns: max-content minmax(300px, 1fr);\n  gap: 12px;\n  align-items: start;\n  min-height: 0;\n}\n\n.tos-stage {\n  grid-column: 1;\n  grid-row: 1;\n  align-self: start;\n  min-width: 0;\n}\n\n.tos-screen {\n  background: var(--tos-black);\n  border: 1px solid var(--tos-dkgray);\n  image-rendering: pixelated;\n  overflow: hidden;\n  outline: none;\n  cursor: crosshair;\n  box-shadow: 0 0 0 1px var(--tos-black);\n}\n\n.tos-screen img {\n  display: block;\n  image-rendering: pixelated;\n  image-rendering: crisp-edges;\n}\n\n.tos-screen.is-focused {\n  border-color: var(--tos-cyan);\n  box-shadow: 0 0 0 2px var(--tos-cyan);\n}\n\n.tos-placeholder {\n  display: flex;\n  align-items: center;\n  justify-content: center;\n  width: 100%;\n  height: 100%;\n  color: var(--tos-yellow);\n  text-align: center;\n  padding: 16px;\n  box-sizing: border-box;\n}\n\n.tos-hatch {\n  margin: 6px 0 0;\n  color: var(--tos-cyan);\n  font-size: 11px;\n  letter-spacing: 0.04em;\n}\n\n.tos-hatch-idle {\n  color: var(--tos-ltgray);\n}\n\n.tos-log {\n  grid-column: 2;\n  grid-row: 1;\n  align-self: start;\n  justify-self: stretch;\n  position: relative;\n  z-index: 8;\n  min-height: 200px;\n  max-height: 210px;\n  overflow: auto;\n  padding: 10px 12px;\n  border: 1px solid color-mix(in srgb, var(--tos-yellow) 35%, var(--tos-dkgray));\n  background: color-mix(in srgb, var(--tos-navy) 18%, var(--tos-black));\n}\n\n.tos-log-line,\n.tos-log p {\n  margin: 0 0 6px;\n  color: var(--tos-ltgray);\n  white-space: nowrap;\n  overflow: hidden;\n  text-overflow: ellipsis;\n}\n\n.tos-log-agent { color: var(--tos-cyan); }\n.tos-log-user { color: var(--tos-yellow); }\n.tos-log-line.is-failed { color: var(--tos-red); }\n.tos-log-empty { color: var(--ui-text-tertiary, var(--tos-dkgray)); }\n\n.tos-error { color: var(--tos-red); }\n.tos-info { color: var(--tos-cyan); }\n\n/* Temple of Hermes theme.\n   Palette: art/palette.json (TempleOS gr32_palette_std), branch hermes/art\n   @ 97d7ad2. Header strip, wallpaper and icons come from the same branch. */\n\n.tos-pane[data-theme=\"hermes\"] {\n  --tos-hermes-gold: #ffff55;\n  --tos-hermes-cyan: #55ffff;\n  --tos-hermes-azure: #5555ff;\n  --tos-hermes-violet: #ff55ff;\n  --tos-hermes-teal: #00aaaa;\n  --tos-hermes-marble: #aaaaaa;\n  --tos-hermes-ink: #000000;\n  --tos-hermes-deep: #0000aa;\n  color: var(--tos-hermes-gold);\n  background:\n    radial-gradient(120% 72% at 50% 0%, rgba(85, 85, 255, 0.22), rgba(0, 0, 0, 0) 62%),\n    linear-gradient(180deg, rgba(0, 0, 0, 0.74) 0 62px, rgba(0, 0, 0, 0.9) 62px),\n    var(--tos-hermes-wallpaper) center / cover no-repeat,\n    var(--tos-hermes-ink);\n}\n\n.tos-pane[data-theme=\"hermes\"] .tos-top {\n  position: relative;\n  padding: 10px 12px 13px;\n  border: 1px solid rgba(85, 255, 255, 0.42);\n  background:\n    linear-gradient(90deg, rgba(0, 0, 0, 0.88), rgba(0, 0, 0, 0.58) 60%, rgba(0, 0, 0, 0.88)),\n    var(--tos-hermes-header) center / cover no-repeat;\n  box-shadow:\n    inset 0 0 26px rgba(0, 0, 170, 0.5),\n    0 0 20px rgba(85, 255, 255, 0.14);\n}\n\n.tos-pane[data-theme=\"hermes\"] .tos-top::after {\n  content: \"\";\n  position: absolute;\n  left: 8px;\n  right: 8px;\n  bottom: 4px;\n  height: 3px;\n  background: repeating-linear-gradient(\n    90deg,\n    var(--tos-hermes-cyan) 0 2px,\n    transparent 2px 7px\n  );\n  opacity: 0.55;\n  pointer-events: none;\n}\n\n.tos-pane[data-theme=\"hermes\"] .tos-mark {\n  width: 30px;\n  height: 30px;\n  background: var(--tos-hermes-mark) center / contain no-repeat;\n  image-rendering: pixelated;\n  box-shadow:\n    0 0 0 1px rgba(255, 255, 85, 0.7),\n    0 0 12px rgba(85, 255, 255, 0.35);\n}\n\n.tos-pane[data-theme=\"hermes\"] .tos-brand strong {\n  color: var(--tos-hermes-gold);\n  text-shadow: 0 0 10px rgba(255, 255, 85, 0.28);\n}\n\n.tos-pane[data-theme=\"hermes\"] .tos-brand em {\n  color: var(--tos-hermes-cyan);\n}\n\n.tos-pane[data-theme=\"hermes\"] .tos-badge {\n  color: var(--tos-hermes-cyan);\n  border-color: rgba(85, 255, 255, 0.55);\n  background: rgba(0, 0, 170, 0.18);\n}\n\n.tos-pane[data-theme=\"hermes\"] .tos-badge-accel {\n  color: var(--tos-hermes-gold);\n  border-color: rgba(255, 255, 85, 0.6);\n}\n\n.tos-pane[data-theme=\"hermes\"] .tos-chip {\n  color: var(--tos-hermes-violet);\n  border-color: rgba(255, 85, 255, 0.5);\n  background: rgba(255, 85, 255, 0.16);\n}\n\n.tos-pane[data-theme=\"hermes\"] .tos-btn {\n  color: var(--tos-hermes-gold);\n  border-color: rgba(255, 255, 85, 0.5);\n  background: linear-gradient(180deg, rgba(0, 0, 170, 0.35), rgba(0, 0, 0, 0.45));\n}\n\n.tos-pane[data-theme=\"hermes\"] .tos-btn:hover:not(:disabled) {\n  color: var(--tos-white);\n  border-color: var(--tos-hermes-cyan);\n  background: linear-gradient(180deg, rgba(85, 85, 255, 0.42), rgba(0, 0, 170, 0.6));\n}\n\n.tos-pane[data-theme=\"hermes\"] .tos-btn.is-on,\n.tos-pane[data-theme=\"hermes\"] .tos-primary {\n  color: var(--tos-white);\n  border-color: var(--tos-hermes-cyan);\n  background: linear-gradient(180deg, rgba(85, 85, 255, 0.48), rgba(0, 0, 170, 0.62));\n  box-shadow: 0 0 10px rgba(85, 255, 255, 0.2);\n}\n\n.tos-pane[data-theme=\"hermes\"] .tos-theme {\n  color: var(--tos-hermes-violet);\n  border-color: rgba(255, 85, 255, 0.55);\n}\n\n.tos-pane[data-theme=\"hermes\"] .tos-theme::before {\n  content: \"\";\n  display: inline-block;\n  width: 12px;\n  height: 12px;\n  margin-right: 5px;\n  vertical-align: -2px;\n  background: var(--tos-hermes-nous) center / contain no-repeat;\n  image-rendering: pixelated;\n}\n\n.tos-pane[data-theme=\"hermes\"] .tos-drive {\n  color: var(--tos-hermes-cyan);\n  border-color: var(--tos-hermes-cyan);\n  background: linear-gradient(90deg, rgba(0, 0, 170, 0.58), rgba(0, 0, 0, 0.72));\n  box-shadow: 0 0 12px rgba(85, 255, 255, 0.12);\n}\n\n.tos-pane[data-theme=\"hermes\"] .tos-drive-user {\n  color: var(--tos-green);\n  border-color: var(--tos-green);\n}\n\n.tos-pane[data-theme=\"hermes\"] .tos-onboard {\n  border-color: rgba(85, 255, 255, 0.42);\n  background:\n    linear-gradient(180deg, rgba(0, 0, 170, 0.3), rgba(0, 0, 0, 0.62));\n  box-shadow: inset 0 0 22px rgba(0, 0, 170, 0.38);\n}\n\n.tos-pane[data-theme=\"hermes\"] .tos-onboard h2,\n.tos-pane[data-theme=\"hermes\"] .tos-log h2 {\n  color: var(--tos-hermes-gold);\n}\n\n.tos-pane[data-theme=\"hermes\"] .tos-log h2::before {\n  content: \"\";\n  display: inline-block;\n  width: 16px;\n  height: 16px;\n  margin-right: 6px;\n  vertical-align: -3px;\n  background: var(--tos-hermes-chat) center / contain no-repeat;\n  image-rendering: pixelated;\n}\n\n.tos-pane[data-theme=\"hermes\"] .tos-hint::before {\n  content: \"\";\n  display: inline-block;\n  width: 16px;\n  height: 16px;\n  margin-right: 6px;\n  vertical-align: -3px;\n  background: var(--tos-hermes-capy) center / contain no-repeat;\n  image-rendering: pixelated;\n}\n\n.tos-pane[data-theme=\"hermes\"] .tos-screen {\n  border-color: rgba(85, 255, 255, 0.45);\n  box-shadow:\n    0 0 0 1px var(--tos-hermes-ink),\n    0 0 26px rgba(0, 0, 170, 0.5);\n}\n\n.tos-pane[data-theme=\"hermes\"] .tos-screen.is-focused {\n  border-color: var(--tos-hermes-cyan);\n  box-shadow:\n    0 0 0 2px var(--tos-hermes-cyan),\n    0 0 30px rgba(85, 255, 255, 0.3);\n}\n\n.tos-pane[data-theme=\"hermes\"] .tos-log {\n  border-color: rgba(255, 255, 85, 0.32);\n  background:\n    linear-gradient(180deg, rgba(0, 0, 170, 0.22), rgba(0, 0, 0, 0.7));\n  box-shadow: inset 0 0 18px rgba(0, 0, 170, 0.32);\n}\n\n.tos-pane[data-theme=\"hermes\"] .tos-log-agent {\n  color: var(--tos-hermes-cyan);\n}\n\n.tos-pane[data-theme=\"hermes\"] .tos-log-user {\n  color: var(--tos-hermes-gold);\n}\n\n.tos-pane[data-theme=\"hermes\"] .tos-log-line.is-failed,\n.tos-pane[data-theme=\"hermes\"] .tos-error {\n  color: var(--tos-red);\n}\n\n.tos-pane[data-theme=\"hermes\"] .tos-info,\n.tos-pane[data-theme=\"hermes\"] .tos-hatch {\n  color: var(--tos-hermes-cyan);\n}\n\n.tos-pane[data-theme=\"hermes\"] .tos-check-ok {\n  color: var(--tos-green);\n}\n\n.tos-pane[data-theme=\"hermes\"] .tos-check-no {\n  color: var(--tos-red);\n}\n\n.tos-pane[data-theme=\"hermes\"] .tos-check-unknown {\n  color: var(--tos-hermes-marble);\n}\n\n@media (max-width: 900px) {\n  .tos-body {\n    grid-template-columns: 1fr;\n  }\n  .tos-chip {\n    margin-left: 0;\n  }\n}\n\n/* Terry companion dock (fan tribute). The stage row is a contents wrapper:\n   the guest screen keeps the left grid cell while the Agent Log and the\n   companion share the right rail. The log sits at the top of the rail and\n   huge Terry fills the rail from under it down to the bottom of the pane. */\n.tos-stage-row {\n  display: contents;\n}\n\n.tos-companion-dock {\n  grid-column: 2;\n  grid-row: 1;\n  align-self: end;\n  justify-self: stretch;\n  position: relative;\n  z-index: 5;\n  width: 100%;\n  min-width: 0;\n  height: var(--tos-companion-h, 750px);\n  min-height: 0;\n  display: flex;\n  flex-direction: column;\n  justify-content: flex-end;\n  align-items: stretch;\n  box-sizing: border-box;\n  overflow: visible;\n}\n\n.tos-companion-bubble {\n  position: absolute;\n  top: 0;\n  left: 0;\n  z-index: 7;\n  max-width: min(100%, 340px);\n  min-width: 140px;\n  padding: 10px 14px;\n  border: 1px solid color-mix(in srgb, var(--tos-yellow) 55%, var(--tos-dkgray));\n  border-radius: 12px 12px 2px 12px;\n  background: color-mix(in srgb, var(--tos-navy) 70%, var(--tos-black));\n  color: var(--tos-yellow);\n  font-size: 15px;\n  line-height: 1.35;\n  letter-spacing: 0.01em;\n  overflow-wrap: anywhere;\n  word-break: break-word;\n  pointer-events: none;\n}\n\n.tos-companion-bubble-slot {\n  /* The bubble is positioned over the transparent crown of the sprite box,\n     so it needs no flow space in the dock. */\n  position: absolute;\n  inset: 0 0 auto 0;\n  height: 0;\n  pointer-events: none;\n}\n\n.tos-companion {\n  position: relative;\n  align-self: stretch;\n  z-index: 6;\n  width: 100%;\n  height: var(--tos-companion-h, 750px);\n  pointer-events: auto;\n  cursor: pointer;\n  image-rendering: auto;\n  filter: drop-shadow(0 6px 10px rgba(0, 0, 0, 0.55));\n}\n\n/* Static sprite sheet used by the screenshot harness and docs render.\n   atlas.png is 1536x1872 (8x9 cells); 800%/900% makes one 192x208 cell\n   fill the sprite box exactly, so the existing art scales enormously\n   without generating or redrawing anything. */\n.tos-companion-static {\n  background-repeat: no-repeat;\n  background-size: 800% 900%;\n  background-position: 0 0;\n}\n\n.tos-companion-canvas {\n  width: 100%;\n  height: 100%;\n  display: block;\n  image-rendering: auto;\n}\n\n.tos-companion-loading {\n  position: absolute;\n  inset: 0;\n  display: flex;\n  align-items: flex-end;\n  justify-content: center;\n  padding: 12px;\n  color: var(--tos-ltgray);\n  font-size: 14px;\n  pointer-events: none;\n}\n\n.tos-companion-controls {\n  display: inline-flex;\n  gap: 6px;\n  align-items: center;\n  margin-left: auto;\n}\n\n.tos-companion-costume select {\n  font: inherit;\n  color: var(--tos-yellow);\n  background: var(--tos-black);\n  border: 1px solid color-mix(in srgb, var(--tos-yellow) 55%, var(--tos-dkgray));\n  border-radius: 2px;\n  padding: 2px 6px;\n}\n\n.tos-sr-only {\n  position: absolute;\n  width: 1px;\n  height: 1px;\n  padding: 0;\n  margin: -1px;\n  overflow: hidden;\n  clip: rect(0, 0, 0, 0);\n  white-space: nowrap;\n  border: 0;\n}\n\n.tos-pane[data-theme=\"hermes\"] {\n  --tos-companion-width: 100%;\n  --tos-companion-h: 750px;\n}\n\n.tos-pane[data-theme=\"hermes\"] .tos-companion-dock {\n  padding: 6px 6px 4px;\n  border: 1px solid rgba(85, 255, 255, 0.28);\n  background:\n    linear-gradient(180deg, rgba(0, 0, 170, 0.22), rgba(0, 0, 0, 0.62));\n  box-shadow: inset 0 0 18px rgba(0, 0, 170, 0.35);\n}\n\n.tos-pane[data-theme=\"hermes\"] .tos-companion-bubble {\n  border-color: rgba(85, 255, 255, 0.62);\n  background:\n    linear-gradient(180deg, rgba(85, 85, 255, 0.34), rgba(0, 0, 170, 0.4));\n  color: var(--tos-hermes-gold);\n  box-shadow:\n    0 0 0 1px rgba(0, 0, 0, 0.55),\n    0 0 12px rgba(85, 255, 255, 0.16);\n}\n\n.tos-pane[data-theme=\"hermes\"] .tos-companion-hide {\n  color: var(--tos-hermes-violet);\n  border-color: rgba(255, 85, 255, 0.55);\n}\n\n.tos-pane[data-theme=\"hermes\"] .tos-companion-costume select {\n  color: var(--tos-hermes-gold);\n  border-color: rgba(85, 255, 255, 0.55);\n  background: rgba(0, 0, 0, 0.78);\n}\n\n@media (max-width: 900px) {\n  .tos-stage,\n  .tos-log,\n  .tos-companion-dock {\n    grid-column: 1;\n    grid-row: auto;\n    justify-self: stretch;\n  }\n\n  .tos-stage {\n    align-self: start;\n  }\n\n  .tos-log {\n    order: 2;\n  }\n\n  .tos-companion-dock {\n    order: 3;\n    align-self: end;\n  }\n}\n";
+const TEMPLEOS_STYLES = "/* TempleOS pane. 16-color accents on Hermes chrome variables. */\n\n.tos-pane {\n  height: 100%;\n  min-height: 0;\n  color-scheme: dark;\n  --tos-black: #000000;\n  --tos-navy: #0000aa;\n  --tos-yellow: #ffff55;\n  --tos-white: #ffffff;\n  --tos-ltgray: #aaaaaa;\n  --tos-dkgray: #555555;\n  --tos-cyan: #55ffff;\n  --tos-green: #55ff55;\n  --tos-red: #ff5555;\n  --tos-blue: #5555ff;\n  --tos-brown: #aa5500;\n  display: flex;\n  flex-direction: column;\n  gap: 10px;\n  padding: 12px 14px 16px;\n  color: var(--tos-yellow);\n  background:\n    linear-gradient(180deg, color-mix(in srgb, var(--tos-navy) 35%, var(--tos-black)) 0 52px, var(--tos-black) 52px);\n  font-family: \"IBM Plex Mono\", \"Lucida Console\", ui-monospace, monospace;\n  min-height: 100%;\n  box-sizing: border-box;\n}\n\n.tos-top,\n.tos-bar {\n  display: flex;\n  flex-wrap: wrap;\n  gap: 8px;\n  align-items: center;\n}\n\n.tos-brand {\n  display: flex;\n  gap: 8px;\n  align-items: center;\n  margin-right: 6px;\n}\n\n.tos-brand strong {\n  display: block;\n  font-size: 14px;\n  letter-spacing: 0.08em;\n  text-transform: uppercase;\n  color: var(--tos-yellow);\n}\n\n.tos-brand em {\n  display: block;\n  font-style: normal;\n  font-size: 10px;\n  letter-spacing: 0.16em;\n  text-transform: uppercase;\n  color: var(--tos-ltgray);\n}\n\n.tos-mark {\n  width: 22px;\n  height: 22px;\n  background:\n    linear-gradient(180deg, var(--tos-navy), #000055);\n  box-shadow: inset 0 0 0 1px var(--tos-yellow);\n}\n\n.tos-badge,\n.tos-chip,\n.tos-btn {\n  font: inherit;\n  color: var(--tos-yellow);\n  background: transparent;\n  border: 1px solid color-mix(in srgb, var(--tos-yellow) 55%, var(--tos-dkgray));\n  border-radius: 2px;\n  padding: 3px 9px;\n  letter-spacing: 0.02em;\n}\n\n.tos-badge,\n.tos-chip {\n  font-size: 11px;\n  text-transform: uppercase;\n}\n\n.tos-badge-accel {\n  color: var(--tos-cyan);\n  border-color: color-mix(in srgb, var(--tos-cyan) 50%, var(--tos-dkgray));\n}\n\n.tos-chip {\n  margin-left: auto;\n  border-radius: 999px;\n  color: var(--tos-ltgray);\n  text-transform: none;\n}\n\n.tos-btn {\n  cursor: pointer;\n  background: color-mix(in srgb, var(--tos-navy) 40%, transparent);\n}\n\n.tos-btn:hover:not(:disabled) {\n  background: color-mix(in srgb, var(--tos-navy) 80%, var(--tos-black));\n  border-color: var(--tos-yellow);\n}\n\n.tos-btn:disabled {\n  opacity: 0.4;\n  cursor: default;\n  color: var(--tos-ltgray);\n  border-color: var(--tos-dkgray);\n  background: transparent;\n}\n\n.tos-btn.is-on,\n.tos-primary {\n  background: color-mix(in srgb, var(--tos-navy) 85%, var(--tos-black));\n  border-color: var(--tos-yellow);\n  color: var(--tos-yellow);\n  font-weight: 650;\n}\n\n.tos-modes {\n  display: flex;\n  gap: 0;\n  margin-left: 4px;\n}\n\n.tos-modes .tos-btn {\n  border-radius: 0;\n}\n\n.tos-modes .tos-btn:first-child {\n  border-top-left-radius: 2px;\n  border-bottom-left-radius: 2px;\n}\n\n.tos-modes .tos-btn:last-child {\n  border-top-right-radius: 2px;\n  border-bottom-right-radius: 2px;\n}\n\n.tos-drive {\n  align-self: flex-start;\n  padding: 4px 12px;\n  border: 1px solid var(--tos-yellow);\n  background: color-mix(in srgb, var(--tos-navy) 70%, var(--tos-black));\n  color: var(--tos-yellow);\n  font-size: 12px;\n  letter-spacing: 0.04em;\n  text-transform: uppercase;\n}\n\n.tos-drive-agent {\n  border-color: var(--tos-cyan);\n  color: var(--tos-cyan);\n}\n\n.tos-drive-user {\n  border-color: var(--tos-green);\n  color: var(--tos-green);\n}\n\n.tos-onboard {\n  padding: 12px 14px;\n  border: 1px solid color-mix(in srgb, var(--tos-yellow) 50%, var(--tos-dkgray));\n  background: color-mix(in srgb, var(--tos-navy) 22%, var(--tos-black));\n}\n\n.tos-onboard h2,\n.tos-log h2 {\n  margin: 0 0 8px;\n  font-size: 13px;\n  font-weight: 650;\n  letter-spacing: 0.08em;\n  text-transform: uppercase;\n  color: var(--tos-yellow);\n}\n\n.tos-onboard p,\n.tos-hint,\n.tos-hatch,\n.tos-error,\n.tos-info,\n.tos-log,\n.tos-placeholder {\n  font-size: 13px;\n  line-height: 1.45;\n}\n\n.tos-onboard p,\n.tos-hint {\n  margin: 0 0 10px;\n  color: var(--tos-ltgray);\n  max-width: 62ch;\n}\n\n.tos-checks {\n  display: flex;\n  flex-wrap: wrap;\n  gap: 8px 18px;\n  margin: 0 0 12px;\n  padding: 0;\n  list-style: none;\n}\n\n.tos-check-ok { color: var(--tos-green); }\n.tos-check-no { color: var(--tos-red); }\n.tos-check-unknown { color: var(--tos-ltgray); }\n\n.tos-body {\n  display: grid;\n  /* The stage takes the leftover width. The rail stays a real column so the\n     guest can scale up without covering the Agent Log or Terry. */\n  grid-template-columns: minmax(0, 1fr) minmax(300px, 40%);\n  grid-template-rows: minmax(0, 1fr);\n  gap: 12px;\n  align-items: stretch;\n  flex: 1 1 auto;\n  min-height: 0;\n  min-width: 0;\n}\n\n.tos-stage {\n  grid-column: 1;\n  grid-row: 1;\n  align-self: stretch;\n  min-width: 0;\n  min-height: 0;\n  width: 100%;\n  height: 100%;\n}\n\n.tos-screen {\n  position: relative;\n  box-sizing: border-box;\n  background: var(--tos-black);\n  border: 1px solid var(--tos-dkgray);\n  image-rendering: pixelated;\n  overflow: hidden;\n  outline: none;\n  cursor: crosshair;\n  box-shadow: 0 0 0 1px var(--tos-black);\n}\n\n.tos-screen img {\n  display: block;\n  width: 100%;\n  height: 100%;\n  image-rendering: pixelated;\n  image-rendering: crisp-edges;\n}\n\n.tos-resize-handle {\n  position: absolute;\n  right: 0;\n  bottom: 0;\n  width: 16px;\n  height: 16px;\n  padding: 0;\n  border: 0;\n  z-index: 3;\n  cursor: nwse-resize;\n  touch-action: none;\n  background: linear-gradient(135deg, transparent 0 46%, var(--tos-cyan) 46% 62%, transparent 62% 70%, var(--tos-yellow) 70%);\n}\n\n.tos-screen.is-focused {\n  border-color: var(--tos-cyan);\n  box-shadow: 0 0 0 2px var(--tos-cyan);\n}\n\n.tos-placeholder {\n  display: flex;\n  align-items: center;\n  justify-content: center;\n  width: 100%;\n  height: 100%;\n  color: var(--tos-yellow);\n  text-align: center;\n  padding: 16px;\n  box-sizing: border-box;\n}\n\n.tos-hatch {\n  margin: 6px 0 0;\n  color: var(--tos-cyan);\n  font-size: 11px;\n  letter-spacing: 0.04em;\n}\n\n.tos-hatch-idle {\n  color: var(--tos-ltgray);\n}\n\n.tos-log {\n  grid-column: 2;\n  grid-row: 1;\n  align-self: start;\n  justify-self: stretch;\n  position: relative;\n  z-index: 8;\n  min-height: 200px;\n  max-height: 210px;\n  overflow: auto;\n  padding: 10px 12px;\n  border: 1px solid color-mix(in srgb, var(--tos-yellow) 35%, var(--tos-dkgray));\n  background: color-mix(in srgb, var(--tos-navy) 18%, var(--tos-black));\n}\n\n.tos-log-line,\n.tos-log p {\n  margin: 0 0 6px;\n  color: var(--tos-ltgray);\n  white-space: nowrap;\n  overflow: hidden;\n  text-overflow: ellipsis;\n}\n\n.tos-log-agent { color: var(--tos-cyan); }\n.tos-log-user { color: var(--tos-yellow); }\n.tos-log-line.is-failed { color: var(--tos-red); }\n.tos-log-empty { color: var(--ui-text-tertiary, var(--tos-dkgray)); }\n\n.tos-error { color: var(--tos-red); }\n.tos-info { color: var(--tos-cyan); }\n\n/* Temple of Hermes theme.\n   Palette: art/palette.json (TempleOS gr32_palette_std), branch hermes/art\n   @ 97d7ad2. Header strip, wallpaper and icons come from the same branch. */\n\n.tos-pane[data-theme=\"hermes\"] {\n  --tos-hermes-gold: #ffff55;\n  --tos-hermes-cyan: #55ffff;\n  --tos-hermes-azure: #5555ff;\n  --tos-hermes-violet: #ff55ff;\n  --tos-hermes-teal: #00aaaa;\n  --tos-hermes-marble: #aaaaaa;\n  --tos-hermes-ink: #000000;\n  --tos-hermes-deep: #0000aa;\n  color: var(--tos-hermes-gold);\n  background:\n    radial-gradient(120% 72% at 50% 0%, rgba(85, 85, 255, 0.22), rgba(0, 0, 0, 0) 62%),\n    linear-gradient(180deg, rgba(0, 0, 0, 0.74) 0 62px, rgba(0, 0, 0, 0.9) 62px),\n    var(--tos-hermes-wallpaper) center / cover no-repeat,\n    var(--tos-hermes-ink);\n}\n\n.tos-pane[data-theme=\"hermes\"] .tos-top {\n  position: relative;\n  padding: 10px 12px 13px;\n  border: 1px solid rgba(85, 255, 255, 0.42);\n  background:\n    linear-gradient(90deg, rgba(0, 0, 0, 0.88), rgba(0, 0, 0, 0.58) 60%, rgba(0, 0, 0, 0.88)),\n    var(--tos-hermes-header) center / cover no-repeat;\n  box-shadow:\n    inset 0 0 26px rgba(0, 0, 170, 0.5),\n    0 0 20px rgba(85, 255, 255, 0.14);\n}\n\n.tos-pane[data-theme=\"hermes\"] .tos-top::after {\n  content: \"\";\n  position: absolute;\n  left: 8px;\n  right: 8px;\n  bottom: 4px;\n  height: 3px;\n  background: repeating-linear-gradient(\n    90deg,\n    var(--tos-hermes-cyan) 0 2px,\n    transparent 2px 7px\n  );\n  opacity: 0.55;\n  pointer-events: none;\n}\n\n.tos-pane[data-theme=\"hermes\"] .tos-mark {\n  width: 30px;\n  height: 30px;\n  background: var(--tos-hermes-mark) center / contain no-repeat;\n  image-rendering: pixelated;\n  box-shadow:\n    0 0 0 1px rgba(255, 255, 85, 0.7),\n    0 0 12px rgba(85, 255, 255, 0.35);\n}\n\n.tos-pane[data-theme=\"hermes\"] .tos-brand strong {\n  color: var(--tos-hermes-gold);\n  text-shadow: 0 0 10px rgba(255, 255, 85, 0.28);\n}\n\n.tos-pane[data-theme=\"hermes\"] .tos-brand em {\n  color: var(--tos-hermes-cyan);\n}\n\n.tos-pane[data-theme=\"hermes\"] .tos-badge {\n  color: var(--tos-hermes-cyan);\n  border-color: rgba(85, 255, 255, 0.55);\n  background: rgba(0, 0, 170, 0.18);\n}\n\n.tos-pane[data-theme=\"hermes\"] .tos-badge-accel {\n  color: var(--tos-hermes-gold);\n  border-color: rgba(255, 255, 85, 0.6);\n}\n\n.tos-pane[data-theme=\"hermes\"] .tos-chip {\n  color: var(--tos-hermes-violet);\n  border-color: rgba(255, 85, 255, 0.5);\n  background: rgba(255, 85, 255, 0.16);\n}\n\n.tos-pane[data-theme=\"hermes\"] .tos-btn {\n  color: var(--tos-hermes-gold);\n  border-color: rgba(255, 255, 85, 0.5);\n  background: linear-gradient(180deg, rgba(0, 0, 170, 0.35), rgba(0, 0, 0, 0.45));\n}\n\n.tos-pane[data-theme=\"hermes\"] .tos-btn:hover:not(:disabled) {\n  color: var(--tos-white);\n  border-color: var(--tos-hermes-cyan);\n  background: linear-gradient(180deg, rgba(85, 85, 255, 0.42), rgba(0, 0, 170, 0.6));\n}\n\n.tos-pane[data-theme=\"hermes\"] .tos-btn.is-on,\n.tos-pane[data-theme=\"hermes\"] .tos-primary {\n  color: var(--tos-white);\n  border-color: var(--tos-hermes-cyan);\n  background: linear-gradient(180deg, rgba(85, 85, 255, 0.48), rgba(0, 0, 170, 0.62));\n  box-shadow: 0 0 10px rgba(85, 255, 255, 0.2);\n}\n\n.tos-pane[data-theme=\"hermes\"] .tos-theme {\n  color: var(--tos-hermes-violet);\n  border-color: rgba(255, 85, 255, 0.55);\n}\n\n.tos-pane[data-theme=\"hermes\"] .tos-theme::before {\n  content: \"\";\n  display: inline-block;\n  width: 12px;\n  height: 12px;\n  margin-right: 5px;\n  vertical-align: -2px;\n  background: var(--tos-hermes-nous) center / contain no-repeat;\n  image-rendering: pixelated;\n}\n\n.tos-pane[data-theme=\"hermes\"] .tos-drive {\n  color: var(--tos-hermes-cyan);\n  border-color: var(--tos-hermes-cyan);\n  background: linear-gradient(90deg, rgba(0, 0, 170, 0.58), rgba(0, 0, 0, 0.72));\n  box-shadow: 0 0 12px rgba(85, 255, 255, 0.12);\n}\n\n.tos-pane[data-theme=\"hermes\"] .tos-drive-user {\n  color: var(--tos-green);\n  border-color: var(--tos-green);\n}\n\n.tos-pane[data-theme=\"hermes\"] .tos-onboard {\n  border-color: rgba(85, 255, 255, 0.42);\n  background:\n    linear-gradient(180deg, rgba(0, 0, 170, 0.3), rgba(0, 0, 0, 0.62));\n  box-shadow: inset 0 0 22px rgba(0, 0, 170, 0.38);\n}\n\n.tos-pane[data-theme=\"hermes\"] .tos-onboard h2,\n.tos-pane[data-theme=\"hermes\"] .tos-log h2 {\n  color: var(--tos-hermes-gold);\n}\n\n.tos-pane[data-theme=\"hermes\"] .tos-log h2::before {\n  content: \"\";\n  display: inline-block;\n  width: 16px;\n  height: 16px;\n  margin-right: 6px;\n  vertical-align: -3px;\n  background: var(--tos-hermes-chat) center / contain no-repeat;\n  image-rendering: pixelated;\n}\n\n.tos-pane[data-theme=\"hermes\"] .tos-hint::before {\n  content: \"\";\n  display: inline-block;\n  width: 16px;\n  height: 16px;\n  margin-right: 6px;\n  vertical-align: -3px;\n  background: var(--tos-hermes-capy) center / contain no-repeat;\n  image-rendering: pixelated;\n}\n\n.tos-pane[data-theme=\"hermes\"] .tos-screen {\n  border-color: rgba(85, 255, 255, 0.45);\n  box-shadow:\n    0 0 0 1px var(--tos-hermes-ink),\n    0 0 26px rgba(0, 0, 170, 0.5);\n}\n\n.tos-pane[data-theme=\"hermes\"] .tos-screen.is-focused {\n  border-color: var(--tos-hermes-cyan);\n  box-shadow:\n    0 0 0 2px var(--tos-hermes-cyan),\n    0 0 30px rgba(85, 255, 255, 0.3);\n}\n\n.tos-pane[data-theme=\"hermes\"] .tos-log {\n  border-color: rgba(255, 255, 85, 0.32);\n  background:\n    linear-gradient(180deg, rgba(0, 0, 170, 0.22), rgba(0, 0, 0, 0.7));\n  box-shadow: inset 0 0 18px rgba(0, 0, 170, 0.32);\n}\n\n.tos-pane[data-theme=\"hermes\"] .tos-log-agent {\n  color: var(--tos-hermes-cyan);\n}\n\n.tos-pane[data-theme=\"hermes\"] .tos-log-user {\n  color: var(--tos-hermes-gold);\n}\n\n.tos-pane[data-theme=\"hermes\"] .tos-log-line.is-failed,\n.tos-pane[data-theme=\"hermes\"] .tos-error {\n  color: var(--tos-red);\n}\n\n.tos-pane[data-theme=\"hermes\"] .tos-info,\n.tos-pane[data-theme=\"hermes\"] .tos-hatch {\n  color: var(--tos-hermes-cyan);\n}\n\n.tos-pane[data-theme=\"hermes\"] .tos-check-ok {\n  color: var(--tos-green);\n}\n\n.tos-pane[data-theme=\"hermes\"] .tos-check-no {\n  color: var(--tos-red);\n}\n\n.tos-pane[data-theme=\"hermes\"] .tos-check-unknown {\n  color: var(--tos-hermes-marble);\n}\n\n@media (max-width: 900px) {\n  .tos-body {\n    grid-template-columns: 1fr;\n  }\n  .tos-chip {\n    margin-left: 0;\n  }\n}\n\n/* Terry companion dock (fan tribute). The stage row is a contents wrapper:\n   the guest screen keeps the left grid cell while the Agent Log and the\n   companion share the right rail. The log sits at the top of the rail and\n   huge Terry fills the rail from under it down to the bottom of the pane. */\n.tos-stage-row {\n  display: contents;\n}\n\n.tos-companion-dock {\n  grid-column: 2;\n  grid-row: 1;\n  align-self: end;\n  justify-self: stretch;\n  position: relative;\n  z-index: 5;\n  width: 100%;\n  min-width: 0;\n  height: var(--tos-companion-h, 750px);\n  min-height: 0;\n  display: flex;\n  flex-direction: column;\n  justify-content: flex-end;\n  align-items: stretch;\n  box-sizing: border-box;\n  overflow: visible;\n}\n\n.tos-companion-bubble {\n  position: absolute;\n  top: 0;\n  left: 0;\n  z-index: 7;\n  max-width: min(100%, 340px);\n  min-width: 140px;\n  padding: 10px 14px;\n  border: 1px solid color-mix(in srgb, var(--tos-yellow) 55%, var(--tos-dkgray));\n  border-radius: 12px 12px 2px 12px;\n  background: color-mix(in srgb, var(--tos-navy) 70%, var(--tos-black));\n  color: var(--tos-yellow);\n  font-size: 15px;\n  line-height: 1.35;\n  letter-spacing: 0.01em;\n  overflow-wrap: anywhere;\n  word-break: break-word;\n  pointer-events: none;\n}\n\n.tos-companion-bubble-slot {\n  /* The bubble is positioned over the transparent crown of the sprite box,\n     so it needs no flow space in the dock. */\n  position: absolute;\n  inset: 0 0 auto 0;\n  height: 0;\n  pointer-events: none;\n}\n\n.tos-companion {\n  position: relative;\n  align-self: stretch;\n  z-index: 6;\n  width: 100%;\n  height: var(--tos-companion-h, 750px);\n  pointer-events: auto;\n  cursor: pointer;\n  image-rendering: auto;\n  filter: drop-shadow(0 6px 10px rgba(0, 0, 0, 0.55));\n}\n\n/* Static sprite sheet used by the screenshot harness and docs render.\n   atlas.png is 1536x1872 (8x9 cells); 800%/900% makes one 192x208 cell\n   fill the sprite box exactly, so the existing art scales enormously\n   without generating or redrawing anything. */\n.tos-companion-static {\n  background-repeat: no-repeat;\n  background-size: 800% 900%;\n  background-position: 0 0;\n}\n\n.tos-companion-canvas {\n  width: 100%;\n  height: 100%;\n  display: block;\n  image-rendering: auto;\n}\n\n.tos-companion-loading {\n  position: absolute;\n  inset: 0;\n  display: flex;\n  align-items: flex-end;\n  justify-content: center;\n  padding: 12px;\n  color: var(--tos-ltgray);\n  font-size: 14px;\n  pointer-events: none;\n}\n\n.tos-companion-controls {\n  display: inline-flex;\n  gap: 6px;\n  align-items: center;\n  margin-left: auto;\n}\n\n.tos-companion-costume select {\n  font: inherit;\n  color: var(--tos-yellow);\n  background: var(--tos-black);\n  border: 1px solid color-mix(in srgb, var(--tos-yellow) 55%, var(--tos-dkgray));\n  border-radius: 2px;\n  padding: 2px 6px;\n}\n\n.tos-sr-only {\n  position: absolute;\n  width: 1px;\n  height: 1px;\n  padding: 0;\n  margin: -1px;\n  overflow: hidden;\n  clip: rect(0, 0, 0, 0);\n  white-space: nowrap;\n  border: 0;\n}\n\n.tos-pane[data-theme=\"hermes\"] {\n  --tos-companion-width: 100%;\n  --tos-companion-h: 750px;\n}\n\n/* Fill the right-hand cell under the Agent Log. The 750px variable above\n   stays the fallback; the cell size wins so a short pane still shows Terry. */\n.tos-pane .tos-companion-dock {\n  align-self: stretch;\n  height: 100%;\n  max-height: 100%;\n  min-height: 0;\n}\n\n.tos-pane .tos-companion {\n  height: 100%;\n  max-height: 100%;\n  min-height: 0;\n}\n\n.tos-pane[data-theme=\"hermes\"] .tos-companion-dock {\n  padding: 6px 6px 4px;\n  border: 1px solid rgba(85, 255, 255, 0.28);\n  background:\n    linear-gradient(180deg, rgba(0, 0, 170, 0.22), rgba(0, 0, 0, 0.62));\n  box-shadow: inset 0 0 18px rgba(0, 0, 170, 0.35);\n}\n\n.tos-pane[data-theme=\"hermes\"] .tos-companion-bubble {\n  border-color: rgba(85, 255, 255, 0.62);\n  background:\n    linear-gradient(180deg, rgba(85, 85, 255, 0.34), rgba(0, 0, 170, 0.4));\n  color: var(--tos-hermes-gold);\n  box-shadow:\n    0 0 0 1px rgba(0, 0, 0, 0.55),\n    0 0 12px rgba(85, 255, 255, 0.16);\n}\n\n.tos-pane[data-theme=\"hermes\"] .tos-companion-hide {\n  color: var(--tos-hermes-violet);\n  border-color: rgba(255, 85, 255, 0.55);\n}\n\n.tos-pane[data-theme=\"hermes\"] .tos-companion-costume select {\n  color: var(--tos-hermes-gold);\n  border-color: rgba(85, 255, 255, 0.55);\n  background: rgba(0, 0, 0, 0.78);\n}\n\n@media (max-width: 900px) {\n  .tos-stage,\n  .tos-log,\n  .tos-companion-dock {\n    grid-column: 1;\n    grid-row: auto;\n    justify-self: stretch;\n  }\n\n  .tos-stage {\n    align-self: start;\n  }\n\n  .tos-log {\n    order: 2;\n  }\n\n  .tos-companion-dock {\n    order: 3;\n    align-self: end;\n  }\n}\n";
 
 function injectTempleOSStyles() {
   if (typeof document === "undefined") return false;

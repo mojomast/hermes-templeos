@@ -13,12 +13,19 @@ import {
   POLL_VISIBLE_MS,
   accelLabel,
   drivingChip,
+  clampScreenWidth,
+  fitGuestDisplay,
   guestSize,
   integerScale,
   isReleaseHatch,
   keyEventToPayload,
   logLine,
   mapPointerToGuest,
+  maxScreenWidth,
+  measureScreenSpace,
+  parseScreenPref,
+  screenDisplay,
+  serializeScreenPref,
   modeLabel,
   checkState,
   firstCheck,
@@ -60,6 +67,86 @@ test("pointer mapping is absolute guest coordinates and clamps", () => {
   assert.deepEqual(mapPointerToGuest(650, 500, rect, 640, 480), { x: 320, y: 240 });
   assert.deepEqual(mapPointerToGuest(1290, 980, rect, 640, 480), { x: 639, y: 479 });
   assert.deepEqual(mapPointerToGuest(-20, -20, rect, 640, 480), { x: 0, y: 0 });
+});
+
+test("pointer mapping stays correct at fractional CSS scales", () => {
+  const rect = { left: 0, top: 0, width: 920, height: 690 };
+  assert.deepEqual(mapPointerToGuest(460, 345, rect, 640, 480), { x: 320, y: 240 });
+  const fractional = { left: 12.5, top: 8.25, width: 960.5, height: 720.4 };
+  assert.deepEqual(
+    mapPointerToGuest(12.5 + 960.5 * 0.5, 8.25 + 720.4 * 0.25, fractional, 640, 480),
+    { x: 320, y: 120 }
+  );
+  assert.deepEqual(mapPointerToGuest(12.5 + 960.5, 8.25 + 720.4, fractional, 640, 480), { x: 639, y: 479 });
+  const below = { left: 0, top: 0, width: 320, height: 240 };
+  assert.deepEqual(mapPointerToGuest(160, 120, below, 640, 480), { x: 320, y: 240 });
+});
+
+test("fit scale subtracts the right rail and keeps the guest aspect", () => {
+  const wide = fitGuestDisplay({ width: 1600, height: 900 }, { width: 640, height: 480 }, 360, 12);
+  assert.equal(wide.availableWidth, 1228);
+  assert.equal(wide.availableHeight, 900);
+  assert.equal(wide.scale, 1.875);
+  assert.equal(wide.width, 1200);
+  assert.equal(wide.height, 900);
+
+  const small = fitGuestDisplay({ width: 700, height: 420 }, { width: 640, height: 480 }, 300, 12);
+  assert.equal(small.availableWidth, 388);
+  assert.ok(Math.abs(small.scale - 0.60625) < 1e-9);
+  assert.ok(Math.abs(small.width - 388) < 1e-6);
+  assert.ok(Math.abs(small.height - 291) < 1e-6);
+
+  const unmeasured = fitGuestDisplay({ width: 0, height: 0 }, { width: 640, height: 480 }, 0, 12);
+  assert.deepEqual(
+    { scale: unmeasured.scale, width: unmeasured.width, height: unmeasured.height },
+    { scale: 1, width: 640, height: 480 }
+  );
+});
+
+test("screen space uses a side-by-side rail and ignores a stacked one", () => {
+  const side = measureScreenSpace({
+    bodyWidth: 1600,
+    stageWidth: 900,
+    stageRight: 920,
+    stageHeight: 800,
+    railWidth: 668,
+    railLeft: 932,
+    hatchHeight: 20,
+  });
+  assert.deepEqual(side, { width: 1600, height: 780, rail: 668, gap: 12 });
+  const fitted = fitGuestDisplay({ width: side.width, height: side.height }, { width: 640, height: 480 }, side.rail, side.gap);
+  assert.equal(fitted.availableWidth, 920);
+  assert.equal(fitted.scale, 1.4375);
+  assert.equal(fitted.width, 920);
+  assert.equal(fitted.height, 690);
+
+  const stacked = measureScreenSpace({
+    bodyWidth: 700,
+    stageWidth: 700,
+    stageRight: 700,
+    stageHeight: 400,
+    railWidth: 700,
+    railLeft: 0,
+    railTop: 420,
+    hatchHeight: 20,
+  });
+  assert.equal(stacked.rail, 0);
+  assert.equal(stacked.width, 700);
+});
+
+test("manual width stays between the guest native size and the remaining space", () => {
+  assert.equal(maxScreenWidth(1228, 900, 640, 480), 1200);
+  assert.equal(clampScreenWidth(400, 640, 1200), 640);
+  assert.equal(clampScreenWidth(2000, 640, 1200), 1200);
+  assert.equal(clampScreenWidth(960, 640, 1200), 960);
+  const manual = screenDisplay({ mode: "manual", width: 960 }, { width: 1600, height: 900 }, { width: 640, height: 480 }, 360, 12);
+  assert.equal(manual.mode, "manual");
+  assert.equal(manual.width, 960);
+  assert.equal(manual.height, 720);
+  const restored = parseScreenPref(serializeScreenPref({ mode: "manual", width: 960.4 }));
+  assert.deepEqual(restored, { mode: "manual", width: 960 });
+  assert.deepEqual(parseScreenPref("nope"), { mode: "fit", width: 0 });
+  assert.equal(serializeScreenPref({ mode: "fit", width: 0 }), '{"mode":"fit","width":0}');
 });
 
 test("adaptive polling stays at or under 5 fps and backs off when idle, hidden, or slow", () => {

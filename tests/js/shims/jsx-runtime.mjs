@@ -3,7 +3,7 @@
 let fiber = null;
 
 function ensure() {
-  if (!fiber) fiber = { hooks: [], cursor: 0, effects: [], rendering: false };
+  if (!fiber) fiber = { hooks: [], cursor: 0, effectCursor: 0, effects: [], effectSlots: [], rendering: false };
   return fiber;
 }
 
@@ -29,8 +29,31 @@ export function useRef(init) {
   return current.hooks[index];
 }
 
-export function useEffect(fn) {
-  ensure().effects.push(fn);
+function sameDeps(a, b) {
+  if (!Array.isArray(a) || !Array.isArray(b)) return false;
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i += 1) {
+    if (!Object.is(a[i], b[i])) return false;
+  }
+  return true;
+}
+
+export function useMemo(factory, deps) {
+  const current = ensure();
+  const index = current.cursor;
+  current.cursor += 1;
+  const prev = current.hooks[index];
+  if (prev && prev.__memo && sameDeps(prev.deps, deps)) return prev.value;
+  const value = factory();
+  current.hooks[index] = { __memo: true, deps: deps, value: value };
+  return value;
+}
+
+export function useEffect(fn, deps) {
+  const current = ensure();
+  const index = current.effectCursor;
+  current.effectCursor += 1;
+  current.effects.push({ index: index, fn: fn, deps: deps });
 }
 
 export function jsx(type, props, key) {
@@ -41,6 +64,7 @@ export function jsx(type, props, key) {
     const root = !current.rendering;
     if (root) {
       current.cursor = 0;
+      current.effectCursor = 0;
       current.effects = [];
       current.rendering = true;
     }
@@ -66,10 +90,18 @@ export function rerender(type, props) {
 
 export function flushEffects() {
   const current = ensure();
-  const effects = current.effects.splice(0);
+  const pending = current.effects.splice(0);
+  if (!current.effectSlots) current.effectSlots = [];
   const cleanups = [];
-  for (const fn of effects) {
-    const cleanup = fn();
+  for (const effect of pending) {
+    const prev = current.effectSlots[effect.index];
+    if (prev && sameDeps(prev.deps, effect.deps)) continue;
+    if (prev && typeof prev.cleanup === "function") prev.cleanup();
+    const cleanup = effect.fn();
+    current.effectSlots[effect.index] = {
+      deps: effect.deps,
+      cleanup: typeof cleanup === "function" ? cleanup : null,
+    };
     if (typeof cleanup === "function") cleanups.push(cleanup);
   }
   return cleanups;
