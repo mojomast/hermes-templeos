@@ -609,6 +609,12 @@ const shots = {
   },
 };
 
+if (process.env.TEMPLEOS_SHOT_REST === "1") {
+  const { shootRestPane } = await import("./shoot_rest_pane.mjs");
+  await shootRestPane({ root: ROOT, css: CSS, chrome: findChrome() });
+  process.exit(0);
+}
+
 mkdirSync(OUT, { recursive: true });
 const chrome = findChrome();
 for (const [name, shot] of Object.entries(shots)) {

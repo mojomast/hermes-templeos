@@ -1,6 +1,8 @@
 /* TempleOS pane. 16-color accents on Hermes chrome variables. */
 
 .tos-pane {
+  height: 100%;
+  min-height: 0;
   color-scheme: dark;
   --tos-black: #000000;
   --tos-navy: #0000aa;
@@ -211,20 +213,30 @@
 
 .tos-body {
   display: grid;
-  grid-template-columns: max-content minmax(300px, 1fr);
+  /* The stage takes the leftover width. The rail stays a real column so the
+     guest can scale up without covering the Agent Log or Terry. */
+  grid-template-columns: minmax(0, 1fr) minmax(300px, 40%);
+  grid-template-rows: minmax(0, 1fr);
   gap: 12px;
-  align-items: start;
+  align-items: stretch;
+  flex: 1 1 auto;
   min-height: 0;
+  min-width: 0;
 }
 
 .tos-stage {
   grid-column: 1;
   grid-row: 1;
-  align-self: start;
+  align-self: stretch;
   min-width: 0;
+  min-height: 0;
+  width: 100%;
+  height: 100%;
 }
 
 .tos-screen {
+  position: relative;
+  box-sizing: border-box;
   background: var(--tos-black);
   border: 1px solid var(--tos-dkgray);
   image-rendering: pixelated;
@@ -236,8 +248,24 @@
 
 .tos-screen img {
   display: block;
+  width: 100%;
+  height: 100%;
   image-rendering: pixelated;
   image-rendering: crisp-edges;
+}
+
+.tos-resize-handle {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  border: 0;
+  z-index: 3;
+  cursor: nwse-resize;
+  touch-action: none;
+  background: linear-gradient(135deg, transparent 0 46%, var(--tos-cyan) 46% 62%, transparent 62% 70%, var(--tos-yellow) 70%);
 }
 
 .tos-screen.is-focused {
@@ -655,6 +683,21 @@
 .tos-pane[data-theme="hermes"] {
   --tos-companion-width: 100%;
   --tos-companion-h: 750px;
+}
+
+/* Fill the right-hand cell under the Agent Log. The 750px variable above
+   stays the fallback; the cell size wins so a short pane still shows Terry. */
+.tos-pane .tos-companion-dock {
+  align-self: stretch;
+  height: 100%;
+  max-height: 100%;
+  min-height: 0;
+}
+
+.tos-pane .tos-companion {
+  height: 100%;
+  max-height: 100%;
+  min-height: 0;
 }
 
 .tos-pane[data-theme="hermes"] .tos-companion-dock {

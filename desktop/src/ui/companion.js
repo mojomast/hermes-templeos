@@ -60,6 +60,86 @@ function hostClip(name) {
   return HOST_MAP[name] || name || "idle";
 }
 
+/** One decoded v4 bundle for this page. Identity changes of ctx.rest must not
+ *  refetch it, and a hide/show cycle reuses the same images. */
+let sessionBundle = null;
+let sessionInflight = null;
+let sessionEpoch = 0;
+
+export function resetTerrySession() {
+  sessionEpoch += 1;
+  sessionBundle = null;
+  sessionInflight = null;
+}
+
+function loadPartImages(parts) {
+  const images = new Map();
+  const entries = Object.entries(parts || {});
+  return Promise.all(
+    entries.map(
+      ([path, data]) =>
+        new Promise((resolve) => {
+          if (typeof Image === "undefined" || !data) {
+            resolve();
+            return;
+          }
+          const image = new Image();
+          image.onload = () => {
+            images.set(path, image);
+            resolve();
+          };
+          image.onerror = () => resolve();
+          image.src = "data:image/png;base64," + data;
+        })
+    )
+  ).then(() => images);
+}
+
+function bundleFromBody(body) {
+  if (!body || body.ok === false || !body.registry) {
+    const error = new Error((body && body.error) || "Could not load the Terry v4 rig.");
+    error.fix = (body && body.fix) || "";
+    throw error;
+  }
+  return loadPartImages(body.parts).then((images) => ({
+    registry: body.registry,
+    speech: body.speech || { events: [], duration_ms: 2600 },
+    smoke: body.smoke || {},
+    costumes: body.costumes || {},
+    images: images,
+  }));
+}
+
+function failText(err) {
+  const message = (err && err.message) || "Terry v4 request failed.";
+  const fix = err && err.fix;
+  return fix ? message + " " + fix : message;
+}
+
+function fetchBundle(api) {
+  if (sessionBundle) return Promise.resolve(sessionBundle);
+  if (sessionInflight) return sessionInflight;
+  if (!api || typeof api.companionClip !== "function") {
+    return Promise.reject(new Error("Terry v4 is not available in this host."));
+  }
+  const epoch = sessionEpoch;
+  const pending = Promise.resolve(api.companionClip({ name: "v4:bundle" }))
+    .then((body) => bundleFromBody(body))
+    .then((bundle) => {
+      if (epoch === sessionEpoch) {
+        sessionBundle = bundle;
+        sessionInflight = null;
+      }
+      return bundle;
+    })
+    .catch((err) => {
+      if (epoch === sessionEpoch) sessionInflight = null;
+      throw err;
+    });
+  sessionInflight = pending;
+  return pending;
+}
+
 /** Canvas rig that plays baked v4 clips via requestAnimationFrame. */
 export function TerryCompanionOverlay({ api, animation, costume, hidden, enabled, speech }) {
   const canvasRef = useRef(null);
@@ -77,8 +157,10 @@ export function TerryCompanionOverlay({ api, animation, costume, hidden, enabled
   const lastNameRef = useRef("");
   const clicksRef = useRef([]);
   const bubbleRef = useRef(bubble);
+  const apiRef = useRef(api);
 
   const hostAnim = animation || "idle";
+  apiRef.current = api;
   bubbleRef.current = bubble;
 
   useEffect(() => {
@@ -90,15 +172,16 @@ export function TerryCompanionOverlay({ api, animation, costume, hidden, enabled
     TerryCompanion._say = (text, opts) => {
       const raw = String(text || "").trim();
       setBubble(raw);
-      if (typeof api.companionSay === "function") {
-        return Promise.resolve(api.companionSay({ say: raw, hold_s: opts && opts.hold_s })).catch(() => {});
+      const live = apiRef.current;
+      if (live && typeof live.companionSay === "function") {
+        return Promise.resolve(live.companionSay({ say: raw, hold_s: opts && opts.hold_s })).catch(() => {});
       }
       return Promise.resolve();
     };
     return () => {
       if (TerryCompanion._say) TerryCompanion._say = null;
     };
-  }, [api]);
+  }, []);
 
   function ensureClip(name) {
     const token = hostClip(name);
@@ -106,8 +189,9 @@ export function TerryCompanionOverlay({ api, animation, costume, hidden, enabled
     const cached = clipsRef.current.get(token);
     if (cached && cached.clip) return Promise.resolve(cached.clip);
     if (cached && cached.pending) return cached.pending;
-    if (typeof api.companionClip !== "function") return Promise.resolve(null);
-    const pending = Promise.resolve(api.companionClip({ name: "v4:" + token }))
+    const live = apiRef.current;
+    if (!live || typeof live.companionClip !== "function") return Promise.resolve(null);
+    const pending = Promise.resolve(live.companionClip({ name: "v4:" + token }))
       .then((body) => {
         if (!body || body.ok === false || !body.clip) {
           clipsRef.current.delete(token);
@@ -152,68 +236,27 @@ export function TerryCompanionOverlay({ api, animation, costume, hidden, enabled
       setReady(false);
       return undefined;
     }
-    if (bundleRef.current) {
-      setReady(true);
-      return undefined;
-    }
-    if (typeof api.companionClip !== "function") {
-      setError("Terry v4 is not available in this host.");
-      setReady(false);
-      return undefined;
-    }
     let cancelled = false;
-    Promise.resolve(api.companionClip({ name: "v4:bundle" }))
-      .then((body) => {
-        if (cancelled) return null;
-        if (!body || body.ok === false || !body.registry) {
-          setError((body && body.error) || "Could not load the Terry v4 rig.");
-          setReady(false);
-          return null;
-        }
-        const images = new Map();
-        const entries = Object.entries(body.parts || {});
-        return Promise.all(
-          entries.map(
-            ([path, data]) =>
-              new Promise((resolve) => {
-                if (typeof Image === "undefined") {
-                  resolve();
-                  return;
-                }
-                const image = new Image();
-                image.onload = () => {
-                  images.set(path, image);
-                  resolve();
-                };
-                image.onerror = () => resolve();
-                image.src = "data:image/png;base64," + data;
-              })
-          )
-        ).then(() => {
-          if (cancelled) return;
-          bundleRef.current = {
-            registry: body.registry,
-            speech: body.speech || { events: [], duration_ms: 2600 },
-            smoke: body.smoke || {},
-            costumes: body.costumes || {},
-            images,
-          };
-          setError("");
-          setReady(true);
-          ensureClip("idle");
-          ensureClip(hostClip(hostAnim));
-        });
+    // api is read from a ref. A new host object must not cancel the in-flight
+    // GET /companion/clip?name=v4:bundle or start another one.
+    fetchBundle(apiRef.current)
+      .then((bundle) => {
+        if (cancelled || !bundle) return;
+        bundleRef.current = bundle;
+        setError("");
+        setReady(true);
+        ensureClip("idle");
+        ensureClip(hostClip(hostAnim));
       })
       .catch((err) => {
-        if (!cancelled) {
-          setError((err && err.message) || "Terry v4 request failed.");
-          setReady(false);
-        }
+        if (cancelled) return;
+        setError(failText(err));
+        setReady(false);
       });
     return () => {
       cancelled = true;
     };
-  }, [api, hidden, enabled]);
+  }, [hidden, enabled]);
 
   useEffect(() => {
     if (ready) ensureClip(hostClip(hostAnim));
@@ -330,10 +373,13 @@ export function TerryCompanionOverlay({ api, animation, costume, hidden, enabled
   if (enabled === false) return null;
   if (hidden) return null;
 
+  const statusText = error ? error : ready ? "" : "Summoning Terry…";
+
   return jsxs("aside", {
     className: "tos-companion-dock",
     "data-testid": "companion-dock",
     "data-animation": animRef.current || hostAnim || "idle",
+    "data-ready": ready ? "1" : "0",
     "aria-label": "Terry companion",
     children: [
       bubble
@@ -361,11 +407,12 @@ export function TerryCompanionOverlay({ api, animation, costume, hidden, enabled
             height: 208,
             "aria-hidden": "true",
           }),
-          error
+          statusText
             ? jsx("div", {
                 className: "tos-companion-loading",
                 "data-testid": "companion-loading",
-                children: error,
+                "data-state": error ? "error" : "loading",
+                children: statusText,
               })
             : null,
         ],

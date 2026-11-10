@@ -1,5 +1,5 @@
 import { jsx, jsxs } from "react/jsx-runtime";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { createApi, blobUrlFromBase64, revokeUrl, errorText, isAbortError } from "./api.js";
 import { getHostTransport } from "./host.js";
 import { CompanionControls, TerryCompanionOverlay } from "./companion.js";
@@ -8,18 +8,24 @@ import {
   GOLDEN_SNAPSHOT,
   accelLabel,
   drivingChip,
+  clampScreenWidth,
+  fitGuestDisplay,
   flavorLabel,
   guestSize,
-  integerScale,
   keyEventToPayload,
   logLine,
   mapPointerToGuest,
+  maxScreenWidth,
+  measureScreenSpace,
   checkState,
   firstCheck,
   needsOnboarding,
   pollIntervalMs,
+  readStoredScreenPref,
+  screenDisplay,
   statusSummary,
   userMayInput,
+  writeStoredScreenPref,
 } from "./logic.js";
 
 function documentIsHidden() {
@@ -41,6 +47,48 @@ function themeStyle(theme) {
 function applyStatus(body, setStatus) {
   if (!body || typeof body !== "object") return;
   setStatus((prev) => ({ ...prev, ...body }));
+}
+
+function rectOf(node) {
+  if (!node || typeof node.getBoundingClientRect !== "function") {
+    return { width: 0, height: 0, left: 0, top: 0, right: 0, bottom: 0 };
+  }
+  const rect = node.getBoundingClientRect();
+  return {
+    width: Number(rect.width) || 0,
+    height: Number(rect.height) || 0,
+    left: Number(rect.left) || 0,
+    top: Number(rect.top) || 0,
+    right: Number(rect.right) || 0,
+    bottom: Number(rect.bottom) || 0,
+  };
+}
+
+function measurePane(stage) {
+  const body = stage && typeof stage.closest === "function" ? stage.closest(".tos-body") : null;
+  const root = body || stage;
+  const bodyRect = rectOf(root);
+  const stageRect = rectOf(stage);
+  let railWidth = 0;
+  let railLeft = Infinity;
+  if (root && typeof root.querySelectorAll === "function") {
+    root.querySelectorAll(".tos-log, .tos-companion-dock").forEach((node) => {
+      const rect = rectOf(node);
+      if (rect.width > railWidth) railWidth = rect.width;
+      if (rect.width > 0 && rect.left < railLeft) railLeft = rect.left;
+    });
+  }
+  const hatch = stage && typeof stage.querySelector === "function" ? stage.querySelector(".tos-hatch") : null;
+  const hatchHeight = hatch ? rectOf(hatch).height + 8 : 28;
+  return measureScreenSpace({
+    bodyWidth: bodyRect.width,
+    stageWidth: stageRect.width,
+    stageHeight: stageRect.height,
+    stageRight: stageRect.right,
+    railWidth: railWidth,
+    railLeft: Number.isFinite(railLeft) ? railLeft : null,
+    hatchHeight: hatchHeight,
+  });
 }
 
 function defaultStatus(initial) {
@@ -69,7 +117,9 @@ function defaultStatus(initial) {
 export function TempleOSPane({ transport, initial } = {}) {
   const host = transport || getHostTransport() || {};
   const skip = !!(initial && initial.skipLoad);
-  const api = createApi(host.rest);
+  const api = useMemo(() => createApi(host.rest), [host.rest]);
+  const apiRef = useRef(api);
+  apiRef.current = api;
   const [status, setStatus] = useState(defaultStatus(initial && initial.status));
   const [error, setError] = useState((initial && initial.error) || "");
   const [info, setInfo] = useState((initial && initial.info) || "");
@@ -88,7 +138,19 @@ export function TempleOSPane({ transport, initial } = {}) {
   );
   const [theme, setTheme] = useState((initial && initial.theme) || "hermes");
   const [unchanged, setUnchanged] = useState(!!(initial && initial.unchanged));
-  const [viewport] = useState((initial && initial.viewport) || { width: 1280, height: 960 });
+  const [screenPref, setScreenPref] = useState(() => {
+    if (initial && initial.screenPref) return { mode: initial.screenPref.mode === "manual" ? "manual" : "fit", width: Number(initial.screenPref.width) || 0 };
+    return readStoredScreenPref();
+  });
+  const [box, setBox] = useState(() => {
+    const vp = initial && initial.viewport;
+    if (!vp) return { width: 0, height: 0, rail: 0 };
+    return {
+      width: Number(vp.width) || 0,
+      height: Number(vp.height) || 0,
+      rail: Number(vp.rail) || 0,
+    };
+  });
   const prevUrl = useRef((initial && initial.frameUrl) || "");
   const shaRef = useRef((initial && initial.sha256) || "");
   const statusRef = useRef(status);
@@ -97,6 +159,11 @@ export function TempleOSPane({ transport, initial } = {}) {
   const hiddenRef = useRef(hidden);
   const lastFrameAt = useRef(0);
   const screenRef = useRef(null);
+  const stageRef = useRef(null);
+  const spaceRef = useRef(box);
+  const sizeRef = useRef({ width: 640, height: 480 });
+  const scaledRef = useRef({ width: 640, height: 480 });
+  spaceRef.current = box;
   statusRef.current = status;
   focusedRef.current = focused;
   unchangedRef.current = unchanged;
@@ -127,7 +194,7 @@ export function TempleOSPane({ transport, initial } = {}) {
         focused: focusedRef.current,
         slow: slowRef.current,
       });
-      api
+      apiRef.current
         .status()
         .then((body) => {
           if (!cancelled) {
@@ -142,7 +209,7 @@ export function TempleOSPane({ transport, initial } = {}) {
         .catch((err) => {
           if (!cancelled) noteError(err);
         });
-      api
+      apiRef.current
         .log()
         .then((body) => {
           if (!cancelled) refreshLog(body);
@@ -154,7 +221,7 @@ export function TempleOSPane({ transport, initial } = {}) {
       lastFrameAt.current = now;
       const since = shaRef.current;
       const frameStarted = Date.now();
-      api
+      apiRef.current
         .frame(since ? { since } : undefined)
         .then((body) => {
           if (cancelled) return;
@@ -198,6 +265,84 @@ export function TempleOSPane({ transport, initial } = {}) {
       prevUrl.current = "";
     };
   }, [skip]);
+
+  useEffect(() => {
+    writeStoredScreenPref(screenPref);
+  }, [screenPref.mode, screenPref.width]);
+
+  useEffect(() => {
+    const stage = stageRef.current;
+    if (!stage || typeof ResizeObserver === "undefined") return undefined;
+    let frame = 0;
+    const measure = () => {
+      const next = measurePane(stage);
+      if (!next || next.width <= 0 || next.height <= 0) return;
+      setBox((prev) => {
+        if (
+          prev &&
+          Math.abs(prev.width - next.width) < 1 &&
+          Math.abs(prev.height - next.height) < 1 &&
+          Math.abs((prev.rail || 0) - (next.rail || 0)) < 1
+        ) {
+          return prev;
+        }
+        return { width: next.width, height: next.height, rail: next.rail };
+      });
+    };
+    const observer = new ResizeObserver(() => {
+      if (typeof requestAnimationFrame === "function") {
+        if (frame) cancelAnimationFrame(frame);
+        frame = requestAnimationFrame(measure);
+      } else {
+        measure();
+      }
+    });
+    observer.observe(stage);
+    const body = typeof stage.closest === "function" ? stage.closest(".tos-body") : null;
+    if (body) observer.observe(body);
+    const pane = typeof stage.closest === "function" ? stage.closest(".tos-pane") : null;
+    if (pane && pane.parentElement) observer.observe(pane.parentElement);
+    measure();
+    return () => {
+      if (frame && typeof cancelAnimationFrame === "function") cancelAnimationFrame(frame);
+      observer.disconnect();
+    };
+  }, [companionHidden, status.companion && status.companion.enabled]);
+
+  function chooseFit() {
+    setScreenPref((prev) => ({ mode: "fit", width: prev.width || 0 }));
+  }
+
+  function onResizePointerDown(event) {
+    if (event && event.button != null && event.button !== 0) return;
+    if (event && event.preventDefault) event.preventDefault();
+    if (event && event.stopPropagation) event.stopPropagation();
+    const startX = Number(event && event.clientX) || 0;
+    const guest = sizeRef.current;
+    const startWidth = scaledRef.current.width || guest.width;
+    function move(ev) {
+      const dx = (Number(ev && ev.clientX) || 0) - startX;
+      const space = spaceRef.current || { width: 0, height: 0, rail: 0 };
+      const fit = fitGuestDisplay({ width: space.width, height: space.height }, guest, space.rail, 12);
+      const known = fit.availableWidth > 0 && fit.availableHeight > 0;
+      const max = known
+        ? maxScreenWidth(fit.availableWidth, fit.availableHeight, guest.width, guest.height)
+        : Math.max(guest.width, startWidth);
+      const width = clampScreenWidth(startWidth + dx, guest.width, max);
+      setScreenPref({ mode: "manual", width: width });
+    }
+    function detach() {
+      if (typeof window === "undefined") return;
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", detach);
+      window.removeEventListener("pointercancel", detach);
+    }
+    if (typeof window !== "undefined") {
+      window.addEventListener("pointermove", move);
+      window.addEventListener("pointerup", detach);
+      window.addEventListener("pointercancel", detach);
+    }
+  }
 
   function run(label, work) {
     setBusy(label);
@@ -279,15 +424,10 @@ export function TempleOSPane({ transport, initial } = {}) {
 
   const size = guestSize(status.flavor, status);
   const forced = initial && initial.scale;
-  const companionVisible = !companionHidden && !(status.companion && status.companion.enabled === false);
-  // The wide right rail holds the Agent Log above the huge Terry dock, so
-  // reserve that single rail (not a separate dock + log pair) before picking
-  // an integer scale. This keeps the whole guest display on screen.
-  const railPx = companionVisible ? 600 : 320;
-  const widthRoom = (viewport.width || 0) - 28 - railPx;
-  const scaled = forced
-    ? { scale: Number(forced), width: size.width * Number(forced), height: size.height * Number(forced) }
-    : integerScale(Math.max(size.width, widthRoom), Math.max(size.height, (viewport.height || 0) - 200), size.width, size.height);
+  const scaled = screenDisplay(screenPref, box, size, box.rail, 12, forced);
+  sizeRef.current = size;
+  scaledRef.current = scaled;
+  spaceRef.current = box;
   const chip = statusSummary(status);
   const drive = drivingChip(status);
   const onboarding = needsOnboarding(status);
@@ -360,6 +500,15 @@ export function TempleOSPane({ transport, initial } = {}) {
           }),
           jsx("button", { type: "button", className: "tos-btn tos-primary", "data-testid": "take-control", disabled: disabled || status.mode === "user", onClick: () => setMode("take"), children: "Take control" }),
           jsx("button", { type: "button", className: "tos-btn", "data-testid": "hand-back", disabled: disabled || status.mode === "shared", onClick: () => setMode("handback"), children: "Hand back" }),
+          jsx("button", {
+            type: "button",
+            className: "tos-btn" + (screenPref.mode === "fit" ? " is-on" : ""),
+            "data-testid": "screen-fit",
+            "aria-pressed": screenPref.mode === "fit" ? "true" : "false",
+            title: "Fit the guest to the pane",
+            onClick: chooseFit,
+            children: "Fit",
+          }),
           jsx(CompanionControls, {
             hidden: companionHidden,
             enabled: !(status.companion && status.companion.enabled === false),
@@ -414,11 +563,14 @@ export function TempleOSPane({ transport, initial } = {}) {
             children: [
           jsxs("div", {
             className: "tos-stage",
+            ref: stageRef,
             children: [
               jsxs("div", {
                 className: "tos-screen" + (focused ? " is-focused" : ""),
                 "data-testid": "screen",
                 "data-focused": focused ? "1" : "0",
+                "data-screen-mode": scaled.mode,
+                "data-scale": String(Math.round(scaled.scale * 1000) / 1000),
                 ref: screenRef,
                 tabIndex: 0,
                 role: "application",
@@ -436,15 +588,31 @@ export function TempleOSPane({ transport, initial } = {}) {
                     ? jsx("img", {
                         alt: "TempleOS guest",
                         src: frameUrl,
-                        width: scaled.width,
-                        height: scaled.height,
                         draggable: false,
+                        style: { width: "100%", height: "100%", imageRendering: "pixelated" },
                       })
                     : jsx("div", {
                         className: "tos-placeholder",
                         "data-testid": "placeholder",
                         children: running ? "Waiting for a frame…" : "VM stopped. Press Start, or ask the agent to start it.",
                       }),
+                  jsx("button", {
+                    type: "button",
+                    className: "tos-resize-handle",
+                    "data-testid": "screen-resize",
+                    "aria-label": "Resize guest screen",
+                    title: "Drag to resize. Double-click to fit.",
+                    onPointerDown: onResizePointerDown,
+                    onClick: (event) => {
+                      if (event.preventDefault) event.preventDefault();
+                      if (event.stopPropagation) event.stopPropagation();
+                    },
+                    onDoubleClick: (event) => {
+                      if (event.preventDefault) event.preventDefault();
+                      if (event.stopPropagation) event.stopPropagation();
+                      chooseFit();
+                    },
+                  }),
                 ],
               }),
               focused

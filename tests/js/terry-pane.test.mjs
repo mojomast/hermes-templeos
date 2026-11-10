@@ -166,7 +166,8 @@ test("P2 Hermes theme stays the default with a dark pane and reserved dock width
 
 test("built plugin carries the dock, bubble lane, and Hermes dark theme", () => {
   assert.equal(PLUGIN.includes("127.0.0.1"), false);
-  assert.equal(PLUGIN.includes("localStorage"), false);
+  assert.equal(PLUGIN.includes("sessionStorage"), false);
+  assert.match(PLUGIN, /templeos\.screenSize/);
   assert.match(PLUGIN, /tos-stage-row/);
   assert.match(PLUGIN, /tos-companion-dock/);
   assert.match(PLUGIN, /tos-companion-bubble-slot/);
@@ -188,5 +189,6 @@ test("overlay renders the live v4 canvas path", () => {
   const canvas = findAll(node, (item) => item.type === "canvas");
   assert.equal(canvas.length, 1);
   assert.equal(canvas[0].props["data-companion-v4"], "1");
-  assert.equal(byTestId(node, "companion-loading").length, 0);
+  assert.equal(node.props["data-ready"], "0");
+  assert.equal(texts(byTestId(node, "companion-loading")[0]), "Summoning Terry…");
 });

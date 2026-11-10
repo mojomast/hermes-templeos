@@ -1,8 +1,12 @@
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
+_DIRECT_STORAGE = re.compile(
+    r"""localStorage\s*\.\s*(getItem|setItem|removeItem|clear)\s*\(([^)]*)\)"""
+)
 
 
 def _read(*globs: str):
@@ -16,11 +20,16 @@ def test_desktop_src_does_not_dial_loopback_or_read_tokens():
     for path, text in _read("desktop/src/**/*.js", "desktop/plugin.js"):
         assert "127.0.0.1" not in text, path
         assert "localhost" not in text, path
-        assert "localStorage" not in text, path
         assert "sessionStorage" not in text, path
         assert "document.cookie" not in text, path
         assert "eval(" not in text, path
         assert "new Function" not in text, path
+        # Guest screen geometry is the only browser storage the pane may touch.
+        if "localStorage" in text:
+            assert "templeos.screenSize" in text, path
+            for method, arg in _DIRECT_STORAGE.findall(text):
+                assert method in {"getItem", "setItem"}, (path, method)
+                assert "templeos.screenSize" in arg, (path, arg)
 
 
 def test_plugin_yaml_declares_no_secrets_and_discloses_qemu():

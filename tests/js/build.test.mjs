@@ -34,8 +34,10 @@ test("plugin.js imports only react and registers the TempleOS pane", () => {
   assert.match(plugin, /export default __tosPlugin/);
   assert.match(plugin, /TempleOS/);
   assert.equal(plugin.includes("127.0.0.1"), false);
-  assert.equal(plugin.includes("localStorage"), false);
   assert.equal(plugin.includes("sessionStorage"), false);
+  assert.equal(plugin.includes("document.cookie"), false);
+  assert.match(plugin, /templeos\.screenSize/);
+  assert.doesNotMatch(plugin, /localStorage\s*\.\s*(?:getItem|setItem|removeItem|clear)\s*\(\s*["'](?!templeos\.screenSize)/);
 });
 
 test("--check accepts the bundle and rejects a stale one", () => {

@@ -44,6 +44,164 @@ export function integerScale(innerWidth, innerHeight, guestWidth, guestHeight) {
   return { scale, width: gw * scale, height: gh * scale };
 }
 
+export const SCREEN_SIZE_KEY = "templeos.screenSize";
+
+function positive(value, fallback) {
+  const number = Number(value);
+  if (Number.isFinite(number) && number > 0) return number;
+  return fallback;
+}
+
+/** Largest aspect-preserving scale that fits in the viewport after the right rail.
+ *  Fractional CSS scales are allowed. A zero measurement falls back to 1x. */
+export function fitGuestDisplay(viewport, guest, railWidth, gap = 12) {
+  const gw = positive(guest && guest.width, DEFAULT_WIDTH);
+  const gh = positive(guest && guest.height, DEFAULT_HEIGHT);
+  const rail = Math.max(0, Number(railWidth) || 0);
+  const gutter = Math.max(0, Number(gap) || 0);
+  const availableWidth = Math.max(0, (Number(viewport && viewport.width) || 0) - rail - gutter);
+  const availableHeight = Math.max(0, Number(viewport && viewport.height) || 0);
+  if (availableWidth <= 0 || availableHeight <= 0) {
+    return { scale: 1, width: gw, height: gh, availableWidth: availableWidth, availableHeight: availableHeight };
+  }
+  const scale = Math.min(availableWidth / gw, availableHeight / gh);
+  return { scale: scale, width: gw * scale, height: gh * scale, availableWidth: availableWidth, availableHeight: availableHeight };
+}
+
+/** Decide whether the rail sits beside the stage. A stacked layout must not
+ *  subtract the rail width from the screen. */
+export function measureScreenSpace(metrics, gap = 12) {
+  const gutter = Math.max(0, Number(gap) || 0);
+  const hatch = Math.max(0, Number(metrics && metrics.hatchHeight) || 0);
+  const height = Math.max(0, (Number(metrics && metrics.stageHeight) || 0) - hatch);
+  const railW = Math.max(0, Number(metrics && metrics.railWidth) || 0);
+  const railLeft = metrics ? metrics.railLeft : null;
+  const stageRight = metrics ? metrics.stageRight : null;
+  const sideBySide =
+    railW > 0 &&
+    railLeft != null &&
+    stageRight != null &&
+    Number.isFinite(Number(railLeft)) &&
+    Number.isFinite(Number(stageRight)) &&
+    Number(railLeft) + 1 >= Number(stageRight);
+  if (sideBySide) {
+    const body = Number(metrics && metrics.bodyWidth) || 0;
+    const stage = Number(metrics && metrics.stageWidth) || 0;
+    const width = body > 0 ? body : stage + railW + gutter;
+    return { width: width, height: height, rail: railW, gap: gutter };
+  }
+  const stage = Number(metrics && metrics.stageWidth) || 0;
+  const body = Number(metrics && metrics.bodyWidth) || 0;
+  return { width: stage > 0 ? stage : body, height: height, rail: 0, gap: gutter };
+}
+
+export function maxScreenWidth(availableWidth, availableHeight, guestWidth, guestHeight) {
+  const gw = positive(guestWidth, DEFAULT_WIDTH);
+  const gh = positive(guestHeight, DEFAULT_HEIGHT);
+  const byW = Number(availableWidth) || 0;
+  const byH = Number(availableHeight) || 0;
+  if (byW <= 0 || byH <= 0) return Math.max(gw, byW, (byH / gh) * gw);
+  return Math.max(gw, Math.min(byW, (byH / gh) * gw));
+}
+
+export function clampScreenWidth(width, guestWidth, maxWidth) {
+  const min = positive(guestWidth, DEFAULT_WIDTH);
+  let max = Number(maxWidth);
+  if (!Number.isFinite(max) || max <= 0) max = min;
+  max = Math.max(min, max);
+  const next = Number(width);
+  if (!Number.isFinite(next)) return min;
+  return Math.min(max, Math.max(min, next));
+}
+
+export function parseScreenPref(raw) {
+  const fallback = { mode: "fit", width: 0 };
+  if (raw == null || raw === "") return fallback;
+  let parsed = raw;
+  if (typeof raw === "string") {
+    try {
+      parsed = JSON.parse(raw);
+    } catch (err) {
+      return fallback;
+    }
+  }
+  if (!parsed || typeof parsed !== "object") return fallback;
+  const width = Number(parsed.width);
+  return {
+    mode: parsed.mode === "manual" ? "manual" : "fit",
+    width: Number.isFinite(width) && width > 0 ? width : 0,
+  };
+}
+
+export function serializeScreenPref(pref) {
+  const mode = pref && pref.mode === "manual" ? "manual" : "fit";
+  const width = Math.max(0, Math.round(Number(pref && pref.width) || 0));
+  return JSON.stringify({ mode: mode, width: width });
+}
+
+export function screenDisplay(pref, viewport, guest, railWidth, gap = 12, forcedScale) {
+  const gw = positive(guest && guest.width, DEFAULT_WIDTH);
+  const gh = positive(guest && guest.height, DEFAULT_HEIGHT);
+  const mode = pref && pref.mode === "manual" ? "manual" : "fit";
+  if (Number(forcedScale) > 0) {
+    const scale = Number(forcedScale);
+    return {
+      mode: mode,
+      scale: scale,
+      width: gw * scale,
+      height: gh * scale,
+      availableWidth: gw * scale,
+      availableHeight: gh * scale,
+    };
+  }
+  const fit = fitGuestDisplay(viewport, { width: gw, height: gh }, railWidth, gap);
+  if (mode !== "manual") return { mode: "fit", ...fit };
+  const known = fit.availableWidth > 0 && fit.availableHeight > 0;
+  const max = known
+    ? maxScreenWidth(fit.availableWidth, fit.availableHeight, gw, gh)
+    : Math.max(gw, Number(pref && pref.width) || gw);
+  const width = clampScreenWidth(pref && pref.width, gw, max);
+  const scale = width / gw;
+  return {
+    mode: "manual",
+    scale: scale,
+    width: width,
+    height: gh * scale,
+    availableWidth: fit.availableWidth,
+    availableHeight: fit.availableHeight,
+  };
+}
+
+function browserStorage() {
+  try {
+    if (typeof localStorage === "undefined" || !localStorage) return null;
+    return localStorage;
+  } catch (err) {
+    return null;
+  }
+}
+
+export function readStoredScreenPref(storage) {
+  const box = storage || browserStorage();
+  if (!box || typeof box.getItem !== "function") return { mode: "fit", width: 0 };
+  try {
+    return parseScreenPref(box.getItem(SCREEN_SIZE_KEY));
+  } catch (err) {
+    return { mode: "fit", width: 0 };
+  }
+}
+
+export function writeStoredScreenPref(pref, storage) {
+  const box = storage || browserStorage();
+  if (!box || typeof box.setItem !== "function") return false;
+  try {
+    box.setItem(SCREEN_SIZE_KEY, serializeScreenPref(pref));
+    return true;
+  } catch (err) {
+    return false;
+  }
+}
+
 export function mapPointerToGuest(clientX, clientY, rect, guestWidth, guestHeight) {
   const gw = Number(guestWidth) || DEFAULT_WIDTH;
   const gh = Number(guestHeight) || DEFAULT_HEIGHT;
