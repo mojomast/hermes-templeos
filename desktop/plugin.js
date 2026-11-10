@@ -136,20 +136,202 @@ function getHostTransport() {
   return { "setHostTransport": setHostTransport, "getHostTransport": getHostTransport };
 })();
 
-// desktop/src/ui/companion.js
+// desktop/src/ui/terry_v4.js
 const __m2 = (function () {
+/** High-resolution Terry v4 rig renderer.
+ *
+ * Fan tribute to Terry A. Davis — not affiliated with TempleOS or his estate.
+ * The v4 part bundle is stored at desktop/assets/companion/terry/v4/ and is
+ * LANCZOS-downsampled to slot_size * 3.5. Draw those parts at their original
+ * slot size inside the rig coordinate space, then let the canvas backing
+ * store scale the whole figure smoothly. Never use the 192x208 atlas here.
+ */
+
+const STUB_SLOTS = Object.freeze([
+  "ear_l",
+  "ear_r",
+  "hair",
+  "brow_l",
+  "brow_r",
+  "eye_l",
+  "eye_r",
+  "nose",
+  "mouth",
+]);
+
+const COSTUME_VARIANTS = Object.freeze({
+  base: Object.freeze({}),
+  cowboy: Object.freeze({ cap: "cowboy", torso_overlay: "cowboy_vest" }),
+  wizard: Object.freeze({ cap: "wizard", torso_overlay: "wizard_robe" }),
+  chef: Object.freeze({ cap: "chef", torso_overlay: "chef_apron" }),
+});
+
+const STUB_SET = new Set(STUB_SLOTS);
+const RIG_CENTER_X = 96;
+const RIG_HEIGHT = 193;
+const RIG_WIDTH = 150;
+const RIG_BOTTOM = 199;
+
+function sampleClip(clip, time) {
+  if (!clip || !clip.frames || !clip.frames.length) return null;
+  const count = clip.frames.length;
+  const duration = Number(clip.duration_ms) || 1;
+  const phase =
+    clip.loop === false
+      ? Math.max(0, Math.min(1, time / duration)) * (count - 1)
+      : ((((time % duration) + duration) % duration) / duration) * count;
+  const index = Math.min(count - 1, Math.max(0, Math.floor(phase)));
+  const frame = clip.frames[index];
+  return { ...frame, parts: { ...(frame.parts || {}) }, variants: { ...(frame.variants || {}) } };
+}
+
+function speechPlate(events, time, fallback = "neutral") {
+  let chosen = fallback;
+  for (const event of events || []) {
+    if (Number(event.time_ms) > time) break;
+    if (event.plate) chosen = event.plate;
+  }
+  return chosen;
+}
+
+function variantPath(spec, variant) {
+  if (!spec || !spec.variants) return "";
+  return spec.variants[variant] || spec.variants.default || "";
+}
+
+function drawFrame(ctx, frame, registry, images, costume = "base", options = {}) {
+  if (!frame || !registry || !registry.slots) return;
+  const parts = { ...(frame.parts || {}) };
+  const variants = { ...(frame.variants || {}) };
+  const costumeMap = COSTUME_VARIANTS[costume] || COSTUME_VARIANTS.base;
+
+  if (costumeMap.torso_overlay && !parts.torso_overlay && parts.torso) {
+    parts.torso_overlay = { ...parts.torso };
+  }
+  Object.assign(variants, costumeMap);
+  if (options.headPlate) variants.head_base = options.headPlate;
+
+  const hidden = new Set(frame.hidden_slots || []);
+  const list = Object.entries(parts).filter(([slot, pose]) => {
+    if (!registry.slots[slot] || !pose || pose.alpha === 0) return false;
+    if (STUB_SET.has(slot) || hidden.has(slot)) return false;
+    // The package has no high-res master for the split cigarette front.
+    if (slot === "cigarette_front") return false;
+    return true;
+  });
+  list.sort(([a, pa], [b, pb]) => {
+    const la = registry.slots[a].layer + (pa.layer_boost || 0);
+    const lb = registry.slots[b].layer + (pb.layer_boost || 0);
+    return la - lb || a.localeCompare(b);
+  });
+
+  for (const [slot, pose] of list) {
+    if (pose.visible === false) continue;
+    if (frame.visibility && frame.visibility[slot] === false) continue;
+    if (frame.props && frame.props[slot] === false) continue;
+    const spec = registry.slots[slot];
+    let variant = variants[slot] || pose.variant || "default";
+    let path = variantPath(spec, variant);
+    let image = path ? images.get(path) : null;
+    if (!image) {
+      path = spec.variants && spec.variants.default;
+      image = path ? images.get(path) : null;
+    }
+    if (!image) continue;
+    const pivot = pose.pivot || spec.pivot || [0, 0];
+    const size = spec.size || [image.width || 1, image.height || 1];
+    ctx.save();
+    ctx.globalAlpha = pose.alpha == null ? 1 : pose.alpha;
+    ctx.translate(pose.x || 0, pose.y || 0);
+    ctx.rotate(((pose.rot || 0) * Math.PI) / 180);
+    ctx.scale((pose.flip ? -1 : 1) * (pose.sx == null ? 1 : pose.sx), pose.sy == null ? 1 : pose.sy);
+    ctx.drawImage(image, -pivot[0], -pivot[1], size[0], size[1]);
+    ctx.restore();
+  }
+}
+
+function drawSmoke(ctx, frame, data, images, time) {
+  const emitter = frame && frame.emitter;
+  if (!emitter || !emitter.active || !data.smoke || !data.smoke.presets) return;
+  const preset = data.smoke.presets[emitter.type];
+  if (!preset || !preset.textures || !preset.textures.length) return;
+  const joints = frame.joints || {};
+  const origin = joints[emitter.origin_joint] || [96, 82];
+  const offset = emitter.start_offset || [0, 0];
+  const direction = emitter.direction || [1, -0.12];
+  const start = preset.scale_start || [0.2, 0.2];
+  const end = preset.scale_end == null ? 0.4 : preset.scale_end;
+  const seconds = Math.max(0, Number(time) || 0) / 1000;
+  for (let i = 0; i < 4; i += 1) {
+    const key = preset.textures[i % preset.textures.length];
+    const asset = data.smoke.assets && data.smoke.assets[key];
+    if (!asset) continue;
+    const image = images.get(asset.path);
+    if (!image) continue;
+    const life = 1.4;
+    const u = ((seconds + i * 0.37) % life) / life;
+    const scale = start[0] + (end - start[0]) * u;
+    const x = origin[0] + offset[0] + direction[0] * u * 14 + Math.sin(seconds * 2 + i) * 2;
+    const y = origin[1] + offset[1] + direction[1] * u * 14 - u * 10;
+    ctx.save();
+    ctx.globalAlpha = (preset.opacity == null ? 0.3 : preset.opacity) * (1 - u);
+    ctx.translate(x, y);
+    ctx.rotate((i - 1.5) * 0.12 + u * 0.2);
+    ctx.scale(scale, scale);
+    ctx.drawImage(image, -asset.anchor[0], -asset.anchor[1], asset.size[0], asset.size[1]);
+    ctx.restore();
+  }
+}
+
+/** Smooth, DPR-aware canvas fit. The rig is 192x208; the visible figure is
+ * about 175px tall, so a 750px dock maps to a ~660px figure. */
+function renderScene(canvas, data, images, frame, costume = "base", options = {}) {
+  if (!canvas || !canvas.getContext) return null;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return null;
+  const rect = typeof canvas.getBoundingClientRect === "function" ? canvas.getBoundingClientRect() : null;
+  const cssW = Math.max(1, (rect && rect.width) || canvas.clientWidth || 600);
+  const cssH = Math.max(1, (rect && rect.height) || canvas.clientHeight || 750);
+  const dpr = (typeof window !== "undefined" && Number(window.devicePixelRatio)) || 1;
+  const width = Math.max(1, Math.round(cssW * dpr));
+  const height = Math.max(1, Math.round(cssH * dpr));
+  if (canvas.width !== width) canvas.width = width;
+  if (canvas.height !== height) canvas.height = height;
+
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.clearRect(0, 0, cssW, cssH);
+  ctx.imageSmoothingEnabled = true;
+  ctx.imageSmoothingQuality = "high";
+
+  const scale = Math.min(cssH / RIG_HEIGHT, cssW / RIG_WIDTH);
+  ctx.save();
+  ctx.translate(cssW / 2 - RIG_CENTER_X * scale, cssH - RIG_BOTTOM * scale);
+  ctx.scale(scale, scale);
+  if (options.smoke) drawSmoke(ctx, frame, data, images, options.time);
+  drawFrame(ctx, frame, data.registry, images, costume, options);
+  ctx.restore();
+  return { cssW, cssH, dpr, scale };
+}
+
+  return { "STUB_SLOTS": STUB_SLOTS, "COSTUME_VARIANTS": COSTUME_VARIANTS, "sampleClip": sampleClip, "speechPlate": speechPlate, "drawFrame": drawFrame, "renderScene": renderScene };
+})();
+
+// desktop/src/ui/companion.js
+const __m3 = (function () {
   const useEffect = __ext0;
   const useRef = __ext1;
   const useState = __ext2;
   const jsx = __ext3;
   const jsxs = __ext4;
-  const blobUrlFromBase64 = __m0["blobUrlFromBase64"];
-  const revokeUrl = __m0["revokeUrl"];
-/** Terry companion atlas + v2 clip overlay for the TempleOS pane.
+  const renderScene = __m2["renderScene"];
+  const sampleClip = __m2["sampleClip"];
+  const speechPlate = __m2["speechPlate"];
+/** Terry companion v4 high-resolution rig for the TempleOS pane.
  *
  * Fan tribute to Terry A. Davis — not affiliated with TempleOS or his estate.
- * Loads the nine-row atlas and on-demand clip strips through ctx.rest.
- * Hide / costume preferences persist through the plugin backend (plugin data dir).
+ * Loads the trimmed 3.5x part bundle and baked clips through ctx.rest, then
+ * renders the rig with a smooth, devicePixelRatio-aware canvas. No 192x208
+ * atlas is upscaled here.
  *
  * Speech bubbles: call TerryCompanion.say(text) (also POST /companion {say})
  * to render a bubble to the left/above of Terry. Text is supplied by the
@@ -157,49 +339,37 @@ const __m2 = (function () {
  */
 
 
-const RICH_CLIPS = {
-  vm_booting: true,
-  celebrate_short: true,
-  greet: true,
-  nod: true,
-  stretch: true,
-  relieved: true,
-  typing: true,
-  talking: true,
-  smoking: true,
-  exhaling: true,
-  dance: true,
+const CLIP_NAMES = new Set([
+  "idle",
+  "typing",
+  "talking",
+  "vm_booting",
+  "celebrate_short",
+  "failed",
+  "greet",
+  "dance",
+  "smoking",
+  "exhaling",
+  "waiting",
+  "review",
+  "nod",
+  "relieved",
+  "stretch",
+]);
+
+const HOST_MAP = {
+  waving: "greet",
+  greet: "greet",
+  jumping: "celebrate_short",
 };
 
 const IDLE_VARIETY = ["stretch", "smoking", "exhaling"];
 const LONG_IDLE_MS = 22000;
 const IDLE_RETRY_MS = 14000;
 const IDLE_CHANCE = 0.4;
+const DANCE_CHANCE = 0.04;
 const TRIPLE_MS = 650;
-// atlas.png is 8x9 cells and .tos-companion-static draws it at 800% x 900%,
-// so one cell fills the box. A row is then a percentage of the surplus
-// height: row 0 = 0%, row 8 = 100%.
-const ROWS = 9;
-
-function rowFor(atlas, name) {
-  const rows = (atlas && atlas.rows) || [];
-  for (let i = 0; i < rows.length; i += 1) {
-    if (rows[i] && rows[i].name === name) return rows[i];
-  }
-  return rows[0] || null;
-}
-
-function clipFrames(clip) {
-  if (!clip) return [];
-  if (clip.frames && clip.frames.length) return clip.frames;
-  const count = Number(clip.count) || 0;
-  const cell = clip.cell || [192, 208];
-  const w = cell[0] || 192;
-  const h = cell[1] || 208;
-  const frames = [];
-  for (let i = 0; i < count; i += 1) frames.push({ x: i * w, y: 0, w: w, h: h });
-  return frames;
-}
+const GREET_MS = 2400;
 
 /** Public hook used by the pane and by other UI. Wired when the overlay mounts. */
 const TerryCompanion = {
@@ -211,23 +381,30 @@ const TerryCompanion = {
   _say: null,
 };
 
-/** Canvas sprite that plays atlas rows or v2 clip strips via requestAnimationFrame. */
-function TerryCompanionOverlay({ api, animation, costume, hidden, enabled, speech, sprite, spriteRow }) {
+function hostClip(name) {
+  return HOST_MAP[name] || name || "idle";
+}
+
+/** Canvas rig that plays baked v4 clips via requestAnimationFrame. */
+function TerryCompanionOverlay({ api, animation, costume, hidden, enabled, speech }) {
   const canvasRef = useRef(null);
   const [ready, setReady] = useState(false);
   const [error, setError] = useState("");
   const [bubble, setBubble] = useState((speech && speech.text) || "");
-  const packRef = useRef(null);
+  const bundleRef = useRef(null);
   const clipsRef = useRef(new Map());
   const animRef = useRef(animation || "idle");
   const localRef = useRef({ name: "", until: 0, follow: "" });
   const idleAtRef = useRef(0);
+  const greetedRef = useRef(false);
   const rafRef = useRef(0);
   const startRef = useRef(0);
   const lastNameRef = useRef("");
   const clicksRef = useRef([]);
+  const bubbleRef = useRef(bubble);
 
   const hostAnim = animation || "idle";
+  bubbleRef.current = bubble;
 
   useEffect(() => {
     const text = speech && speech.active !== false ? String((speech && speech.text) || "") : "";
@@ -248,99 +425,28 @@ function TerryCompanionOverlay({ api, animation, costume, hidden, enabled, speec
     };
   }, [api]);
 
-  useEffect(() => {
-    if (hidden || enabled === false) {
-      setReady(false);
-      return undefined;
-    }
-    let cancelled = false;
-    const chosen = costume || "base";
-    Promise.resolve(api.companionAtlas({ costume: chosen }))
-      .then((body) => {
-        if (cancelled) return;
-        if (!body || body.ok === false || !body.data || !body.atlas) {
-          setError((body && body.error) || "Could not load Terry atlas.");
-          setReady(false);
-          return;
-        }
-        const url = blobUrlFromBase64(body.data, body.mime || "image/png");
-        const image = new Image();
-        image.onload = () => {
-          if (cancelled) {
-            revokeUrl(url);
-            return;
-          }
-          const prev = packRef.current;
-          if (prev && prev.url) revokeUrl(prev.url);
-          packRef.current = { url, image, atlas: body.atlas, costume: body.costume || chosen };
-          setError("");
-          setReady(true);
-        };
-        image.onerror = () => {
-          revokeUrl(url);
-          if (!cancelled) {
-            setError("Terry atlas image failed to decode.");
-            setReady(false);
-          }
-        };
-        image.src = url;
-      })
-      .catch((err) => {
-        if (!cancelled) {
-          setError((err && err.message) || "Terry atlas request failed.");
-          setReady(false);
-        }
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [api, costume, hidden, enabled]);
-
-  useEffect(() => {
-    return () => {
-      if (rafRef.current) cancelAnimationFrame(rafRef.current);
-      const prev = packRef.current;
-      if (prev && prev.url) revokeUrl(prev.url);
-      packRef.current = null;
-      clipsRef.current.forEach((entry) => {
-        if (entry && entry.url) revokeUrl(entry.url);
-      });
-      clipsRef.current = new Map();
-    };
-  }, []);
-
   function ensureClip(name) {
-    if (!RICH_CLIPS[name]) return Promise.resolve(null);
-    const cached = clipsRef.current.get(name);
-    if (cached && cached.image) return Promise.resolve(cached);
+    const token = hostClip(name);
+    if (!CLIP_NAMES.has(token)) return Promise.resolve(null);
+    const cached = clipsRef.current.get(token);
+    if (cached && cached.clip) return Promise.resolve(cached.clip);
     if (cached && cached.pending) return cached.pending;
-    const pending = Promise.resolve(api.companionClip({ name }))
+    if (typeof api.companionClip !== "function") return Promise.resolve(null);
+    const pending = Promise.resolve(api.companionClip({ name: "v4:" + token }))
       .then((body) => {
-        if (!body || body.ok === false || !body.data || !body.clip) {
-          clipsRef.current.delete(name);
+        if (!body || body.ok === false || !body.clip) {
+          clipsRef.current.delete(token);
           return null;
         }
-        return new Promise((resolve) => {
-          const url = blobUrlFromBase64(body.data, body.mime || "image/png");
-          const image = new Image();
-          image.onload = () => {
-            const entry = { url, image, clip: body.clip, name };
-            clipsRef.current.set(name, entry);
-            resolve(entry);
-          };
-          image.onerror = () => {
-            revokeUrl(url);
-            clipsRef.current.delete(name);
-            resolve(null);
-          };
-          image.src = url;
-        });
+        const entry = { clip: body.clip, name: token };
+        clipsRef.current.set(token, entry);
+        return entry.clip;
       })
       .catch(() => {
-        clipsRef.current.delete(name);
+        clipsRef.current.delete(token);
         return null;
       });
-    clipsRef.current.set(name, { pending });
+    clipsRef.current.set(token, { pending });
     return pending;
   }
 
@@ -367,6 +473,94 @@ function TerryCompanionOverlay({ api, animation, costume, hidden, enabled, speec
   }
 
   useEffect(() => {
+    if (hidden || enabled === false) {
+      setReady(false);
+      return undefined;
+    }
+    if (bundleRef.current) {
+      setReady(true);
+      return undefined;
+    }
+    if (typeof api.companionClip !== "function") {
+      setError("Terry v4 is not available in this host.");
+      setReady(false);
+      return undefined;
+    }
+    let cancelled = false;
+    Promise.resolve(api.companionClip({ name: "v4:bundle" }))
+      .then((body) => {
+        if (cancelled) return null;
+        if (!body || body.ok === false || !body.registry) {
+          setError((body && body.error) || "Could not load the Terry v4 rig.");
+          setReady(false);
+          return null;
+        }
+        const images = new Map();
+        const entries = Object.entries(body.parts || {});
+        return Promise.all(
+          entries.map(
+            ([path, data]) =>
+              new Promise((resolve) => {
+                if (typeof Image === "undefined") {
+                  resolve();
+                  return;
+                }
+                const image = new Image();
+                image.onload = () => {
+                  images.set(path, image);
+                  resolve();
+                };
+                image.onerror = () => resolve();
+                image.src = "data:image/png;base64," + data;
+              })
+          )
+        ).then(() => {
+          if (cancelled) return;
+          bundleRef.current = {
+            registry: body.registry,
+            speech: body.speech || { events: [], duration_ms: 2600 },
+            smoke: body.smoke || {},
+            costumes: body.costumes || {},
+            images,
+          };
+          setError("");
+          setReady(true);
+          ensureClip("idle");
+          ensureClip(hostClip(hostAnim));
+        });
+      })
+      .catch((err) => {
+        if (!cancelled) {
+          setError((err && err.message) || "Terry v4 request failed.");
+          setReady(false);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [api, hidden, enabled]);
+
+  useEffect(() => {
+    if (ready) ensureClip(hostClip(hostAnim));
+  }, [ready, hostAnim]);
+
+  useEffect(() => {
+    if (!ready || hidden || enabled === false) return undefined;
+    if (!greetedRef.current && hostClip(hostAnim) === "idle") {
+      greetedRef.current = true;
+      playLocal("greet", GREET_MS, "");
+    }
+    return undefined;
+  }, [ready, hostAnim, hidden, enabled]);
+
+  useEffect(() => {
+    return () => {
+      if (rafRef.current) cancelAnimationFrame(rafRef.current);
+      rafRef.current = 0;
+    };
+  }, []);
+
+  useEffect(() => {
     if (!ready || hidden || enabled === false) {
       if (rafRef.current) cancelAnimationFrame(rafRef.current);
       rafRef.current = 0;
@@ -374,45 +568,51 @@ function TerryCompanionOverlay({ api, animation, costume, hidden, enabled, speec
     }
     const canvas = canvasRef.current;
     if (!canvas) return undefined;
-    const ctx = canvas.getContext("2d");
-    if (!ctx) return undefined;
     startRef.current = performance.now();
     lastNameRef.current = "";
     idleAtRef.current = performance.now();
 
     const tick = (now) => {
+      const bundle = bundleRef.current;
+      if (!bundle) {
+        rafRef.current = requestAnimationFrame(tick);
+        return;
+      }
       const local = localRef.current;
       if (local.name && now >= local.until) {
         const follow = local.follow;
         localRef.current = { name: "", until: 0, follow: "" };
-        if (follow) {
-          const nextDur = follow === "exhaling" ? 3200 : 1500;
-          playLocal(follow, nextDur, "");
-        }
+        if (follow) playLocal(follow, follow === "exhaling" ? 3200 : 1500, "");
       }
       const busyHost = hostAnim !== "idle";
       if (busyHost && localRef.current.name && localRef.current.name !== "dance") {
         localRef.current = { name: "", until: 0, follow: "" };
       }
-      // Dance yields if a real host state takes over (tool, error, boot…).
       if (busyHost && localRef.current.name === "dance" && hostAnim !== "idle") {
         localRef.current = { name: "", until: 0, follow: "" };
       }
 
-      let name = (localRef.current.name && now < localRef.current.until && localRef.current.name) || hostAnim || "idle";
-      animRef.current = name;
+      let name =
+        (localRef.current.name && now < localRef.current.until && localRef.current.name) ||
+        hostClip(hostAnim) ||
+        "idle";
+      // A live bubble speaks with the discrete whole-head plates.
+      if (bubbleRef.current) name = "talking";
 
-      if (name === "idle") {
+      if (name === "idle" && !localRef.current.name) {
         if (!idleAtRef.current) idleAtRef.current = now;
-        if (now - idleAtRef.current >= LONG_IDLE_MS && !localRef.current.name) {
+        if (now - idleAtRef.current >= LONG_IDLE_MS) {
           idleAtRef.current = now + IDLE_RETRY_MS;
-          if (Math.random() < IDLE_CHANCE) {
+          const roll = Math.random();
+          if (roll < DANCE_CHANCE) {
+            playLocal("dance", 7200, "");
+            name = "dance";
+          } else if (roll < DANCE_CHANCE + IDLE_CHANCE) {
             const pick = IDLE_VARIETY[Math.floor(Math.random() * IDLE_VARIETY.length)];
             const dur = pick === "stretch" ? 3400 : pick === "smoking" ? 5600 : 3200;
             const follow = pick === "smoking" && Math.random() < 0.55 ? "exhaling" : "";
             playLocal(pick, dur, follow);
             name = pick;
-            animRef.current = name;
           }
         }
       } else if (!localRef.current.name) {
@@ -422,40 +622,26 @@ function TerryCompanionOverlay({ api, animation, costume, hidden, enabled, speec
       if (name !== lastNameRef.current) {
         startRef.current = now;
         lastNameRef.current = name;
-        if (RICH_CLIPS[name]) ensureClip(name);
+        ensureClip(name);
       }
+      animRef.current = name;
 
-      const pack = packRef.current;
-      const clipEntry = clipsRef.current.get(name);
-      let image = null;
-      let frames = [];
-      let frameMs = 183;
-      let loop = true;
-      if (clipEntry && clipEntry.image && clipEntry.clip) {
-        image = clipEntry.image;
-        frames = clipFrames(clipEntry.clip);
-        frameMs = Number(clipEntry.clip.frame_ms) || 50;
-        loop = clipEntry.clip.loop !== false;
-      } else if (pack && pack.image && pack.atlas) {
-        const row = rowFor(pack.atlas, name);
-        image = pack.image;
-        frames = (row && row.frames) || [];
-        frameMs = (row && Number(row.frame_ms)) || Number(pack.atlas.loop_ms) / Math.max(1, frames.length) || 183;
-        loop = true;
-      }
-
-      const cw = 192;
-      const ch = 208;
-      if (canvas.width !== cw) canvas.width = cw;
-      if (canvas.height !== ch) canvas.height = ch;
-      ctx.clearRect(0, 0, cw, ch);
-      if (image && frames.length) {
+      let clip = clipsRef.current.get(name) && clipsRef.current.get(name).clip;
+      if (!clip) clip = clipsRef.current.get("idle") && clipsRef.current.get("idle").clip;
+      if (clip) {
         const elapsed = Math.max(0, now - startRef.current);
-        let index;
-        if (loop) index = Math.floor(elapsed / frameMs) % frames.length;
-        else index = Math.min(frames.length - 1, Math.floor(elapsed / frameMs));
-        const frame = frames[index];
-        ctx.drawImage(image, frame.x, frame.y, frame.w, frame.h, 0, 0, cw, ch);
+        const frame = sampleClip(clip, elapsed);
+        if (frame) {
+          if (name === "talking") {
+            const duration = Number(bundle.speech.duration_ms) || 2600;
+            frame.variants.head_base = speechPlate(
+              bundle.speech.events,
+              elapsed % duration,
+              frame.variants.head_base
+            );
+          }
+          renderScene(canvas, bundle, bundle.images, frame, costume || "base", { time: elapsed, smoke: true });
+        }
       }
       rafRef.current = requestAnimationFrame(tick);
     };
@@ -464,20 +650,10 @@ function TerryCompanionOverlay({ api, animation, costume, hidden, enabled, speec
       if (rafRef.current) cancelAnimationFrame(rafRef.current);
       rafRef.current = 0;
     };
-  }, [ready, hidden, enabled, hostAnim, api]);
+  }, [ready, hidden, enabled, hostAnim, costume]);
 
   if (enabled === false) return null;
   if (hidden) return null;
-
-  const staticSheet = typeof sprite === "string" && sprite ? sprite : "";
-  const row = Math.max(0, Math.min(ROWS - 1, Number(spriteRow) || 0));
-  const rowPct = (row / (ROWS - 1)) * 100;
-  const spriteStyle = staticSheet
-    ? {
-        backgroundImage: `url("${staticSheet}")`,
-        backgroundPosition: `0 ${rowPct}%`,
-      }
-    : undefined;
 
   return jsxs("aside", {
     className: "tos-companion-dock",
@@ -493,28 +669,31 @@ function TerryCompanionOverlay({ api, animation, costume, hidden, enabled, speec
           })
         : jsx("div", { className: "tos-companion-bubble-slot", "aria-hidden": "true" }),
       jsxs("div", {
-        className: "tos-companion" + (staticSheet ? " tos-companion-static" : ""),
+        className: "tos-companion",
         "data-testid": "companion",
         "data-animation": hostAnim || "idle",
         "data-costume": costume || "base",
         title: "Terry companion — fan tribute to Terry A. Davis. Triple-click to dance.",
-        style: spriteStyle,
         onClick: onTerryClick,
-        children: staticSheet
-          ? null
-          : ready
-            ? jsx("canvas", {
-                ref: canvasRef,
-                className: "tos-companion-canvas",
-                width: 192,
-                height: 208,
-                "aria-hidden": "true",
-              })
-            : jsx("div", {
+        children: [
+          jsx("canvas", {
+            ref: canvasRef,
+            className: "tos-companion-canvas",
+            "data-companion-v4": "1",
+            "data-animation": hostAnim || "idle",
+            "data-costume": costume || "base",
+            width: 192,
+            height: 208,
+            "aria-hidden": "true",
+          }),
+          error
+            ? jsx("div", {
                 className: "tos-companion-loading",
                 "data-testid": "companion-loading",
-                children: error || "…",
-              }),
+                children: error,
+              })
+            : null,
+        ],
       }),
     ],
   });
@@ -556,7 +735,7 @@ function CompanionControls({ hidden, onToggleHidden, costume, onCostume, costume
 })();
 
 // desktop/src/ui/theme.js
-const __m3 = (function () {
+const __m4 = (function () {
 // Temple of Hermes theme assets, adapted from mojomast/temple-of-hermes
 // branch hermes/art @ 97d7ad2 (public domain / Unlicense).
 // Generated from desktop/theme/hermes/; edit the source art there, not this file.
@@ -599,7 +778,7 @@ function nextTheme(theme) {
 })();
 
 // desktop/src/ui/logic.js
-const __m4 = (function () {
+const __m5 = (function () {
 /** Pure helpers for the TempleOS pane. */
 
 const DEFAULT_WIDTH = 640;
@@ -893,7 +1072,7 @@ function logLine(event) {
 })();
 
 // desktop/src/ui/pane.js
-const __m5 = (function () {
+const __m6 = (function () {
   const jsx = __ext3;
   const jsxs = __ext4;
   const useEffect = __ext0;
@@ -905,25 +1084,25 @@ const __m5 = (function () {
   const errorText = __m0["errorText"];
   const isAbortError = __m0["isAbortError"];
   const getHostTransport = __m1["getHostTransport"];
-  const CompanionControls = __m2["CompanionControls"];
-  const TerryCompanionOverlay = __m2["TerryCompanionOverlay"];
-  const HERMES_ASSETS = __m3["HERMES_ASSETS"];
-  const nextTheme = __m3["nextTheme"];
-  const GOLDEN_SNAPSHOT = __m4["GOLDEN_SNAPSHOT"];
-  const accelLabel = __m4["accelLabel"];
-  const drivingChip = __m4["drivingChip"];
-  const flavorLabel = __m4["flavorLabel"];
-  const guestSize = __m4["guestSize"];
-  const integerScale = __m4["integerScale"];
-  const keyEventToPayload = __m4["keyEventToPayload"];
-  const logLine = __m4["logLine"];
-  const mapPointerToGuest = __m4["mapPointerToGuest"];
-  const checkState = __m4["checkState"];
-  const firstCheck = __m4["firstCheck"];
-  const needsOnboarding = __m4["needsOnboarding"];
-  const pollIntervalMs = __m4["pollIntervalMs"];
-  const statusSummary = __m4["statusSummary"];
-  const userMayInput = __m4["userMayInput"];
+  const CompanionControls = __m3["CompanionControls"];
+  const TerryCompanionOverlay = __m3["TerryCompanionOverlay"];
+  const HERMES_ASSETS = __m4["HERMES_ASSETS"];
+  const nextTheme = __m4["nextTheme"];
+  const GOLDEN_SNAPSHOT = __m5["GOLDEN_SNAPSHOT"];
+  const accelLabel = __m5["accelLabel"];
+  const drivingChip = __m5["drivingChip"];
+  const flavorLabel = __m5["flavorLabel"];
+  const guestSize = __m5["guestSize"];
+  const integerScale = __m5["integerScale"];
+  const keyEventToPayload = __m5["keyEventToPayload"];
+  const logLine = __m5["logLine"];
+  const mapPointerToGuest = __m5["mapPointerToGuest"];
+  const checkState = __m5["checkState"];
+  const firstCheck = __m5["firstCheck"];
+  const needsOnboarding = __m5["needsOnboarding"];
+  const pollIntervalMs = __m5["pollIntervalMs"];
+  const statusSummary = __m5["statusSummary"];
+  const userMayInput = __m5["userMayInput"];
 
 function documentIsHidden() {
   return typeof document !== "undefined" && document.visibilityState === "hidden";
@@ -1423,10 +1602,10 @@ function checkRow(label, value) {
 })();
 
 // desktop/src/ui/register.js
-const __m6 = (function () {
+const __m7 = (function () {
   const jsx = __ext3;
   const setHostTransport = __m1["setHostTransport"];
-  const TempleOSPane = __m5["TempleOSPane"];
+  const TempleOSPane = __m6["TempleOSPane"];
 
 const PANE_ID = "templeos";
 const PANE_TITLE = "TempleOS";
@@ -1478,14 +1657,14 @@ function createDesktopPlugin() {
 })();
 
 // desktop/src/ui/index.js
-const __m7 = (function () {
+const __m8 = (function () {
 
 
-  return { "TempleOSPane": __m5["TempleOSPane"], "PANE_ID": __m6["PANE_ID"], "PANE_TITLE": __m6["PANE_TITLE"], "createPaneContribution": __m6["createPaneContribution"], "registerTempleOSPane": __m6["registerTempleOSPane"], "createDesktopPlugin": __m6["createDesktopPlugin"], "DEFAULT_WIDTH": __m4["DEFAULT_WIDTH"], "DEFAULT_HEIGHT": __m4["DEFAULT_HEIGHT"], "CONTROL_MODES": __m4["CONTROL_MODES"], "GOLDEN_SNAPSHOT": __m4["GOLDEN_SNAPSHOT"], "guestSize": __m4["guestSize"], "integerScale": __m4["integerScale"], "mapPointerToGuest": __m4["mapPointerToGuest"], "modeLabel": __m4["modeLabel"], "accelLabel": __m4["accelLabel"], "statusSummary": __m4["statusSummary"], "drivingChip": __m4["drivingChip"], "needsOnboarding": __m4["needsOnboarding"], "firstCheck": __m4["firstCheck"], "checkState": __m4["checkState"], "pollIntervalMs": __m4["pollIntervalMs"], "isReleaseHatch": __m4["isReleaseHatch"], "qcodeFor": __m4["qcodeFor"], "keyEventToPayload": __m4["keyEventToPayload"], "nextMode": __m4["nextMode"], "userMayInput": __m4["userMayInput"], "logLine": __m4["logLine"], "flavorLabel": __m4["flavorLabel"], "TerryCompanionOverlay": __m2["TerryCompanionOverlay"], "CompanionControls": __m2["CompanionControls"], "TerryCompanion": __m2["TerryCompanion"] };
+  return { "TempleOSPane": __m6["TempleOSPane"], "PANE_ID": __m7["PANE_ID"], "PANE_TITLE": __m7["PANE_TITLE"], "createPaneContribution": __m7["createPaneContribution"], "registerTempleOSPane": __m7["registerTempleOSPane"], "createDesktopPlugin": __m7["createDesktopPlugin"], "DEFAULT_WIDTH": __m5["DEFAULT_WIDTH"], "DEFAULT_HEIGHT": __m5["DEFAULT_HEIGHT"], "CONTROL_MODES": __m5["CONTROL_MODES"], "GOLDEN_SNAPSHOT": __m5["GOLDEN_SNAPSHOT"], "guestSize": __m5["guestSize"], "integerScale": __m5["integerScale"], "mapPointerToGuest": __m5["mapPointerToGuest"], "modeLabel": __m5["modeLabel"], "accelLabel": __m5["accelLabel"], "statusSummary": __m5["statusSummary"], "drivingChip": __m5["drivingChip"], "needsOnboarding": __m5["needsOnboarding"], "firstCheck": __m5["firstCheck"], "checkState": __m5["checkState"], "pollIntervalMs": __m5["pollIntervalMs"], "isReleaseHatch": __m5["isReleaseHatch"], "qcodeFor": __m5["qcodeFor"], "keyEventToPayload": __m5["keyEventToPayload"], "nextMode": __m5["nextMode"], "userMayInput": __m5["userMayInput"], "logLine": __m5["logLine"], "flavorLabel": __m5["flavorLabel"], "TerryCompanionOverlay": __m3["TerryCompanionOverlay"], "CompanionControls": __m3["CompanionControls"], "TerryCompanion": __m3["TerryCompanion"] };
 })();
 
 const TEMPLEOS_STYLE_ID = "templeos-desktop-styles";
-const TEMPLEOS_STYLES = "/* TempleOS pane. 16-color accents on Hermes chrome variables. */\n\n.tos-pane {\n  color-scheme: dark;\n  --tos-black: #000000;\n  --tos-navy: #0000aa;\n  --tos-yellow: #ffff55;\n  --tos-white: #ffffff;\n  --tos-ltgray: #aaaaaa;\n  --tos-dkgray: #555555;\n  --tos-cyan: #55ffff;\n  --tos-green: #55ff55;\n  --tos-red: #ff5555;\n  --tos-blue: #5555ff;\n  --tos-brown: #aa5500;\n  display: flex;\n  flex-direction: column;\n  gap: 10px;\n  padding: 12px 14px 16px;\n  color: var(--tos-yellow);\n  background:\n    linear-gradient(180deg, color-mix(in srgb, var(--tos-navy) 35%, var(--tos-black)) 0 52px, var(--tos-black) 52px);\n  font-family: \"IBM Plex Mono\", \"Lucida Console\", ui-monospace, monospace;\n  min-height: 100%;\n  box-sizing: border-box;\n}\n\n.tos-top,\n.tos-bar {\n  display: flex;\n  flex-wrap: wrap;\n  gap: 8px;\n  align-items: center;\n}\n\n.tos-brand {\n  display: flex;\n  gap: 8px;\n  align-items: center;\n  margin-right: 6px;\n}\n\n.tos-brand strong {\n  display: block;\n  font-size: 14px;\n  letter-spacing: 0.08em;\n  text-transform: uppercase;\n  color: var(--tos-yellow);\n}\n\n.tos-brand em {\n  display: block;\n  font-style: normal;\n  font-size: 10px;\n  letter-spacing: 0.16em;\n  text-transform: uppercase;\n  color: var(--tos-ltgray);\n}\n\n.tos-mark {\n  width: 22px;\n  height: 22px;\n  background:\n    linear-gradient(180deg, var(--tos-navy), #000055);\n  box-shadow: inset 0 0 0 1px var(--tos-yellow);\n}\n\n.tos-badge,\n.tos-chip,\n.tos-btn {\n  font: inherit;\n  color: var(--tos-yellow);\n  background: transparent;\n  border: 1px solid color-mix(in srgb, var(--tos-yellow) 55%, var(--tos-dkgray));\n  border-radius: 2px;\n  padding: 3px 9px;\n  letter-spacing: 0.02em;\n}\n\n.tos-badge,\n.tos-chip {\n  font-size: 11px;\n  text-transform: uppercase;\n}\n\n.tos-badge-accel {\n  color: var(--tos-cyan);\n  border-color: color-mix(in srgb, var(--tos-cyan) 50%, var(--tos-dkgray));\n}\n\n.tos-chip {\n  margin-left: auto;\n  border-radius: 999px;\n  color: var(--tos-ltgray);\n  text-transform: none;\n}\n\n.tos-btn {\n  cursor: pointer;\n  background: color-mix(in srgb, var(--tos-navy) 40%, transparent);\n}\n\n.tos-btn:hover:not(:disabled) {\n  background: color-mix(in srgb, var(--tos-navy) 80%, var(--tos-black));\n  border-color: var(--tos-yellow);\n}\n\n.tos-btn:disabled {\n  opacity: 0.4;\n  cursor: default;\n  color: var(--tos-ltgray);\n  border-color: var(--tos-dkgray);\n  background: transparent;\n}\n\n.tos-btn.is-on,\n.tos-primary {\n  background: color-mix(in srgb, var(--tos-navy) 85%, var(--tos-black));\n  border-color: var(--tos-yellow);\n  color: var(--tos-yellow);\n  font-weight: 650;\n}\n\n.tos-modes {\n  display: flex;\n  gap: 0;\n  margin-left: 4px;\n}\n\n.tos-modes .tos-btn {\n  border-radius: 0;\n}\n\n.tos-modes .tos-btn:first-child {\n  border-top-left-radius: 2px;\n  border-bottom-left-radius: 2px;\n}\n\n.tos-modes .tos-btn:last-child {\n  border-top-right-radius: 2px;\n  border-bottom-right-radius: 2px;\n}\n\n.tos-drive {\n  align-self: flex-start;\n  padding: 4px 12px;\n  border: 1px solid var(--tos-yellow);\n  background: color-mix(in srgb, var(--tos-navy) 70%, var(--tos-black));\n  color: var(--tos-yellow);\n  font-size: 12px;\n  letter-spacing: 0.04em;\n  text-transform: uppercase;\n}\n\n.tos-drive-agent {\n  border-color: var(--tos-cyan);\n  color: var(--tos-cyan);\n}\n\n.tos-drive-user {\n  border-color: var(--tos-green);\n  color: var(--tos-green);\n}\n\n.tos-onboard {\n  padding: 12px 14px;\n  border: 1px solid color-mix(in srgb, var(--tos-yellow) 50%, var(--tos-dkgray));\n  background: color-mix(in srgb, var(--tos-navy) 22%, var(--tos-black));\n}\n\n.tos-onboard h2,\n.tos-log h2 {\n  margin: 0 0 8px;\n  font-size: 13px;\n  font-weight: 650;\n  letter-spacing: 0.08em;\n  text-transform: uppercase;\n  color: var(--tos-yellow);\n}\n\n.tos-onboard p,\n.tos-hint,\n.tos-hatch,\n.tos-error,\n.tos-info,\n.tos-log,\n.tos-placeholder {\n  font-size: 13px;\n  line-height: 1.45;\n}\n\n.tos-onboard p,\n.tos-hint {\n  margin: 0 0 10px;\n  color: var(--tos-ltgray);\n  max-width: 62ch;\n}\n\n.tos-checks {\n  display: flex;\n  flex-wrap: wrap;\n  gap: 8px 18px;\n  margin: 0 0 12px;\n  padding: 0;\n  list-style: none;\n}\n\n.tos-check-ok { color: var(--tos-green); }\n.tos-check-no { color: var(--tos-red); }\n.tos-check-unknown { color: var(--tos-ltgray); }\n\n.tos-body {\n  display: grid;\n  grid-template-columns: max-content minmax(300px, 1fr);\n  gap: 12px;\n  align-items: start;\n  min-height: 0;\n}\n\n.tos-stage {\n  grid-column: 1;\n  grid-row: 1;\n  align-self: start;\n  min-width: 0;\n}\n\n.tos-screen {\n  background: var(--tos-black);\n  border: 1px solid var(--tos-dkgray);\n  image-rendering: pixelated;\n  overflow: hidden;\n  outline: none;\n  cursor: crosshair;\n  box-shadow: 0 0 0 1px var(--tos-black);\n}\n\n.tos-screen img {\n  display: block;\n  image-rendering: pixelated;\n  image-rendering: crisp-edges;\n}\n\n.tos-screen.is-focused {\n  border-color: var(--tos-cyan);\n  box-shadow: 0 0 0 2px var(--tos-cyan);\n}\n\n.tos-placeholder {\n  display: flex;\n  align-items: center;\n  justify-content: center;\n  width: 100%;\n  height: 100%;\n  color: var(--tos-yellow);\n  text-align: center;\n  padding: 16px;\n  box-sizing: border-box;\n}\n\n.tos-hatch {\n  margin: 6px 0 0;\n  color: var(--tos-cyan);\n  font-size: 11px;\n  letter-spacing: 0.04em;\n}\n\n.tos-hatch-idle {\n  color: var(--tos-ltgray);\n}\n\n.tos-log {\n  grid-column: 2;\n  grid-row: 1;\n  align-self: start;\n  justify-self: stretch;\n  position: relative;\n  z-index: 8;\n  min-height: 200px;\n  max-height: 210px;\n  overflow: auto;\n  padding: 10px 12px;\n  border: 1px solid color-mix(in srgb, var(--tos-yellow) 35%, var(--tos-dkgray));\n  background: color-mix(in srgb, var(--tos-navy) 18%, var(--tos-black));\n}\n\n.tos-log-line,\n.tos-log p {\n  margin: 0 0 6px;\n  color: var(--tos-ltgray);\n  white-space: nowrap;\n  overflow: hidden;\n  text-overflow: ellipsis;\n}\n\n.tos-log-agent { color: var(--tos-cyan); }\n.tos-log-user { color: var(--tos-yellow); }\n.tos-log-line.is-failed { color: var(--tos-red); }\n.tos-log-empty { color: var(--ui-text-tertiary, var(--tos-dkgray)); }\n\n.tos-error { color: var(--tos-red); }\n.tos-info { color: var(--tos-cyan); }\n\n/* Temple of Hermes theme.\n   Palette: art/palette.json (TempleOS gr32_palette_std), branch hermes/art\n   @ 97d7ad2. Header strip, wallpaper and icons come from the same branch. */\n\n.tos-pane[data-theme=\"hermes\"] {\n  --tos-hermes-gold: #ffff55;\n  --tos-hermes-cyan: #55ffff;\n  --tos-hermes-azure: #5555ff;\n  --tos-hermes-violet: #ff55ff;\n  --tos-hermes-teal: #00aaaa;\n  --tos-hermes-marble: #aaaaaa;\n  --tos-hermes-ink: #000000;\n  --tos-hermes-deep: #0000aa;\n  color: var(--tos-hermes-gold);\n  background:\n    radial-gradient(120% 72% at 50% 0%, rgba(85, 85, 255, 0.22), rgba(0, 0, 0, 0) 62%),\n    linear-gradient(180deg, rgba(0, 0, 0, 0.74) 0 62px, rgba(0, 0, 0, 0.9) 62px),\n    var(--tos-hermes-wallpaper) center / cover no-repeat,\n    var(--tos-hermes-ink);\n}\n\n.tos-pane[data-theme=\"hermes\"] .tos-top {\n  position: relative;\n  padding: 10px 12px 13px;\n  border: 1px solid rgba(85, 255, 255, 0.42);\n  background:\n    linear-gradient(90deg, rgba(0, 0, 0, 0.88), rgba(0, 0, 0, 0.58) 60%, rgba(0, 0, 0, 0.88)),\n    var(--tos-hermes-header) center / cover no-repeat;\n  box-shadow:\n    inset 0 0 26px rgba(0, 0, 170, 0.5),\n    0 0 20px rgba(85, 255, 255, 0.14);\n}\n\n.tos-pane[data-theme=\"hermes\"] .tos-top::after {\n  content: \"\";\n  position: absolute;\n  left: 8px;\n  right: 8px;\n  bottom: 4px;\n  height: 3px;\n  background: repeating-linear-gradient(\n    90deg,\n    var(--tos-hermes-cyan) 0 2px,\n    transparent 2px 7px\n  );\n  opacity: 0.55;\n  pointer-events: none;\n}\n\n.tos-pane[data-theme=\"hermes\"] .tos-mark {\n  width: 30px;\n  height: 30px;\n  background: var(--tos-hermes-mark) center / contain no-repeat;\n  image-rendering: pixelated;\n  box-shadow:\n    0 0 0 1px rgba(255, 255, 85, 0.7),\n    0 0 12px rgba(85, 255, 255, 0.35);\n}\n\n.tos-pane[data-theme=\"hermes\"] .tos-brand strong {\n  color: var(--tos-hermes-gold);\n  text-shadow: 0 0 10px rgba(255, 255, 85, 0.28);\n}\n\n.tos-pane[data-theme=\"hermes\"] .tos-brand em {\n  color: var(--tos-hermes-cyan);\n}\n\n.tos-pane[data-theme=\"hermes\"] .tos-badge {\n  color: var(--tos-hermes-cyan);\n  border-color: rgba(85, 255, 255, 0.55);\n  background: rgba(0, 0, 170, 0.18);\n}\n\n.tos-pane[data-theme=\"hermes\"] .tos-badge-accel {\n  color: var(--tos-hermes-gold);\n  border-color: rgba(255, 255, 85, 0.6);\n}\n\n.tos-pane[data-theme=\"hermes\"] .tos-chip {\n  color: var(--tos-hermes-violet);\n  border-color: rgba(255, 85, 255, 0.5);\n  background: rgba(255, 85, 255, 0.16);\n}\n\n.tos-pane[data-theme=\"hermes\"] .tos-btn {\n  color: var(--tos-hermes-gold);\n  border-color: rgba(255, 255, 85, 0.5);\n  background: linear-gradient(180deg, rgba(0, 0, 170, 0.35), rgba(0, 0, 0, 0.45));\n}\n\n.tos-pane[data-theme=\"hermes\"] .tos-btn:hover:not(:disabled) {\n  color: var(--tos-white);\n  border-color: var(--tos-hermes-cyan);\n  background: linear-gradient(180deg, rgba(85, 85, 255, 0.42), rgba(0, 0, 170, 0.6));\n}\n\n.tos-pane[data-theme=\"hermes\"] .tos-btn.is-on,\n.tos-pane[data-theme=\"hermes\"] .tos-primary {\n  color: var(--tos-white);\n  border-color: var(--tos-hermes-cyan);\n  background: linear-gradient(180deg, rgba(85, 85, 255, 0.48), rgba(0, 0, 170, 0.62));\n  box-shadow: 0 0 10px rgba(85, 255, 255, 0.2);\n}\n\n.tos-pane[data-theme=\"hermes\"] .tos-theme {\n  color: var(--tos-hermes-violet);\n  border-color: rgba(255, 85, 255, 0.55);\n}\n\n.tos-pane[data-theme=\"hermes\"] .tos-theme::before {\n  content: \"\";\n  display: inline-block;\n  width: 12px;\n  height: 12px;\n  margin-right: 5px;\n  vertical-align: -2px;\n  background: var(--tos-hermes-nous) center / contain no-repeat;\n  image-rendering: pixelated;\n}\n\n.tos-pane[data-theme=\"hermes\"] .tos-drive {\n  color: var(--tos-hermes-cyan);\n  border-color: var(--tos-hermes-cyan);\n  background: linear-gradient(90deg, rgba(0, 0, 170, 0.58), rgba(0, 0, 0, 0.72));\n  box-shadow: 0 0 12px rgba(85, 255, 255, 0.12);\n}\n\n.tos-pane[data-theme=\"hermes\"] .tos-drive-user {\n  color: var(--tos-green);\n  border-color: var(--tos-green);\n}\n\n.tos-pane[data-theme=\"hermes\"] .tos-onboard {\n  border-color: rgba(85, 255, 255, 0.42);\n  background:\n    linear-gradient(180deg, rgba(0, 0, 170, 0.3), rgba(0, 0, 0, 0.62));\n  box-shadow: inset 0 0 22px rgba(0, 0, 170, 0.38);\n}\n\n.tos-pane[data-theme=\"hermes\"] .tos-onboard h2,\n.tos-pane[data-theme=\"hermes\"] .tos-log h2 {\n  color: var(--tos-hermes-gold);\n}\n\n.tos-pane[data-theme=\"hermes\"] .tos-log h2::before {\n  content: \"\";\n  display: inline-block;\n  width: 16px;\n  height: 16px;\n  margin-right: 6px;\n  vertical-align: -3px;\n  background: var(--tos-hermes-chat) center / contain no-repeat;\n  image-rendering: pixelated;\n}\n\n.tos-pane[data-theme=\"hermes\"] .tos-hint::before {\n  content: \"\";\n  display: inline-block;\n  width: 16px;\n  height: 16px;\n  margin-right: 6px;\n  vertical-align: -3px;\n  background: var(--tos-hermes-capy) center / contain no-repeat;\n  image-rendering: pixelated;\n}\n\n.tos-pane[data-theme=\"hermes\"] .tos-screen {\n  border-color: rgba(85, 255, 255, 0.45);\n  box-shadow:\n    0 0 0 1px var(--tos-hermes-ink),\n    0 0 26px rgba(0, 0, 170, 0.5);\n}\n\n.tos-pane[data-theme=\"hermes\"] .tos-screen.is-focused {\n  border-color: var(--tos-hermes-cyan);\n  box-shadow:\n    0 0 0 2px var(--tos-hermes-cyan),\n    0 0 30px rgba(85, 255, 255, 0.3);\n}\n\n.tos-pane[data-theme=\"hermes\"] .tos-log {\n  border-color: rgba(255, 255, 85, 0.32);\n  background:\n    linear-gradient(180deg, rgba(0, 0, 170, 0.22), rgba(0, 0, 0, 0.7));\n  box-shadow: inset 0 0 18px rgba(0, 0, 170, 0.32);\n}\n\n.tos-pane[data-theme=\"hermes\"] .tos-log-agent {\n  color: var(--tos-hermes-cyan);\n}\n\n.tos-pane[data-theme=\"hermes\"] .tos-log-user {\n  color: var(--tos-hermes-gold);\n}\n\n.tos-pane[data-theme=\"hermes\"] .tos-log-line.is-failed,\n.tos-pane[data-theme=\"hermes\"] .tos-error {\n  color: var(--tos-red);\n}\n\n.tos-pane[data-theme=\"hermes\"] .tos-info,\n.tos-pane[data-theme=\"hermes\"] .tos-hatch {\n  color: var(--tos-hermes-cyan);\n}\n\n.tos-pane[data-theme=\"hermes\"] .tos-check-ok {\n  color: var(--tos-green);\n}\n\n.tos-pane[data-theme=\"hermes\"] .tos-check-no {\n  color: var(--tos-red);\n}\n\n.tos-pane[data-theme=\"hermes\"] .tos-check-unknown {\n  color: var(--tos-hermes-marble);\n}\n\n@media (max-width: 900px) {\n  .tos-body {\n    grid-template-columns: 1fr;\n  }\n  .tos-chip {\n    margin-left: 0;\n  }\n}\n\n/* Terry companion dock (fan tribute). The stage row is a contents wrapper:\n   the guest screen keeps the left grid cell while the Agent Log and the\n   companion share the right rail. The log sits at the top of the rail and\n   huge Terry fills the rail from under it down to the bottom of the pane. */\n.tos-stage-row {\n  display: contents;\n}\n\n.tos-companion-dock {\n  grid-column: 2;\n  grid-row: 1;\n  align-self: end;\n  justify-self: stretch;\n  position: relative;\n  z-index: 5;\n  width: 100%;\n  min-width: 0;\n  height: var(--tos-companion-h, 750px);\n  min-height: 0;\n  display: flex;\n  flex-direction: column;\n  justify-content: flex-end;\n  align-items: stretch;\n  box-sizing: border-box;\n  overflow: visible;\n}\n\n.tos-companion-bubble {\n  position: absolute;\n  top: 0;\n  left: 0;\n  z-index: 7;\n  max-width: min(100%, 340px);\n  min-width: 140px;\n  padding: 10px 14px;\n  border: 1px solid color-mix(in srgb, var(--tos-yellow) 55%, var(--tos-dkgray));\n  border-radius: 12px 12px 2px 12px;\n  background: color-mix(in srgb, var(--tos-navy) 70%, var(--tos-black));\n  color: var(--tos-yellow);\n  font-size: 15px;\n  line-height: 1.35;\n  letter-spacing: 0.01em;\n  overflow-wrap: anywhere;\n  word-break: break-word;\n  pointer-events: none;\n}\n\n.tos-companion-bubble-slot {\n  /* The bubble is positioned over the transparent crown of the sprite box,\n     so it needs no flow space in the dock. */\n  position: absolute;\n  inset: 0 0 auto 0;\n  height: 0;\n  pointer-events: none;\n}\n\n.tos-companion {\n  position: relative;\n  align-self: stretch;\n  z-index: 6;\n  width: 100%;\n  height: var(--tos-companion-h, 750px);\n  pointer-events: auto;\n  cursor: pointer;\n  image-rendering: pixelated;\n  image-rendering: crisp-edges;\n  filter: drop-shadow(0 6px 10px rgba(0, 0, 0, 0.55));\n}\n\n/* Static sprite sheet used by the screenshot harness and docs render.\n   atlas.png is 1536x1872 (8x9 cells); 800%/900% makes one 192x208 cell\n   fill the sprite box exactly, so the existing art scales enormously\n   without generating or redrawing anything. */\n.tos-companion-static {\n  background-repeat: no-repeat;\n  background-size: 800% 900%;\n  background-position: 0 0;\n}\n\n.tos-companion-canvas {\n  width: 100%;\n  height: 100%;\n  display: block;\n  image-rendering: pixelated;\n  image-rendering: crisp-edges;\n}\n\n.tos-companion-loading {\n  width: 100%;\n  height: 100%;\n  display: flex;\n  align-items: flex-end;\n  justify-content: center;\n  color: var(--tos-ltgray);\n  font-size: 14px;\n}\n\n.tos-companion-controls {\n  display: inline-flex;\n  gap: 6px;\n  align-items: center;\n  margin-left: auto;\n}\n\n.tos-companion-costume select {\n  font: inherit;\n  color: var(--tos-yellow);\n  background: var(--tos-black);\n  border: 1px solid color-mix(in srgb, var(--tos-yellow) 55%, var(--tos-dkgray));\n  border-radius: 2px;\n  padding: 2px 6px;\n}\n\n.tos-sr-only {\n  position: absolute;\n  width: 1px;\n  height: 1px;\n  padding: 0;\n  margin: -1px;\n  overflow: hidden;\n  clip: rect(0, 0, 0, 0);\n  white-space: nowrap;\n  border: 0;\n}\n\n.tos-pane[data-theme=\"hermes\"] {\n  --tos-companion-width: 100%;\n  --tos-companion-h: 750px;\n}\n\n.tos-pane[data-theme=\"hermes\"] .tos-companion-dock {\n  padding: 6px 6px 4px;\n  border: 1px solid rgba(85, 255, 255, 0.28);\n  background:\n    linear-gradient(180deg, rgba(0, 0, 170, 0.22), rgba(0, 0, 0, 0.62));\n  box-shadow: inset 0 0 18px rgba(0, 0, 170, 0.35);\n}\n\n.tos-pane[data-theme=\"hermes\"] .tos-companion-bubble {\n  border-color: rgba(85, 255, 255, 0.62);\n  background:\n    linear-gradient(180deg, rgba(85, 85, 255, 0.34), rgba(0, 0, 170, 0.4));\n  color: var(--tos-hermes-gold);\n  box-shadow:\n    0 0 0 1px rgba(0, 0, 0, 0.55),\n    0 0 12px rgba(85, 255, 255, 0.16);\n}\n\n.tos-pane[data-theme=\"hermes\"] .tos-companion-hide {\n  color: var(--tos-hermes-violet);\n  border-color: rgba(255, 85, 255, 0.55);\n}\n\n.tos-pane[data-theme=\"hermes\"] .tos-companion-costume select {\n  color: var(--tos-hermes-gold);\n  border-color: rgba(85, 255, 255, 0.55);\n  background: rgba(0, 0, 0, 0.78);\n}\n\n@media (max-width: 900px) {\n  .tos-stage,\n  .tos-log,\n  .tos-companion-dock {\n    grid-column: 1;\n    grid-row: auto;\n    justify-self: stretch;\n  }\n\n  .tos-stage {\n    align-self: start;\n  }\n\n  .tos-log {\n    order: 2;\n  }\n\n  .tos-companion-dock {\n    order: 3;\n    align-self: end;\n  }\n}\n";
+const TEMPLEOS_STYLES = "/* TempleOS pane. 16-color accents on Hermes chrome variables. */\n\n.tos-pane {\n  color-scheme: dark;\n  --tos-black: #000000;\n  --tos-navy: #0000aa;\n  --tos-yellow: #ffff55;\n  --tos-white: #ffffff;\n  --tos-ltgray: #aaaaaa;\n  --tos-dkgray: #555555;\n  --tos-cyan: #55ffff;\n  --tos-green: #55ff55;\n  --tos-red: #ff5555;\n  --tos-blue: #5555ff;\n  --tos-brown: #aa5500;\n  display: flex;\n  flex-direction: column;\n  gap: 10px;\n  padding: 12px 14px 16px;\n  color: var(--tos-yellow);\n  background:\n    linear-gradient(180deg, color-mix(in srgb, var(--tos-navy) 35%, var(--tos-black)) 0 52px, var(--tos-black) 52px);\n  font-family: \"IBM Plex Mono\", \"Lucida Console\", ui-monospace, monospace;\n  min-height: 100%;\n  box-sizing: border-box;\n}\n\n.tos-top,\n.tos-bar {\n  display: flex;\n  flex-wrap: wrap;\n  gap: 8px;\n  align-items: center;\n}\n\n.tos-brand {\n  display: flex;\n  gap: 8px;\n  align-items: center;\n  margin-right: 6px;\n}\n\n.tos-brand strong {\n  display: block;\n  font-size: 14px;\n  letter-spacing: 0.08em;\n  text-transform: uppercase;\n  color: var(--tos-yellow);\n}\n\n.tos-brand em {\n  display: block;\n  font-style: normal;\n  font-size: 10px;\n  letter-spacing: 0.16em;\n  text-transform: uppercase;\n  color: var(--tos-ltgray);\n}\n\n.tos-mark {\n  width: 22px;\n  height: 22px;\n  background:\n    linear-gradient(180deg, var(--tos-navy), #000055);\n  box-shadow: inset 0 0 0 1px var(--tos-yellow);\n}\n\n.tos-badge,\n.tos-chip,\n.tos-btn {\n  font: inherit;\n  color: var(--tos-yellow);\n  background: transparent;\n  border: 1px solid color-mix(in srgb, var(--tos-yellow) 55%, var(--tos-dkgray));\n  border-radius: 2px;\n  padding: 3px 9px;\n  letter-spacing: 0.02em;\n}\n\n.tos-badge,\n.tos-chip {\n  font-size: 11px;\n  text-transform: uppercase;\n}\n\n.tos-badge-accel {\n  color: var(--tos-cyan);\n  border-color: color-mix(in srgb, var(--tos-cyan) 50%, var(--tos-dkgray));\n}\n\n.tos-chip {\n  margin-left: auto;\n  border-radius: 999px;\n  color: var(--tos-ltgray);\n  text-transform: none;\n}\n\n.tos-btn {\n  cursor: pointer;\n  background: color-mix(in srgb, var(--tos-navy) 40%, transparent);\n}\n\n.tos-btn:hover:not(:disabled) {\n  background: color-mix(in srgb, var(--tos-navy) 80%, var(--tos-black));\n  border-color: var(--tos-yellow);\n}\n\n.tos-btn:disabled {\n  opacity: 0.4;\n  cursor: default;\n  color: var(--tos-ltgray);\n  border-color: var(--tos-dkgray);\n  background: transparent;\n}\n\n.tos-btn.is-on,\n.tos-primary {\n  background: color-mix(in srgb, var(--tos-navy) 85%, var(--tos-black));\n  border-color: var(--tos-yellow);\n  color: var(--tos-yellow);\n  font-weight: 650;\n}\n\n.tos-modes {\n  display: flex;\n  gap: 0;\n  margin-left: 4px;\n}\n\n.tos-modes .tos-btn {\n  border-radius: 0;\n}\n\n.tos-modes .tos-btn:first-child {\n  border-top-left-radius: 2px;\n  border-bottom-left-radius: 2px;\n}\n\n.tos-modes .tos-btn:last-child {\n  border-top-right-radius: 2px;\n  border-bottom-right-radius: 2px;\n}\n\n.tos-drive {\n  align-self: flex-start;\n  padding: 4px 12px;\n  border: 1px solid var(--tos-yellow);\n  background: color-mix(in srgb, var(--tos-navy) 70%, var(--tos-black));\n  color: var(--tos-yellow);\n  font-size: 12px;\n  letter-spacing: 0.04em;\n  text-transform: uppercase;\n}\n\n.tos-drive-agent {\n  border-color: var(--tos-cyan);\n  color: var(--tos-cyan);\n}\n\n.tos-drive-user {\n  border-color: var(--tos-green);\n  color: var(--tos-green);\n}\n\n.tos-onboard {\n  padding: 12px 14px;\n  border: 1px solid color-mix(in srgb, var(--tos-yellow) 50%, var(--tos-dkgray));\n  background: color-mix(in srgb, var(--tos-navy) 22%, var(--tos-black));\n}\n\n.tos-onboard h2,\n.tos-log h2 {\n  margin: 0 0 8px;\n  font-size: 13px;\n  font-weight: 650;\n  letter-spacing: 0.08em;\n  text-transform: uppercase;\n  color: var(--tos-yellow);\n}\n\n.tos-onboard p,\n.tos-hint,\n.tos-hatch,\n.tos-error,\n.tos-info,\n.tos-log,\n.tos-placeholder {\n  font-size: 13px;\n  line-height: 1.45;\n}\n\n.tos-onboard p,\n.tos-hint {\n  margin: 0 0 10px;\n  color: var(--tos-ltgray);\n  max-width: 62ch;\n}\n\n.tos-checks {\n  display: flex;\n  flex-wrap: wrap;\n  gap: 8px 18px;\n  margin: 0 0 12px;\n  padding: 0;\n  list-style: none;\n}\n\n.tos-check-ok { color: var(--tos-green); }\n.tos-check-no { color: var(--tos-red); }\n.tos-check-unknown { color: var(--tos-ltgray); }\n\n.tos-body {\n  display: grid;\n  grid-template-columns: max-content minmax(300px, 1fr);\n  gap: 12px;\n  align-items: start;\n  min-height: 0;\n}\n\n.tos-stage {\n  grid-column: 1;\n  grid-row: 1;\n  align-self: start;\n  min-width: 0;\n}\n\n.tos-screen {\n  background: var(--tos-black);\n  border: 1px solid var(--tos-dkgray);\n  image-rendering: pixelated;\n  overflow: hidden;\n  outline: none;\n  cursor: crosshair;\n  box-shadow: 0 0 0 1px var(--tos-black);\n}\n\n.tos-screen img {\n  display: block;\n  image-rendering: pixelated;\n  image-rendering: crisp-edges;\n}\n\n.tos-screen.is-focused {\n  border-color: var(--tos-cyan);\n  box-shadow: 0 0 0 2px var(--tos-cyan);\n}\n\n.tos-placeholder {\n  display: flex;\n  align-items: center;\n  justify-content: center;\n  width: 100%;\n  height: 100%;\n  color: var(--tos-yellow);\n  text-align: center;\n  padding: 16px;\n  box-sizing: border-box;\n}\n\n.tos-hatch {\n  margin: 6px 0 0;\n  color: var(--tos-cyan);\n  font-size: 11px;\n  letter-spacing: 0.04em;\n}\n\n.tos-hatch-idle {\n  color: var(--tos-ltgray);\n}\n\n.tos-log {\n  grid-column: 2;\n  grid-row: 1;\n  align-self: start;\n  justify-self: stretch;\n  position: relative;\n  z-index: 8;\n  min-height: 200px;\n  max-height: 210px;\n  overflow: auto;\n  padding: 10px 12px;\n  border: 1px solid color-mix(in srgb, var(--tos-yellow) 35%, var(--tos-dkgray));\n  background: color-mix(in srgb, var(--tos-navy) 18%, var(--tos-black));\n}\n\n.tos-log-line,\n.tos-log p {\n  margin: 0 0 6px;\n  color: var(--tos-ltgray);\n  white-space: nowrap;\n  overflow: hidden;\n  text-overflow: ellipsis;\n}\n\n.tos-log-agent { color: var(--tos-cyan); }\n.tos-log-user { color: var(--tos-yellow); }\n.tos-log-line.is-failed { color: var(--tos-red); }\n.tos-log-empty { color: var(--ui-text-tertiary, var(--tos-dkgray)); }\n\n.tos-error { color: var(--tos-red); }\n.tos-info { color: var(--tos-cyan); }\n\n/* Temple of Hermes theme.\n   Palette: art/palette.json (TempleOS gr32_palette_std), branch hermes/art\n   @ 97d7ad2. Header strip, wallpaper and icons come from the same branch. */\n\n.tos-pane[data-theme=\"hermes\"] {\n  --tos-hermes-gold: #ffff55;\n  --tos-hermes-cyan: #55ffff;\n  --tos-hermes-azure: #5555ff;\n  --tos-hermes-violet: #ff55ff;\n  --tos-hermes-teal: #00aaaa;\n  --tos-hermes-marble: #aaaaaa;\n  --tos-hermes-ink: #000000;\n  --tos-hermes-deep: #0000aa;\n  color: var(--tos-hermes-gold);\n  background:\n    radial-gradient(120% 72% at 50% 0%, rgba(85, 85, 255, 0.22), rgba(0, 0, 0, 0) 62%),\n    linear-gradient(180deg, rgba(0, 0, 0, 0.74) 0 62px, rgba(0, 0, 0, 0.9) 62px),\n    var(--tos-hermes-wallpaper) center / cover no-repeat,\n    var(--tos-hermes-ink);\n}\n\n.tos-pane[data-theme=\"hermes\"] .tos-top {\n  position: relative;\n  padding: 10px 12px 13px;\n  border: 1px solid rgba(85, 255, 255, 0.42);\n  background:\n    linear-gradient(90deg, rgba(0, 0, 0, 0.88), rgba(0, 0, 0, 0.58) 60%, rgba(0, 0, 0, 0.88)),\n    var(--tos-hermes-header) center / cover no-repeat;\n  box-shadow:\n    inset 0 0 26px rgba(0, 0, 170, 0.5),\n    0 0 20px rgba(85, 255, 255, 0.14);\n}\n\n.tos-pane[data-theme=\"hermes\"] .tos-top::after {\n  content: \"\";\n  position: absolute;\n  left: 8px;\n  right: 8px;\n  bottom: 4px;\n  height: 3px;\n  background: repeating-linear-gradient(\n    90deg,\n    var(--tos-hermes-cyan) 0 2px,\n    transparent 2px 7px\n  );\n  opacity: 0.55;\n  pointer-events: none;\n}\n\n.tos-pane[data-theme=\"hermes\"] .tos-mark {\n  width: 30px;\n  height: 30px;\n  background: var(--tos-hermes-mark) center / contain no-repeat;\n  image-rendering: pixelated;\n  box-shadow:\n    0 0 0 1px rgba(255, 255, 85, 0.7),\n    0 0 12px rgba(85, 255, 255, 0.35);\n}\n\n.tos-pane[data-theme=\"hermes\"] .tos-brand strong {\n  color: var(--tos-hermes-gold);\n  text-shadow: 0 0 10px rgba(255, 255, 85, 0.28);\n}\n\n.tos-pane[data-theme=\"hermes\"] .tos-brand em {\n  color: var(--tos-hermes-cyan);\n}\n\n.tos-pane[data-theme=\"hermes\"] .tos-badge {\n  color: var(--tos-hermes-cyan);\n  border-color: rgba(85, 255, 255, 0.55);\n  background: rgba(0, 0, 170, 0.18);\n}\n\n.tos-pane[data-theme=\"hermes\"] .tos-badge-accel {\n  color: var(--tos-hermes-gold);\n  border-color: rgba(255, 255, 85, 0.6);\n}\n\n.tos-pane[data-theme=\"hermes\"] .tos-chip {\n  color: var(--tos-hermes-violet);\n  border-color: rgba(255, 85, 255, 0.5);\n  background: rgba(255, 85, 255, 0.16);\n}\n\n.tos-pane[data-theme=\"hermes\"] .tos-btn {\n  color: var(--tos-hermes-gold);\n  border-color: rgba(255, 255, 85, 0.5);\n  background: linear-gradient(180deg, rgba(0, 0, 170, 0.35), rgba(0, 0, 0, 0.45));\n}\n\n.tos-pane[data-theme=\"hermes\"] .tos-btn:hover:not(:disabled) {\n  color: var(--tos-white);\n  border-color: var(--tos-hermes-cyan);\n  background: linear-gradient(180deg, rgba(85, 85, 255, 0.42), rgba(0, 0, 170, 0.6));\n}\n\n.tos-pane[data-theme=\"hermes\"] .tos-btn.is-on,\n.tos-pane[data-theme=\"hermes\"] .tos-primary {\n  color: var(--tos-white);\n  border-color: var(--tos-hermes-cyan);\n  background: linear-gradient(180deg, rgba(85, 85, 255, 0.48), rgba(0, 0, 170, 0.62));\n  box-shadow: 0 0 10px rgba(85, 255, 255, 0.2);\n}\n\n.tos-pane[data-theme=\"hermes\"] .tos-theme {\n  color: var(--tos-hermes-violet);\n  border-color: rgba(255, 85, 255, 0.55);\n}\n\n.tos-pane[data-theme=\"hermes\"] .tos-theme::before {\n  content: \"\";\n  display: inline-block;\n  width: 12px;\n  height: 12px;\n  margin-right: 5px;\n  vertical-align: -2px;\n  background: var(--tos-hermes-nous) center / contain no-repeat;\n  image-rendering: pixelated;\n}\n\n.tos-pane[data-theme=\"hermes\"] .tos-drive {\n  color: var(--tos-hermes-cyan);\n  border-color: var(--tos-hermes-cyan);\n  background: linear-gradient(90deg, rgba(0, 0, 170, 0.58), rgba(0, 0, 0, 0.72));\n  box-shadow: 0 0 12px rgba(85, 255, 255, 0.12);\n}\n\n.tos-pane[data-theme=\"hermes\"] .tos-drive-user {\n  color: var(--tos-green);\n  border-color: var(--tos-green);\n}\n\n.tos-pane[data-theme=\"hermes\"] .tos-onboard {\n  border-color: rgba(85, 255, 255, 0.42);\n  background:\n    linear-gradient(180deg, rgba(0, 0, 170, 0.3), rgba(0, 0, 0, 0.62));\n  box-shadow: inset 0 0 22px rgba(0, 0, 170, 0.38);\n}\n\n.tos-pane[data-theme=\"hermes\"] .tos-onboard h2,\n.tos-pane[data-theme=\"hermes\"] .tos-log h2 {\n  color: var(--tos-hermes-gold);\n}\n\n.tos-pane[data-theme=\"hermes\"] .tos-log h2::before {\n  content: \"\";\n  display: inline-block;\n  width: 16px;\n  height: 16px;\n  margin-right: 6px;\n  vertical-align: -3px;\n  background: var(--tos-hermes-chat) center / contain no-repeat;\n  image-rendering: pixelated;\n}\n\n.tos-pane[data-theme=\"hermes\"] .tos-hint::before {\n  content: \"\";\n  display: inline-block;\n  width: 16px;\n  height: 16px;\n  margin-right: 6px;\n  vertical-align: -3px;\n  background: var(--tos-hermes-capy) center / contain no-repeat;\n  image-rendering: pixelated;\n}\n\n.tos-pane[data-theme=\"hermes\"] .tos-screen {\n  border-color: rgba(85, 255, 255, 0.45);\n  box-shadow:\n    0 0 0 1px var(--tos-hermes-ink),\n    0 0 26px rgba(0, 0, 170, 0.5);\n}\n\n.tos-pane[data-theme=\"hermes\"] .tos-screen.is-focused {\n  border-color: var(--tos-hermes-cyan);\n  box-shadow:\n    0 0 0 2px var(--tos-hermes-cyan),\n    0 0 30px rgba(85, 255, 255, 0.3);\n}\n\n.tos-pane[data-theme=\"hermes\"] .tos-log {\n  border-color: rgba(255, 255, 85, 0.32);\n  background:\n    linear-gradient(180deg, rgba(0, 0, 170, 0.22), rgba(0, 0, 0, 0.7));\n  box-shadow: inset 0 0 18px rgba(0, 0, 170, 0.32);\n}\n\n.tos-pane[data-theme=\"hermes\"] .tos-log-agent {\n  color: var(--tos-hermes-cyan);\n}\n\n.tos-pane[data-theme=\"hermes\"] .tos-log-user {\n  color: var(--tos-hermes-gold);\n}\n\n.tos-pane[data-theme=\"hermes\"] .tos-log-line.is-failed,\n.tos-pane[data-theme=\"hermes\"] .tos-error {\n  color: var(--tos-red);\n}\n\n.tos-pane[data-theme=\"hermes\"] .tos-info,\n.tos-pane[data-theme=\"hermes\"] .tos-hatch {\n  color: var(--tos-hermes-cyan);\n}\n\n.tos-pane[data-theme=\"hermes\"] .tos-check-ok {\n  color: var(--tos-green);\n}\n\n.tos-pane[data-theme=\"hermes\"] .tos-check-no {\n  color: var(--tos-red);\n}\n\n.tos-pane[data-theme=\"hermes\"] .tos-check-unknown {\n  color: var(--tos-hermes-marble);\n}\n\n@media (max-width: 900px) {\n  .tos-body {\n    grid-template-columns: 1fr;\n  }\n  .tos-chip {\n    margin-left: 0;\n  }\n}\n\n/* Terry companion dock (fan tribute). The stage row is a contents wrapper:\n   the guest screen keeps the left grid cell while the Agent Log and the\n   companion share the right rail. The log sits at the top of the rail and\n   huge Terry fills the rail from under it down to the bottom of the pane. */\n.tos-stage-row {\n  display: contents;\n}\n\n.tos-companion-dock {\n  grid-column: 2;\n  grid-row: 1;\n  align-self: end;\n  justify-self: stretch;\n  position: relative;\n  z-index: 5;\n  width: 100%;\n  min-width: 0;\n  height: var(--tos-companion-h, 750px);\n  min-height: 0;\n  display: flex;\n  flex-direction: column;\n  justify-content: flex-end;\n  align-items: stretch;\n  box-sizing: border-box;\n  overflow: visible;\n}\n\n.tos-companion-bubble {\n  position: absolute;\n  top: 0;\n  left: 0;\n  z-index: 7;\n  max-width: min(100%, 340px);\n  min-width: 140px;\n  padding: 10px 14px;\n  border: 1px solid color-mix(in srgb, var(--tos-yellow) 55%, var(--tos-dkgray));\n  border-radius: 12px 12px 2px 12px;\n  background: color-mix(in srgb, var(--tos-navy) 70%, var(--tos-black));\n  color: var(--tos-yellow);\n  font-size: 15px;\n  line-height: 1.35;\n  letter-spacing: 0.01em;\n  overflow-wrap: anywhere;\n  word-break: break-word;\n  pointer-events: none;\n}\n\n.tos-companion-bubble-slot {\n  /* The bubble is positioned over the transparent crown of the sprite box,\n     so it needs no flow space in the dock. */\n  position: absolute;\n  inset: 0 0 auto 0;\n  height: 0;\n  pointer-events: none;\n}\n\n.tos-companion {\n  position: relative;\n  align-self: stretch;\n  z-index: 6;\n  width: 100%;\n  height: var(--tos-companion-h, 750px);\n  pointer-events: auto;\n  cursor: pointer;\n  image-rendering: auto;\n  filter: drop-shadow(0 6px 10px rgba(0, 0, 0, 0.55));\n}\n\n/* Static sprite sheet used by the screenshot harness and docs render.\n   atlas.png is 1536x1872 (8x9 cells); 800%/900% makes one 192x208 cell\n   fill the sprite box exactly, so the existing art scales enormously\n   without generating or redrawing anything. */\n.tos-companion-static {\n  background-repeat: no-repeat;\n  background-size: 800% 900%;\n  background-position: 0 0;\n}\n\n.tos-companion-canvas {\n  width: 100%;\n  height: 100%;\n  display: block;\n  image-rendering: auto;\n}\n\n.tos-companion-loading {\n  position: absolute;\n  inset: 0;\n  display: flex;\n  align-items: flex-end;\n  justify-content: center;\n  padding: 12px;\n  color: var(--tos-ltgray);\n  font-size: 14px;\n  pointer-events: none;\n}\n\n.tos-companion-controls {\n  display: inline-flex;\n  gap: 6px;\n  align-items: center;\n  margin-left: auto;\n}\n\n.tos-companion-costume select {\n  font: inherit;\n  color: var(--tos-yellow);\n  background: var(--tos-black);\n  border: 1px solid color-mix(in srgb, var(--tos-yellow) 55%, var(--tos-dkgray));\n  border-radius: 2px;\n  padding: 2px 6px;\n}\n\n.tos-sr-only {\n  position: absolute;\n  width: 1px;\n  height: 1px;\n  padding: 0;\n  margin: -1px;\n  overflow: hidden;\n  clip: rect(0, 0, 0, 0);\n  white-space: nowrap;\n  border: 0;\n}\n\n.tos-pane[data-theme=\"hermes\"] {\n  --tos-companion-width: 100%;\n  --tos-companion-h: 750px;\n}\n\n.tos-pane[data-theme=\"hermes\"] .tos-companion-dock {\n  padding: 6px 6px 4px;\n  border: 1px solid rgba(85, 255, 255, 0.28);\n  background:\n    linear-gradient(180deg, rgba(0, 0, 170, 0.22), rgba(0, 0, 0, 0.62));\n  box-shadow: inset 0 0 18px rgba(0, 0, 170, 0.35);\n}\n\n.tos-pane[data-theme=\"hermes\"] .tos-companion-bubble {\n  border-color: rgba(85, 255, 255, 0.62);\n  background:\n    linear-gradient(180deg, rgba(85, 85, 255, 0.34), rgba(0, 0, 170, 0.4));\n  color: var(--tos-hermes-gold);\n  box-shadow:\n    0 0 0 1px rgba(0, 0, 0, 0.55),\n    0 0 12px rgba(85, 255, 255, 0.16);\n}\n\n.tos-pane[data-theme=\"hermes\"] .tos-companion-hide {\n  color: var(--tos-hermes-violet);\n  border-color: rgba(255, 85, 255, 0.55);\n}\n\n.tos-pane[data-theme=\"hermes\"] .tos-companion-costume select {\n  color: var(--tos-hermes-gold);\n  border-color: rgba(85, 255, 255, 0.55);\n  background: rgba(0, 0, 0, 0.78);\n}\n\n@media (max-width: 900px) {\n  .tos-stage,\n  .tos-log,\n  .tos-companion-dock {\n    grid-column: 1;\n    grid-row: auto;\n    justify-self: stretch;\n  }\n\n  .tos-stage {\n    align-self: start;\n  }\n\n  .tos-log {\n    order: 2;\n  }\n\n  .tos-companion-dock {\n    order: 3;\n    align-self: end;\n  }\n}\n";
 
 function injectTempleOSStyles() {
   if (typeof document === "undefined") return false;
@@ -1500,8 +1679,8 @@ function injectTempleOSStyles() {
   return true;
 }
 
-const __tosCreatePlugin = __m7["createDesktopPlugin"];
-const __tosRegisterPane = __m7["registerTempleOSPane"];
+const __tosCreatePlugin = __m8["createDesktopPlugin"];
+const __tosRegisterPane = __m8["registerTempleOSPane"];
 const __tosPlugin = typeof __tosCreatePlugin === "function"
   ? __tosCreatePlugin()
   : { id: "templeos", name: "TempleOS", defaultEnabled: true, register: __tosRegisterPane };
@@ -1519,37 +1698,37 @@ export function register(ctx) {
 
 __tosPlugin.register = register;
 
-export const CONTROL_MODES = __m7["CONTROL_MODES"];
-export const CompanionControls = __m7["CompanionControls"];
-export const DEFAULT_HEIGHT = __m7["DEFAULT_HEIGHT"];
-export const DEFAULT_WIDTH = __m7["DEFAULT_WIDTH"];
-export const GOLDEN_SNAPSHOT = __m7["GOLDEN_SNAPSHOT"];
-export const PANE_ID = __m7["PANE_ID"];
-export const PANE_TITLE = __m7["PANE_TITLE"];
-export const TempleOSPane = __m7["TempleOSPane"];
-export const TerryCompanion = __m7["TerryCompanion"];
-export const TerryCompanionOverlay = __m7["TerryCompanionOverlay"];
-export const accelLabel = __m7["accelLabel"];
-export const checkState = __m7["checkState"];
-export const createDesktopPlugin = __m7["createDesktopPlugin"];
-export const createPaneContribution = __m7["createPaneContribution"];
-export const drivingChip = __m7["drivingChip"];
-export const firstCheck = __m7["firstCheck"];
-export const flavorLabel = __m7["flavorLabel"];
-export const guestSize = __m7["guestSize"];
-export const integerScale = __m7["integerScale"];
-export const isReleaseHatch = __m7["isReleaseHatch"];
-export const keyEventToPayload = __m7["keyEventToPayload"];
-export const logLine = __m7["logLine"];
-export const mapPointerToGuest = __m7["mapPointerToGuest"];
-export const modeLabel = __m7["modeLabel"];
-export const needsOnboarding = __m7["needsOnboarding"];
-export const nextMode = __m7["nextMode"];
-export const pollIntervalMs = __m7["pollIntervalMs"];
-export const qcodeFor = __m7["qcodeFor"];
-export const registerTempleOSPane = __m7["registerTempleOSPane"];
-export const statusSummary = __m7["statusSummary"];
-export const userMayInput = __m7["userMayInput"];
+export const CONTROL_MODES = __m8["CONTROL_MODES"];
+export const CompanionControls = __m8["CompanionControls"];
+export const DEFAULT_HEIGHT = __m8["DEFAULT_HEIGHT"];
+export const DEFAULT_WIDTH = __m8["DEFAULT_WIDTH"];
+export const GOLDEN_SNAPSHOT = __m8["GOLDEN_SNAPSHOT"];
+export const PANE_ID = __m8["PANE_ID"];
+export const PANE_TITLE = __m8["PANE_TITLE"];
+export const TempleOSPane = __m8["TempleOSPane"];
+export const TerryCompanion = __m8["TerryCompanion"];
+export const TerryCompanionOverlay = __m8["TerryCompanionOverlay"];
+export const accelLabel = __m8["accelLabel"];
+export const checkState = __m8["checkState"];
+export const createDesktopPlugin = __m8["createDesktopPlugin"];
+export const createPaneContribution = __m8["createPaneContribution"];
+export const drivingChip = __m8["drivingChip"];
+export const firstCheck = __m8["firstCheck"];
+export const flavorLabel = __m8["flavorLabel"];
+export const guestSize = __m8["guestSize"];
+export const integerScale = __m8["integerScale"];
+export const isReleaseHatch = __m8["isReleaseHatch"];
+export const keyEventToPayload = __m8["keyEventToPayload"];
+export const logLine = __m8["logLine"];
+export const mapPointerToGuest = __m8["mapPointerToGuest"];
+export const modeLabel = __m8["modeLabel"];
+export const needsOnboarding = __m8["needsOnboarding"];
+export const nextMode = __m8["nextMode"];
+export const pollIntervalMs = __m8["pollIntervalMs"];
+export const qcodeFor = __m8["qcodeFor"];
+export const registerTempleOSPane = __m8["registerTempleOSPane"];
+export const statusSummary = __m8["statusSummary"];
+export const userMayInput = __m8["userMayInput"];
 
 export { injectTempleOSStyles as injectStyles };
 export default __tosPlugin;

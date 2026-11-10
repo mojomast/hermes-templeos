@@ -1,0 +1,64 @@
+{
+  "version": 2,
+  "cell": [
+    192,
+    208
+  ],
+  "coordinates": "x right, y down, clockwise degrees",
+  "pose_inputs": "world-space pivots; do not apply a parent transform again to baked poses",
+  "setup_pose": "anims/idle.json frames[0] before foot normalization",
+  "arm_chain": {
+    "upper_slot": "{side}_upper_arm",
+    "elbow_slot": "{side}_forearm",
+    "wrist_slot": "{side}_hand",
+    "upper_length": 24,
+    "forearm_length": 22,
+    "hand_palm_offset": [
+      0,
+      7
+    ]
+  },
+  "leg_chain": {
+    "hip_slot": "{side}_thigh",
+    "knee_slot": "{side}_shin",
+    "ankle_slot": "{side}_foot",
+    "thigh_length": 24,
+    "shin_length": 21
+  },
+  "hand_variants": [
+    "relaxed",
+    "grip",
+    "pinch",
+    "typing",
+    "open"
+  ],
+  "head_pivot": [
+    32,
+    76
+  ],
+  "cap_attach_head_local": [
+    32,
+    24
+  ],
+  "mouth_head_local": [
+    32,
+    64
+  ],
+  "foot_baseline": 198,
+  "solver": "scripts/rig.py:ik clamps target reach; bend_sign must stay stable within a clip",
+  "runtime_solver": "runtime/companion.js:solveTwoBone",
+  "layers": "parts.json slots.*.layer; typing back hand uses hand_layer_boost=46",
+  "root_scale": 0.9,
+  "root_scale_origin": [
+    96,
+    148
+  ],
+  "sampling": "Interpolate source controls before FK/IK or select complete60fps baked frames.",
+  "effect_joints": [
+    "mouth",
+    "cigarette_filter",
+    "cigarette_grip",
+    "cigarette_tip"
+  ],
+  "attachment_reset": "reset_attachments + hidden_slots + completeparts; keyboard_disposition distinguishes carry from typing."
+}

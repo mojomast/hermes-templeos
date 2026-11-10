@@ -1,0 +1,211 @@
+{
+  "version": 1,
+  "alpha": "straight",
+  "blend": "source-over",
+  "coordinate_space": "world after birth",
+  "assets": {
+    "source_thread": {
+      "path": "smoke/assets/source_thread.png",
+      "size": [
+        128,
+        128
+      ],
+      "anchor": [
+        89,
+        118
+      ]
+    },
+    "s_curve": {
+      "path": "smoke/assets/s_curve.png",
+      "size": [
+        128,
+        128
+      ],
+      "anchor": [
+        63,
+        117
+      ]
+    },
+    "curl_left": {
+      "path": "smoke/assets/curl_left.png",
+      "size": [
+        128,
+        128
+      ],
+      "anchor": [
+        77,
+        118
+      ]
+    },
+    "curl_right": {
+      "path": "smoke/assets/curl_right.png",
+      "size": [
+        128,
+        128
+      ],
+      "anchor": [
+        44,
+        118
+      ]
+    },
+    "exhale_jet": {
+      "path": "smoke/assets/exhale_jet.png",
+      "size": [
+        128,
+        128
+      ],
+      "anchor": [
+        9,
+        91
+      ]
+    },
+    "exhale_ribbon": {
+      "path": "smoke/assets/exhale_ribbon.png",
+      "size": [
+        128,
+        128
+      ],
+      "anchor": [
+        9,
+        106
+      ]
+    },
+    "exhale_puff": {
+      "path": "smoke/assets/exhale_puff.png",
+      "size": [
+        128,
+        128
+      ],
+      "anchor": [
+        10,
+        81
+      ]
+    },
+    "dissipating_cloud": {
+      "path": "smoke/assets/dissipating_cloud.png",
+      "size": [
+        128,
+        128
+      ],
+      "anchor": [
+        64,
+        64
+      ]
+    }
+  },
+  "presets": {
+    "cigarette_idle": {
+      "textures": [
+        "source_thread",
+        "s_curve",
+        "curl_left",
+        "curl_right"
+      ],
+      "rate_per_second": 3,
+      "max_particles": 18,
+      "life_ms": [
+        1300,
+        2300
+      ],
+      "velocity_x": [
+        -3,
+        4
+      ],
+      "velocity_y": [
+        -9,
+        -5
+      ],
+      "acceleration_y": -2,
+      "scale_start": [
+        0.17,
+        0.24
+      ],
+      "scale_end": 0.36,
+      "opacity": 0.35
+    },
+    "exhale_soft": {
+      "textures": [
+        "exhale_jet",
+        "exhale_ribbon",
+        "exhale_puff",
+        "dissipating_cloud"
+      ],
+      "rate_per_second": 8,
+      "max_particles": 24,
+      "life_ms": [
+        1500,
+        2400
+      ],
+      "velocity_x": [
+        13,
+        23
+      ],
+      "velocity_y": [
+        -5,
+        -2
+      ],
+      "acceleration_y": -3,
+      "scale_start": [
+        0.2,
+        0.3
+      ],
+      "scale_end": 0.55,
+      "opacity": 0.25
+    },
+    "exhale_short": {
+      "textures": [
+        "exhale_jet",
+        "exhale_puff"
+      ],
+      "rate_per_second": 10,
+      "max_particles": 12,
+      "life_ms": [
+        900,
+        1700
+      ],
+      "velocity_x": [
+        15,
+        25
+      ],
+      "velocity_y": [
+        -4,
+        -1
+      ],
+      "acceleration_y": -2,
+      "scale_start": [
+        0.16,
+        0.25
+      ],
+      "scale_end": 0.4,
+      "opacity": 0.3
+    },
+    "dissipate": {
+      "textures": [
+        "curl_left",
+        "curl_right",
+        "dissipating_cloud"
+      ],
+      "rate_per_second": 2,
+      "max_particles": 10,
+      "life_ms": [
+        1800,
+        2800
+      ],
+      "velocity_x": [
+        -5,
+        6
+      ],
+      "velocity_y": [
+        -12,
+        -6
+      ],
+      "acceleration_y": -2,
+      "scale_start": [
+        0.24,
+        0.32
+      ],
+      "scale_end": 0.7,
+      "opacity": 0.18
+    }
+  }
+}

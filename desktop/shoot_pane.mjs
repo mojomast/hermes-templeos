@@ -3,7 +3,7 @@
  * Usage: node --import ./tests/js/register-mocks.mjs desktop/shoot_pane.mjs
  */
 import { spawnSync } from "node:child_process";
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -21,9 +21,68 @@ const ONLY = (process.env.TEMPLEOS_SHOT_ONLY || "")
   .map((name) => name.trim())
   .filter(Boolean);
 
-function assetDataUrl(relative) {
-  const bytes = readFileSync(path.join(ROOT, relative));
-  return "data:image/png;base64," + bytes.toString("base64");
+const V4_ROOT = path.join(ROOT, "desktop", "assets", "companion", "terry", "v4");
+const V4_SOURCE = readFileSync(path.join(ROOT, "desktop", "src", "ui", "terry_v4.js"), "utf8")
+  .replace(/^export\s+/gm, "");
+
+function loadV4() {
+  const registry = JSON.parse(readFileSync(path.join(V4_ROOT, "parts.json"), "utf8"));
+  const speech = JSON.parse(readFileSync(path.join(V4_ROOT, "speech.json"), "utf8"));
+  const smoke = JSON.parse(readFileSync(path.join(V4_ROOT, "smoke", "smoke.json"), "utf8"));
+  const baked = JSON.parse(readFileSync(path.join(V4_ROOT, "baked-presets.json"), "utf8"));
+  const parts = {};
+  const collect = (folder) => {
+    for (const entry of readdirSync(folder, { withFileTypes: true })) {
+      const file = path.join(folder, entry.name);
+      if (entry.isDirectory()) collect(file);
+      else if (entry.name.endsWith(".png")) {
+        const rel = path.relative(V4_ROOT, file).split(path.sep).join("/");
+        parts[rel] = "data:image/png;base64," + readFileSync(file).toString("base64");
+      }
+    }
+  };
+  collect(path.join(V4_ROOT, "parts"));
+  collect(path.join(V4_ROOT, "smoke", "assets"));
+  return { registry, speech, smoke, baked, parts };
+}
+
+const V4 = loadV4();
+
+function v4Script(options) {
+  const clips = {};
+  for (const name of options.clips || [options.animation || "idle"]) {
+    if (V4.baked[name]) clips[name] = V4.baked[name];
+  }
+  const data = {
+    registry: V4.registry,
+    speech: V4.speech,
+    smoke: V4.smoke,
+    parts: V4.parts,
+    clips,
+    animation: options.animation || "idle",
+    costume: options.costume || "base",
+    time: Number(options.time) || 0,
+  };
+  return `<script>window.__TERRY_V4__ = ${JSON.stringify(data)};</script>
+<script type="module">
+${V4_SOURCE}
+const DATA = window.__TERRY_V4__;
+const canvas = document.querySelector('canvas[data-companion-v4]');
+const images = new Map();
+await Promise.all(Object.entries(DATA.parts).map(([name, url]) => new Promise((resolve) => {
+  const image = new Image();
+  image.onload = () => { images.set(name, image); resolve(); };
+  image.onerror = () => resolve();
+  image.src = url;
+})));
+const clip = DATA.clips[DATA.animation] || DATA.clips.idle;
+const frame = sampleClip(clip, DATA.time);
+if (DATA.animation === 'talking' && frame) {
+  frame.variants.head_base = speechPlate(DATA.speech.events, DATA.time, frame.variants.head_base);
+}
+if (frame) renderScene(canvas, DATA, images, frame, DATA.costume);
+document.documentElement.dataset.terryV4 = 'drawn';
+</script>`;
 }
 
 function findChrome() {
@@ -87,7 +146,7 @@ function toHtml(node, parentValue) {
   return open + toHtml(props.children, nextParent) + `</${node.type}>`;
 }
 
-function page(body) {
+function page(body, script = "") {
   return `<!doctype html>
 <html>
 <head>
@@ -105,25 +164,23 @@ function page(body) {
   ${CSS}
 </style>
 </head>
-<body><div id="root">${body}</div></body>
+<body><div id="root">${body}</div>${script}</body>
 </html>`;
 }
 
-function render(initial) {
+function render(initial, v4) {
   resetFiber();
-  return page(
-    toHtml(
-      rerender(TempleOSPane, {
-        transport: { rest: () => Promise.resolve({ ok: true }) },
-        initial: { skipLoad: true, ...initial },
-      })
-    )
+  const body = toHtml(
+    rerender(TempleOSPane, {
+      transport: { rest: () => Promise.resolve({ ok: true }) },
+      initial: { skipLoad: true, ...initial },
+    })
   );
+  return page(body, v4 ? v4Script(v4) : "");
 }
 
 const tinkeros = frameDataUrl("tinkeros-mouse-click.png");
 const prompt = frameDataUrl("tinkeros-holyc-prompt.png");
-const terryAtlas = assetDataUrl("desktop/assets/companion/terry/atlas.png");
 
 const ready = {
   running: true,
@@ -314,73 +371,76 @@ const shots = {
   },
   "terry-hermes-dark.png": {
     size: "1920,1240",
-    html: render({
-      theme: "hermes",
-      scale: 2,
-      viewport: { width: 1920, height: 1240 },
-      frameUrl: tinkeros,
-      companionSprite: terryAtlas,
-      companionSpriteRow: 3,
-      status: {
-        ...ready,
-        companion: {
-          enabled: true,
-          hidden: false,
-          character: "terry",
-          animation: "greet",
-          costume: "base",
-          speech: { active: true, text: "Hello from Hermes" },
+    html: render(
+      {
+        theme: "hermes",
+        scale: 2,
+        viewport: { width: 1920, height: 1240 },
+        frameUrl: tinkeros,
+        status: {
+          ...ready,
+          companion: {
+            enabled: true,
+            hidden: false,
+            character: "terry",
+            animation: "greet",
+            costume: "base",
+            speech: { active: true, text: "Hello from Hermes" },
+          },
         },
       },
-    }),
+      { animation: "greet", costume: "base", time: 800, clips: ["greet"] }
+    ),
   },
   "terry-hermes-typing.png": {
     size: "1920,1240",
-    html: render({
-      theme: "hermes",
-      scale: 2,
-      viewport: { width: 1920, height: 1240 },
-      frameUrl: tinkeros,
-      companionSprite: terryAtlas,
-      companionSpriteRow: 3,
-      status: {
-        ...ready,
-        agent_busy: true,
-        companion: {
-          enabled: true,
-          hidden: false,
-          character: "terry",
-          animation: "typing",
-          costume: "base",
-          speech: { active: false, text: "" },
+    html: render(
+      {
+        theme: "hermes",
+        scale: 2,
+        viewport: { width: 1920, height: 1240 },
+        frameUrl: tinkeros,
+        status: {
+          ...ready,
+          agent_busy: true,
+          companion: {
+            enabled: true,
+            hidden: false,
+            character: "terry",
+            animation: "typing",
+            costume: "base",
+            speech: { active: false, text: "" },
+          },
         },
+        log,
       },
-      log,
-    }),
+      { animation: "typing", costume: "base", time: 800, clips: ["typing"] }
+    ),
   },
   "terry-big.png": {
     size: "1920,1240",
-    html: render({
-      theme: "hermes",
-      scale: 2,
-      viewport: { width: 1920, height: 1240 },
-      frameUrl: tinkeros,
-      companionSprite: terryAtlas,
-      companionSpriteRow: 3,
-      log,
-      status: {
-        ...ready,
-        agent_busy: true,
-        companion: {
-          enabled: true,
-          hidden: false,
-          character: "terry",
-          animation: "typing",
-          costume: "base",
-          speech: { active: true, text: "Hello from Hermes" },
+    html: render(
+      {
+        theme: "hermes",
+        scale: 2,
+        viewport: { width: 1920, height: 1240 },
+        frameUrl: tinkeros,
+        log,
+        status: {
+          ...ready,
+          agent_busy: true,
+          companion: {
+            enabled: true,
+            hidden: false,
+            character: "terry",
+            animation: "typing",
+            costume: "base",
+            speech: { active: true, text: "Hello from Hermes" },
+          },
         },
       },
-    }),
+      { animation: "talking", costume: "base", time: 900, clips: ["talking"] }
+    ),
   },
   "terry-hermes-hidden.png": {
     size: "1920,1240",
@@ -402,6 +462,102 @@ const shots = {
         },
       },
     }),
+  },
+  "v4-idle.png": {
+    size: "1920,1240",
+    html: render(
+      {
+        theme: "hermes",
+        scale: 2,
+        viewport: { width: 1920, height: 1240 },
+        frameUrl: tinkeros,
+        status: {
+          ...ready,
+          companion: {
+            enabled: true,
+            hidden: false,
+            character: "terry",
+            animation: "idle",
+            costume: "base",
+            speech: { active: false, text: "" },
+          },
+        },
+      },
+      { animation: "idle", costume: "base", time: 420, clips: ["idle", "greet"] }
+    ),
+  },
+  "v4-typing.png": {
+    size: "1920,1240",
+    html: render(
+      {
+        theme: "hermes",
+        scale: 2,
+        viewport: { width: 1920, height: 1240 },
+        frameUrl: tinkeros,
+        log,
+        status: {
+          ...ready,
+          agent_busy: true,
+          companion: {
+            enabled: true,
+            hidden: false,
+            character: "terry",
+            animation: "typing",
+            costume: "base",
+            speech: { active: false, text: "" },
+          },
+        },
+      },
+      { animation: "typing", costume: "base", time: 800, clips: ["idle", "typing"] }
+    ),
+  },
+  "v4-talking.png": {
+    size: "1920,1240",
+    html: render(
+      {
+        theme: "hermes",
+        scale: 2,
+        viewport: { width: 1920, height: 1240 },
+        frameUrl: tinkeros,
+        log,
+        status: {
+          ...ready,
+          agent_busy: true,
+          companion: {
+            enabled: true,
+            hidden: false,
+            character: "terry",
+            animation: "talking",
+            costume: "base",
+            speech: { active: true, text: "Hello from Hermes" },
+          },
+        },
+      },
+      { animation: "talking", costume: "base", time: 900, clips: ["idle", "talking"] }
+    ),
+  },
+  "v4-costume.png": {
+    size: "1920,1240",
+    html: render(
+      {
+        theme: "hermes",
+        scale: 2,
+        viewport: { width: 1920, height: 1240 },
+        frameUrl: tinkeros,
+        status: {
+          ...ready,
+          companion: {
+            enabled: true,
+            hidden: false,
+            character: "terry",
+            animation: "idle",
+            costume: "cowboy",
+            speech: { active: false, text: "" },
+          },
+        },
+      },
+      { animation: "idle", costume: "cowboy", time: 420, clips: ["idle"] }
+    ),
   },
 };
 
