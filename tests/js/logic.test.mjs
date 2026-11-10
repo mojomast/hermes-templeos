@@ -103,6 +103,44 @@ test("fit scale subtracts the right rail and keeps the guest aspect", () => {
   );
 });
 
+test("fit subtracts only Terry's column from the width and the log from the height", () => {
+  const guest = { width: 640, height: 480 };
+  const fit = fitGuestDisplay({ width: 1600, height: 1100 }, guest, 380, 12, 210);
+  assert.equal(fit.availableWidth, 1208);
+  assert.equal(fit.availableHeight, 890);
+  assert.ok(Math.abs(fit.scale - 890 / 480) < 1e-9);
+  assert.ok(Math.abs(fit.height - 890) < 1e-6);
+  assert.ok(Math.abs(fit.width - (640 * 890) / 480) < 1e-6);
+
+  const fatRail = fitGuestDisplay({ width: 1600, height: 1100 }, guest, 668, 12, 0);
+  assert.equal(fatRail.width, 920);
+  assert.ok(fit.width > fatRail.width);
+  assert.ok(fit.height > fatRail.height);
+
+  const measured = measureScreenSpace({
+    bodyWidth: 1600,
+    stageWidth: 1200,
+    stageRight: 1212,
+    stageHeight: 1000,
+    railWidth: 380,
+    railLeft: 1224,
+    hatchHeight: 28,
+    logHeight: 210,
+  });
+  assert.equal(measured.rail, 380);
+  assert.equal(measured.log, 210);
+  assert.equal(measured.height, 972);
+  const fromMeasure = fitGuestDisplay(
+    { width: measured.width, height: measured.height },
+    guest,
+    measured.rail,
+    measured.gap,
+    measured.log
+  );
+  assert.equal(fromMeasure.availableWidth, 1208);
+  assert.equal(fromMeasure.availableHeight, 762);
+});
+
 test("screen space uses a side-by-side rail and ignores a stacked one", () => {
   const side = measureScreenSpace({
     bodyWidth: 1600,
@@ -113,8 +151,14 @@ test("screen space uses a side-by-side rail and ignores a stacked one", () => {
     railLeft: 932,
     hatchHeight: 20,
   });
-  assert.deepEqual(side, { width: 1600, height: 780, rail: 668, gap: 12 });
-  const fitted = fitGuestDisplay({ width: side.width, height: side.height }, { width: 640, height: 480 }, side.rail, side.gap);
+  assert.deepEqual(side, { width: 1600, height: 780, rail: 668, gap: 12, log: 0 });
+  const fitted = fitGuestDisplay(
+    { width: side.width, height: side.height },
+    { width: 640, height: 480 },
+    side.rail,
+    side.gap,
+    side.log
+  );
   assert.equal(fitted.availableWidth, 920);
   assert.equal(fitted.scale, 1.4375);
   assert.equal(fitted.width, 920);

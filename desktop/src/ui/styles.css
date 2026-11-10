@@ -213,8 +213,8 @@
 
 .tos-body {
   display: grid;
-  /* The stage takes the leftover width. The rail stays a real column so the
-     guest can scale up without covering the Agent Log or Terry. */
+  /* Left column is the guest with the Agent Log under it. Terry keeps the
+     right column at full pane height, so the screen can use the leftover width. */
   grid-template-columns: minmax(0, 1fr) minmax(300px, 40%);
   grid-template-rows: minmax(0, 1fr);
   gap: 12px;
@@ -228,15 +228,29 @@
   grid-column: 1;
   grid-row: 1;
   align-self: stretch;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
   min-width: 0;
   min-height: 0;
   width: 100%;
   height: 100%;
+  overflow: hidden;
+}
+
+.tos-screen-stack {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  max-width: 100%;
+  min-width: 0;
+  min-height: 0;
 }
 
 .tos-screen {
   position: relative;
   box-sizing: border-box;
+  max-width: 100%;
   background: var(--tos-black);
   border: 1px solid var(--tos-dkgray);
   image-rendering: pixelated;
@@ -297,14 +311,12 @@
 }
 
 .tos-log {
-  grid-column: 2;
-  grid-row: 1;
-  align-self: start;
-  justify-self: stretch;
-  position: relative;
-  z-index: 8;
-  min-height: 200px;
-  max-height: 210px;
+  box-sizing: border-box;
+  width: 100%;
+  height: 210px;
+  max-height: 240px;
+  flex: 0 0 auto;
+  margin: 8px 0 0;
   overflow: auto;
   padding: 10px 12px;
   border: 1px solid color-mix(in srgb, var(--tos-yellow) 35%, var(--tos-dkgray));
@@ -556,9 +568,8 @@
 }
 
 /* Terry companion dock (fan tribute). The stage row is a contents wrapper:
-   the guest screen keeps the left grid cell while the Agent Log and the
-   companion share the right rail. The log sits at the top of the rail and
-   huge Terry fills the rail from under it down to the bottom of the pane. */
+   the guest screen and the Agent Log share the left grid cell, and Terry
+   fills the right cell from top to bottom. The log never covers the screen. */
 .tos-stage-row {
   display: contents;
 }
@@ -685,8 +696,8 @@
   --tos-companion-h: 750px;
 }
 
-/* Fill the right-hand cell under the Agent Log. The 750px variable above
-   stays the fallback; the cell size wins so a short pane still shows Terry. */
+/* Terry fills the right-hand cell. The 750px variable above stays the
+   fallback; the cell size wins so a short pane still shows the figure. */
 .tos-pane .tos-companion-dock {
   align-self: stretch;
   height: 100%;

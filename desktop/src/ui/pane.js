@@ -69,25 +69,22 @@ function measurePane(stage) {
   const root = body || stage;
   const bodyRect = rectOf(root);
   const stageRect = rectOf(stage);
-  let railWidth = 0;
-  let railLeft = Infinity;
-  if (root && typeof root.querySelectorAll === "function") {
-    root.querySelectorAll(".tos-log, .tos-companion-dock").forEach((node) => {
-      const rect = rectOf(node);
-      if (rect.width > railWidth) railWidth = rect.width;
-      if (rect.width > 0 && rect.left < railLeft) railLeft = rect.left;
-    });
-  }
+  const dock = root && typeof root.querySelector === "function" ? root.querySelector(".tos-companion-dock") : null;
+  const dockRect = rectOf(dock);
+  const log = stage && typeof stage.querySelector === "function" ? stage.querySelector(".tos-log") : null;
+  const logRect = rectOf(log);
   const hatch = stage && typeof stage.querySelector === "function" ? stage.querySelector(".tos-hatch") : null;
   const hatchHeight = hatch ? rectOf(hatch).height + 8 : 28;
+  const logHeight = log ? logRect.height + 8 : 0;
   return measureScreenSpace({
     bodyWidth: bodyRect.width,
     stageWidth: stageRect.width,
     stageHeight: stageRect.height,
     stageRight: stageRect.right,
-    railWidth: railWidth,
-    railLeft: Number.isFinite(railLeft) ? railLeft : null,
+    railWidth: dock ? dockRect.width : 0,
+    railLeft: dock && dockRect.width > 0 ? dockRect.left : null,
     hatchHeight: hatchHeight,
+    logHeight: logHeight,
   });
 }
 
@@ -144,11 +141,12 @@ export function TempleOSPane({ transport, initial } = {}) {
   });
   const [box, setBox] = useState(() => {
     const vp = initial && initial.viewport;
-    if (!vp) return { width: 0, height: 0, rail: 0 };
+    if (!vp) return { width: 0, height: 0, rail: 0, log: 0 };
     return {
       width: Number(vp.width) || 0,
       height: Number(vp.height) || 0,
       rail: Number(vp.rail) || 0,
+      log: Number(vp.log) || 0,
     };
   });
   const prevUrl = useRef((initial && initial.frameUrl) || "");
@@ -282,11 +280,12 @@ export function TempleOSPane({ transport, initial } = {}) {
           prev &&
           Math.abs(prev.width - next.width) < 1 &&
           Math.abs(prev.height - next.height) < 1 &&
-          Math.abs((prev.rail || 0) - (next.rail || 0)) < 1
+          Math.abs((prev.rail || 0) - (next.rail || 0)) < 1 &&
+          Math.abs((prev.log || 0) - (next.log || 0)) < 1
         ) {
           return prev;
         }
-        return { width: next.width, height: next.height, rail: next.rail };
+        return { width: next.width, height: next.height, rail: next.rail, log: next.log || 0 };
       });
     };
     const observer = new ResizeObserver(() => {
@@ -322,8 +321,8 @@ export function TempleOSPane({ transport, initial } = {}) {
     const startWidth = scaledRef.current.width || guest.width;
     function move(ev) {
       const dx = (Number(ev && ev.clientX) || 0) - startX;
-      const space = spaceRef.current || { width: 0, height: 0, rail: 0 };
-      const fit = fitGuestDisplay({ width: space.width, height: space.height }, guest, space.rail, 12);
+      const space = spaceRef.current || { width: 0, height: 0, rail: 0, log: 0 };
+      const fit = fitGuestDisplay({ width: space.width, height: space.height }, guest, space.rail, 12, space.log);
       const known = fit.availableWidth > 0 && fit.availableHeight > 0;
       const max = known
         ? maxScreenWidth(fit.availableWidth, fit.availableHeight, guest.width, guest.height)
@@ -424,7 +423,7 @@ export function TempleOSPane({ transport, initial } = {}) {
 
   const size = guestSize(status.flavor, status);
   const forced = initial && initial.scale;
-  const scaled = screenDisplay(screenPref, box, size, box.rail, 12, forced);
+  const scaled = screenDisplay(screenPref, box, size, box.rail, 12, forced, box.log);
   sizeRef.current = size;
   scaledRef.current = scaled;
   spaceRef.current = box;
@@ -566,6 +565,10 @@ export function TempleOSPane({ transport, initial } = {}) {
             ref: stageRef,
             children: [
               jsxs("div", {
+                className: "tos-screen-stack",
+                style: { width: scaled.width },
+                children: [
+              jsxs("div", {
                 className: "tos-screen" + (focused ? " is-focused" : ""),
                 "data-testid": "screen",
                 "data-focused": focused ? "1" : "0",
@@ -618,6 +621,27 @@ export function TempleOSPane({ transport, initial } = {}) {
               focused
                 ? jsx("p", { className: "tos-hatch", "data-testid": "keyboard-hatch", children: "Keyboard captured. Press Esc to release." })
                 : jsx("p", { className: "tos-hatch tos-hatch-idle", "data-testid": "keyboard-hatch", children: "Click the screen to type. Esc releases the keyboard." }),
+              jsxs("section", {
+                className: "tos-log",
+                "data-testid": "agent-log",
+                children: [
+                  jsx("h2", { children: "Agent log" }),
+                  log.length
+                    ? log.map((event, i) =>
+                        jsx(
+                          "p",
+                          {
+                            className: "tos-log-line tos-log-" + (event.source || "agent") + (event.ok === false ? " is-failed" : ""),
+                            children: typeof event === "string" ? event : logLine(event),
+                          },
+                          String((event && event.id) || i)
+                        )
+                      )
+                    : jsx("p", { className: "tos-log-empty", children: "The agent has not injected input yet." }),
+                ],
+              }),
+                ],
+              }),
             ],
           }),
               jsx(TerryCompanionOverlay, {
@@ -630,25 +654,6 @@ export function TempleOSPane({ transport, initial } = {}) {
                 sprite: (initial && initial.companionSprite) || "",
                 spriteRow: (initial && initial.companionSpriteRow) || 0,
               }),
-            ],
-          }),
-          jsxs("section", {
-            className: "tos-log",
-            "data-testid": "agent-log",
-            children: [
-              jsx("h2", { children: "Agent log" }),
-              log.length
-                ? log.map((event, i) =>
-                    jsx(
-                      "p",
-                      {
-                        className: "tos-log-line tos-log-" + (event.source || "agent") + (event.ok === false ? " is-failed" : ""),
-                        children: typeof event === "string" ? event : logLine(event),
-                      },
-                      String((event && event.id) || i)
-                    )
-                  )
-                : jsx("p", { className: "tos-log-empty", children: "The agent has not injected input yet." }),
             ],
           }),
         ],
