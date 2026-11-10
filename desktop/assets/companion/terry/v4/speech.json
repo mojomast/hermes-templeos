@@ -1,0 +1,92 @@
+{
+  "version": 1,
+  "duration_ms": 2600,
+  "audio_supplied": false,
+  "notes": "Illustrative speech timing only; use audio/TTS timestamps for actual lip sync. No head interpolation or facial mesh deformation.",
+  "events": [
+    {
+      "time_ms": 0,
+      "plate": "neutral"
+    },
+    {
+      "time_ms": 110,
+      "plate": "talk_m"
+    },
+    {
+      "time_ms": 190,
+      "plate": "talk_a"
+    },
+    {
+      "time_ms": 350,
+      "plate": "talk_e"
+    },
+    {
+      "time_ms": 470,
+      "plate": "talk_ee"
+    },
+    {
+      "time_ms": 610,
+      "plate": "talk_l"
+    },
+    {
+      "time_ms": 720,
+      "plate": "talk_o"
+    },
+    {
+      "time_ms": 860,
+      "plate": "talk_u"
+    },
+    {
+      "time_ms": 1010,
+      "plate": "talk_f"
+    },
+    {
+      "time_ms": 1140,
+      "plate": "talk_s"
+    },
+    {
+      "time_ms": 1280,
+      "plate": "talk_ch"
+    },
+    {
+      "time_ms": 1400,
+      "plate": "talk_a"
+    },
+    {
+      "time_ms": 1550,
+      "plate": "talk_blink"
+    },
+    {
+      "time_ms": 1660,
+      "plate": "talk_e"
+    },
+    {
+      "time_ms": 1840,
+      "plate": "talk_m"
+    },
+    {
+      "time_ms": 1980,
+      "plate": "neutral"
+    }
+  ],
+  "polly_viseme_to_plate": {
+    "sil": "neutral",
+    "p": "talk_m",
+    "a": "talk_a",
+    "e": "talk_e",
+    "E": "talk_e",
+    "i": "talk_ee",
+    "o": "talk_o",
+    "O": "talk_o",
+    "u": "talk_u",
+    "f": "talk_f",
+    "l": "talk_l",
+    "T": "talk_l",
+    "t": "talk_s",
+    "s": "talk_s",
+    "S": "talk_ch",
+    "k": "talk_a",
+    "r": "talk_o",
+    "@": "talk_e"
+  }
+}
