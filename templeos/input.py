@@ -206,15 +206,80 @@ def _require_qmp() -> Any:
 
 
 _MODIFIER_QCODES = frozenset({"shift", "shift_r", "shift_l", "ctrl", "ctrl_r", "alt", "alt_r", "altgr"})
+_SHIFT_QCODES = frozenset({"shift", "shift_r", "shift_l"})
+
+
+def _accel(qmp: Any) -> str:
+    """Best-effort accel name for the live guest ('' when unknown)."""
+    try:
+        from templeos import vm as vm_mod
+
+        rt = vm_mod.get_runtime()
+        accel = getattr(rt, "accel", None)
+        if accel:
+            return str(accel).lower()
+    except Exception:
+        pass
+    accel = getattr(qmp, "accel", None)
+    return str(accel).lower() if accel else ""
+
+
+def _shifted_chord(names: Sequence[str]) -> bool:
+    """A Shift modifier plus at least one real key (e.g. shift+apostrophe)."""
+    has_shift = any(c in _SHIFT_QCODES for c in names)
+    has_key = any(c not in _MODIFIER_QCODES for c in names)
+    return has_shift and has_key
+
+
+def _send_key_cmd(qmp: Any, names: Sequence[str], *, hold_ms: int) -> None:
+    if hasattr(qmp, "send_key"):
+        qmp.send_key(list(names), hold_ms=hold_ms)
+    else:
+        keys = [{"type": "qcode", "data": c} for c in names]
+        qmp.cmd("send-key", keys=keys, **{"hold-time": int(hold_ms)})
+
+
+def _send_key_sequential(qmp: Any, names: Sequence[str], *, hold_s: float) -> None:
+    """Press keys down in order, hold, then release in reverse order.
+
+    Under TCG batched QMP key events can reach the guest out of order, with
+    Shift already released (``"`` becomes a bare apostrophe and ``*`` a bare
+    8). Sending every down/up as its own QMP event and holding the chord long
+    enough gives the slow guest time to register modifiers before the character.
+    This is the production slow-TCG path; no test hook is involved.
+    """
+    for code in names:
+        _input_events(
+            qmp,
+            [{"type": "key", "data": {"down": True, "key": {"type": "qcode", "data": code}}}],
+        )
+    if hold_s > 0:
+        time.sleep(hold_s)
+    for code in reversed(names):
+        _input_events(
+            qmp,
+            [{"type": "key", "data": {"down": False, "key": {"type": "qcode", "data": code}}}],
+        )
 
 
 def _send_key(qmp: Any, codes: Sequence[str], *, hold_ms: int = DEFAULT_HOLD_MS) -> None:
     """Press qcodes. Modifier chords use input-send-event down, a short hold, then up.
 
-    TinkerOS under TCG often drops Shift when send-key fires the chord in one
-    packet, so Shift+apostrophe becomes a bare apostrophe.
+    TinkerOS under TCG can drop Shift from a batched input-send-event chord, so
+    slow TCG falls back to per-key key events with an adaptive hold. Fast hosts
+    (KVM) and the zero-hold unit seam keep the one-packet down/up event path.
     """
     names = [str(c) for c in codes]
+    if hold_ms > 0 and _accel(qmp) != "kvm":
+        # Slow TCG: deterministic per-key events beat send-key's async holds.
+        if _shifted_chord(names):
+            hold_s = max(0.12, min(0.30, float(hold_ms) / 1000.0))
+        else:
+            hold_s = max(0.02, min(0.06, float(hold_ms) / 1000.0))
+        _send_key_sequential(qmp, names, hold_s=hold_s)
+        if any(c in _SHIFT_QCODES for c in names):
+            _unstick_shift(qmp)
+        return
     use_events = len(names) > 1 or any(c in _MODIFIER_QCODES for c in names)
     if use_events and (hasattr(qmp, "input_send_event") or hasattr(qmp, "cmd")):
         downs = [
@@ -229,16 +294,12 @@ def _send_key(qmp: Any, codes: Sequence[str], *, hold_ms: int = DEFAULT_HOLD_MS)
         if hold_ms > 0:
             time.sleep(min(0.05, hold_ms / 1000.0))
         _input_events(qmp, ups)
-        if any(c in {"shift", "shift_r", "shift_l"} for c in names):
+        if any(c in _SHIFT_QCODES for c in names):
             _unstick_shift(qmp)
         return
-    if hasattr(qmp, "send_key"):
-        qmp.send_key(list(names), hold_ms=hold_ms)
-    else:
-        keys = [{"type": "qcode", "data": c} for c in names]
-        qmp.cmd("send-key", keys=keys, **{"hold-time": hold_ms})
+    _send_key_cmd(qmp, names, hold_ms=hold_ms)
     # send-key can leave Shift latched on TinkerOS; release both shift keys.
-    if any(c in {"shift", "shift_r", "shift_l"} for c in names):
+    if any(c in _SHIFT_QCODES for c in names):
         _unstick_shift(qmp)
 
 
