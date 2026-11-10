@@ -51,6 +51,15 @@ def register(ctx) -> None:
             )
         except Exception:
             pass
+
+    # Terry companion (tribute): observer hooks drive the pane sprite. No new tools.
+    try:
+        from templeos.companion import register_hooks as register_companion_hooks
+
+        register_companion_hooks(ctx)
+    except Exception:
+        pass
+
     # Pane agent log: wrap handlers even when the dashboard router is not imported.
     try:
         from templeos.api import install_tool_log_hooks

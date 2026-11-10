@@ -30,3 +30,5 @@ export {
   logLine,
   flavorLabel,
 } from "./logic.js";
+
+export { TerryCompanionOverlay, CompanionControls } from "./companion.js";

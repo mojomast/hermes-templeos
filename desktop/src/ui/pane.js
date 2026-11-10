@@ -2,6 +2,7 @@ import { jsx, jsxs } from "react/jsx-runtime";
 import { useEffect, useRef, useState } from "react";
 import { createApi, blobUrlFromBase64, revokeUrl, errorText, isAbortError } from "./api.js";
 import { getHostTransport } from "./host.js";
+import { CompanionControls, TerryCompanionOverlay } from "./companion.js";
 import {
   GOLDEN_SNAPSHOT,
   accelLabel,
@@ -47,6 +48,7 @@ function defaultStatus(initial) {
     user_may_input: true,
     width: 640,
     height: 480,
+    companion: { enabled: true, character: "terry", animation: "idle", costume: "base" },
     ...(initial || {}),
   };
 }
@@ -63,6 +65,14 @@ export function TempleOSPane({ transport, initial } = {}) {
   const [focused, setFocused] = useState(!!(initial && initial.focused));
   const [busy, setBusy] = useState((initial && initial.busy) || "");
   const [hidden, setHidden] = useState(!!(initial && initial.hidden));
+  const [companionHidden, setCompanionHidden] = useState(
+    !!(initial && (initial.companionHidden || (initial.status && initial.status.companion && initial.status.companion.hidden)))
+  );
+  const [companionCostume, setCompanionCostume] = useState(
+    (initial && initial.companionCostume) ||
+      (initial && initial.status && initial.status.companion && initial.status.companion.costume) ||
+      "base"
+  );
   const [unchanged, setUnchanged] = useState(!!(initial && initial.unchanged));
   const [viewport] = useState((initial && initial.viewport) || { width: 1280, height: 960 });
   const prevUrl = useRef((initial && initial.frameUrl) || "");
@@ -108,6 +118,10 @@ export function TempleOSPane({ transport, initial } = {}) {
         .then((body) => {
           if (!cancelled) {
             applyStatus(body, setStatus);
+            if (body && body.companion) {
+              if (typeof body.companion.hidden === "boolean") setCompanionHidden(!!body.companion.hidden);
+              if (body.companion.costume) setCompanionCostume(body.companion.costume);
+            }
             setError("");
           }
         })
@@ -315,6 +329,23 @@ export function TempleOSPane({ transport, initial } = {}) {
           }),
           jsx("button", { type: "button", className: "tos-btn tos-primary", "data-testid": "take-control", disabled: disabled || status.mode === "user", onClick: () => setMode("take"), children: "Take control" }),
           jsx("button", { type: "button", className: "tos-btn", "data-testid": "hand-back", disabled: disabled || status.mode === "shared", onClick: () => setMode("handback"), children: "Hand back" }),
+          jsx(CompanionControls, {
+            hidden: companionHidden,
+            enabled: !(status.companion && status.companion.enabled === false),
+            costume: companionCostume,
+            costumes: (status.companion && status.companion.costumes) || ["base", "cowboy", "wizard", "chef"],
+            onToggleHidden: () => {
+              setCompanionHidden((prev) => {
+                const next = !prev;
+                api.companionSet({ hidden: next }).catch(() => {});
+                return next;
+              });
+            },
+            onCostume: (name) => {
+              setCompanionCostume(name);
+              api.companionSet({ costume: name }).catch(() => {});
+            },
+          }),
         ],
       }),
       jsx("div", {
@@ -406,6 +437,13 @@ export function TempleOSPane({ transport, initial } = {}) {
             ],
           }),
         ],
+      }),
+      jsx(TerryCompanionOverlay, {
+        api: api,
+        animation: (status.companion && status.companion.animation) || "idle",
+        costume: companionCostume,
+        hidden: companionHidden,
+        enabled: !(status.companion && status.companion.enabled === false),
       }),
       error ? jsx("div", { className: "tos-error", "data-testid": "error", children: error }) : null,
       info ? jsx("div", { className: "tos-info", "data-testid": "info", children: info }) : null,

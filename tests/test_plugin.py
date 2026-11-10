@@ -29,7 +29,10 @@ def test_manifest_matches_registered_tools_and_skill():
     assert manifest["version"] == __version__ == "0.1.0"
     assert manifest["requires_hermes"] == ">=0.23.0"
     assert manifest["requires_env"] == []
-    assert manifest["provides_hooks"] == []
+    from templeos.companion import HOOK_NAMES
+
+    assert sorted(manifest["provides_hooks"]) == sorted(HOOK_NAMES)
+    assert sorted(ctx.hooks) == sorted(HOOK_NAMES)
     assert sorted(ctx.tools) == sorted(manifest["provides_tools"]) == sorted(TOOL_NAMES)
     assert len(TOOL_NAMES) == 4
     assert "templeos-operator" in ctx.skills
