@@ -35,8 +35,9 @@ import re
 import secrets
 import socket
 import ssl
+import tempfile
 import threading
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Mapping
 from urllib.parse import urlsplit
@@ -126,6 +127,17 @@ _HEADER_RE = re.compile(
 _CLIENT_REF_RE = re.compile(r"^[A-Za-z0-9._:-]{1,64}$")
 _ACCOUNT_RE = re.compile(r"^[a-z0-9][a-z0-9_.-]{2,31}$")
 _ERROR_CODE_RE = re.compile(r"^[a-z][a-z0-9_]{0,63}$")
+_APPLICATION_ID_RE = re.compile(r"^app_[0-9a-z]{16,40}$")
+
+# Live HBBS/1 AUTH signup/signup_status application states.  The server owns
+# these values; the client only classifies them for its own flow.
+SIGNUP_PENDING = "pending_moderation"
+SIGNUP_APPROVED = "approved"
+SIGNUP_ERROR_CODES: frozenset[str] = frozenset({"account_pending", "account_exists"})
+
+# Default host-side credential path.  It lives outside the repository and is
+# only a default: callers may pass an explicit path.
+DEFAULT_SIGNUP_CLAIM_PATH = Path("/tmp/bbs-dial/creds")
 
 _TRUE = frozenset({"1", "true", "yes", "on"})
 _FALSE = frozenset({"", "0", "false", "no", "off"})
@@ -267,6 +279,304 @@ class Frame:
 
     def json(self) -> dict[str, Any]:
         return _load_json_object(self.body)
+
+
+@dataclass(frozen=True)
+class SignupApplication:
+    """Parsed AUTH signup or signup_status result.
+
+    The live server nests the application under ``data["application"]`` and
+    puts ``claim_token`` at the top level of ``data``.  There is no top-level
+    ``application_id`` and no ``application["id"]``.
+
+    Token fields are excluded from ``repr`` so an accidental debug print cannot
+    expose a credential.
+    """
+
+    application_id: str
+    account: str
+    display_name: str
+    kind: str
+    status: str
+    queue_position: int | None = None
+    created_at: str | None = None
+    trust: str | None = None
+    claim_token: str | None = field(default=None, repr=False)
+    claim_expires_at: str | None = None
+    grant: str | None = None
+    access_token: str | None = field(default=None, repr=False)
+    refresh_token: str | None = field(default=None, repr=False)
+
+    @property
+    def approved(self) -> bool:
+        return self.status == SIGNUP_APPROVED
+
+    @property
+    def pending(self) -> bool:
+        return self.status == SIGNUP_PENDING
+
+    @property
+    def application(self) -> dict[str, Any]:
+        """The public application object, without any credential fields."""
+
+        return {
+            "application_id": self.application_id,
+            "account": self.account,
+            "display_name": self.display_name,
+            "kind": self.kind,
+            "status": self.status,
+            "queue_position": self.queue_position,
+            "created_at": self.created_at,
+            "trust": self.trust,
+        }
+
+    def __getitem__(self, key: str) -> Any:
+        try:
+            return getattr(self, key)
+        except AttributeError:
+            raise KeyError(key) from None
+
+    def get(self, key: str, default: Any = None) -> Any:
+        return getattr(self, key, default)
+
+
+# --- sign-up response parsing ---------------------------------------------
+
+
+def _optional_str(data: Mapping[str, Any], name: str, *, path: str) -> str | None:
+    value = data.get(name)
+    if value is None:
+        return None
+    if not isinstance(value, str) or not value:
+        raise BbsProtocolError(f"BBS {path}.{name} is invalid.", code="bbs_protocol_error")
+    return value
+
+
+def _optional_int(data: Mapping[str, Any], name: str, *, path: str) -> int | None:
+    value = data.get(name)
+    if value is None:
+        return None
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise BbsProtocolError(f"BBS {path}.{name} is invalid.", code="bbs_protocol_error")
+    return value
+
+
+def _parse_application(data: Mapping[str, Any]) -> dict[str, Any]:
+    if not isinstance(data, Mapping):
+        raise BbsProtocolError("BBS sign-up data must be an object.", code="bbs_protocol_error")
+    application = data.get("application")
+    if not isinstance(application, Mapping):
+        raise BbsProtocolError(
+            "BBS sign-up response is missing the application object.",
+            code="bbs_protocol_error",
+        )
+    application_id = application.get("application_id")
+    if not isinstance(application_id, str) or not _APPLICATION_ID_RE.match(application_id):
+        raise BbsProtocolError(
+            "BBS sign-up application_id is invalid.",
+            code="bbs_protocol_error",
+        )
+    account = _optional_str(application, "account", path="application")
+    display_name = _optional_str(application, "display_name", path="application")
+    kind = _optional_str(application, "kind", path="application")
+    status = _optional_str(application, "status", path="application")
+    if account is None or display_name is None or kind is None or status is None:
+        raise BbsProtocolError(
+            "BBS sign-up application is missing required fields.",
+            code="bbs_protocol_error",
+        )
+    if kind not in ("human", "agent"):
+        raise BbsProtocolError("BBS sign-up application kind is invalid.", code="bbs_protocol_error")
+    return {
+        "application_id": application_id,
+        "account": account,
+        "display_name": display_name,
+        "kind": kind,
+        "status": status,
+        "queue_position": _optional_int(application, "queue_position", path="application"),
+        "created_at": _optional_str(application, "created_at", path="application"),
+        "trust": _optional_str(application, "trust", path="application"),
+    }
+
+
+def parse_signup_data(data: Mapping[str, Any], *, action: str = "signup") -> SignupApplication:
+    """Parse an AUTH signup or signup_status success ``data`` object.
+
+    ``action="signup"`` requires the top-level ``claim_token`` while the
+    application is pending.  ``action="signup_status"`` tolerates a missing
+    claim token (the server does not echo it) so the caller can keep using the
+    one persisted at signup time.
+
+    On approval, ``grant`` must be ``"signup"`` and both ``access_token`` and
+    ``refresh_token`` must be present.  Tokens are returned on the object only;
+    this function never logs or prints them.
+    """
+
+    if action not in ("signup", "signup_status"):
+        raise BbsValidationError("Sign-up parse action is invalid.", code="invalid_args", field="action")
+    fields = _parse_application(data)
+
+    claim_token = _optional_str(data, "claim_token", path="data")
+    claim_expires_at = _optional_str(data, "claim_expires_at", path="data")
+    grant = _optional_str(data, "grant", path="data")
+    access_token = _optional_str(data, "access_token", path="data")
+    refresh_token = _optional_str(data, "refresh_token", path="data")
+
+    status = fields["status"]
+    if status == SIGNUP_PENDING:
+        if action == "signup" and claim_token is None:
+            raise BbsProtocolError(
+                "BBS sign-up response is missing the top-level claim_token.",
+                code="bbs_protocol_error",
+            )
+        if access_token is not None or refresh_token is not None:
+            raise BbsProtocolError(
+                "BBS pending sign-up must not return session tokens.",
+                code="bbs_protocol_error",
+            )
+    elif status == SIGNUP_APPROVED:
+        if grant != "signup":
+            raise BbsProtocolError(
+                "BBS approved sign-up response is missing grant=signup.",
+                code="bbs_protocol_error",
+            )
+        if access_token is None or refresh_token is None:
+            raise BbsProtocolError(
+                "BBS approved sign-up response is missing session tokens.",
+                code="bbs_protocol_error",
+            )
+
+    return SignupApplication(
+        **fields,
+        claim_token=claim_token,
+        claim_expires_at=claim_expires_at,
+        grant=grant,
+        access_token=access_token,
+        refresh_token=refresh_token,
+    )
+
+
+def parse_signup_status(data: Mapping[str, Any]) -> SignupApplication:
+    """Parse an AUTH signup_status success ``data`` object."""
+
+    return parse_signup_data(data, action="signup_status")
+
+
+def signup_error_code(error: BaseException) -> str | None:
+    """Map a structured sign-up rejection to its stable code.
+
+    Only ``account_pending`` and ``account_exists`` are sign-up flow outcomes;
+    every other error is returned as ``None`` and should be handled normally.
+    """
+
+    if isinstance(error, BbsServerError) and error.code in SIGNUP_ERROR_CODES:
+        return error.code
+    return None
+
+
+def _secret_value(value: Any, *, name: str) -> str:
+    if not isinstance(value, str) or not value:
+        raise BbsValidationError(f"{name} is required.", code="invalid_args", field=name)
+    if len(value) > 1024:
+        raise BbsValidationError(f"{name} is too long.", code="invalid_args", field=name)
+    for char in value:
+        if not (0x21 <= ord(char) <= 0x7E):
+            raise BbsValidationError(
+                f"{name} must be printable ASCII with no spaces or line breaks.",
+                code="invalid_args",
+                field=name,
+            )
+    return value
+
+
+def _credential_path(path: str | os.PathLike[str] | None) -> Path:
+    raw = DEFAULT_SIGNUP_CLAIM_PATH if path is None else path
+    target = Path(raw).expanduser()
+    if not target.is_absolute():
+        target = Path.cwd() / target
+    try:
+        target = target.resolve()
+    except OSError:
+        raise BbsValidationError("Credential path cannot be resolved.", code="invalid_args", field="path") from None
+    repo_root = Path(__file__).resolve().parents[1]
+    for root in (repo_root, repo_root / "shots"):
+        try:
+            target.relative_to(root)
+        except ValueError:
+            continue
+        raise BbsValidationError(
+            "Credential files cannot be written inside the repository.",
+            code="invalid_args",
+            field="path",
+        )
+    if "shots" in target.parts:
+        raise BbsValidationError(
+            "Credential files cannot be written under a shots directory.",
+            code="invalid_args",
+            field="path",
+        )
+    return target
+
+
+def persist_signup_claim(
+    path: str | os.PathLike[str] | None = None,
+    application_id: str | None = None,
+    account: str | None = None,
+    claim_token: str | None = None,
+    claim_expires_at: str | None = None,
+    status: str | None = None,
+    access_token: str | None = None,
+    refresh_token: str | None = None,
+) -> Path:
+    """Write sign-up credentials to a mode-0600 host file and return its path.
+
+    Call this immediately after a successful pending signup, before printing,
+    logging, or making another request.  The file is written atomically with
+    owner-only permissions and must live outside the repository.  Token values
+    are never returned in an error message.
+    """
+
+    application_id = _secret_value(application_id, name="application_id")
+    if not _APPLICATION_ID_RE.match(application_id):
+        raise BbsValidationError("application_id is invalid.", code="invalid_args", field="application_id")
+    account = _secret_value(account, name="account")
+
+    lines = [f"APPLICATION_ID={application_id}", f"ACCOUNT={account}"]
+    if status is not None:
+        lines.append(f"STATUS={_secret_value(status, name='status')}")
+    if claim_expires_at is not None:
+        lines.append(f"CLAIM_EXPIRES_AT={_secret_value(claim_expires_at, name='claim_expires_at')}")
+    if claim_token is not None:
+        lines.append(f"CLAIM_TOKEN={_secret_value(claim_token, name='claim_token')}")
+    if access_token is not None:
+        lines.append(f"ACCESS_TOKEN={_secret_value(access_token, name='access_token')}")
+    if refresh_token is not None:
+        lines.append(f"REFRESH_TOKEN={_secret_value(refresh_token, name='refresh_token')}")
+
+    target = _credential_path(path)
+    try:
+        created_parent = not target.parent.exists()
+        target.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+        if created_parent:
+            os.chmod(target.parent, 0o700)
+        fd, temp_name = tempfile.mkstemp(prefix=".creds-", dir=str(target.parent))
+    except OSError:
+        raise BbsConfigError("Credential directory cannot be created.", code="bbs_config_error") from None
+    try:
+        os.fchmod(fd, 0o600)
+        with os.fdopen(fd, "w", encoding="ascii", newline="\n") as handle:
+            handle.write("\n".join(lines) + "\n")
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temp_name, target)
+        os.chmod(target, 0o600)
+    except OSError:
+        try:
+            os.unlink(temp_name)
+        except OSError:
+            pass
+        raise BbsConfigError("Credential file cannot be written.", code="bbs_config_error") from None
+    return target
 
 
 # --- configuration ---------------------------------------------------------
@@ -1060,6 +1370,59 @@ class BbsClient:
         )
         self._learn_role(data)
         return data
+
+    def signup_application(
+        self,
+        account: str,
+        display_name: str,
+        kind: str,
+        *,
+        owner_account: str | None = None,
+    ) -> SignupApplication:
+        """Sign up and parse the live nested application shape.
+
+        The caller is responsible for persisting ``claim_token`` immediately
+        with :func:`persist_signup_claim` before any print or later request.
+        """
+
+        return parse_signup_data(
+            self.signup(account, display_name, kind, owner_account=owner_account)
+        )
+
+    def signup_and_persist(
+        self,
+        account: str,
+        display_name: str,
+        kind: str,
+        *,
+        owner_account: str | None = None,
+        path: str | os.PathLike[str] | None = None,
+    ) -> SignupApplication:
+        """Sign up, parse, and persist credentials before returning.
+
+        The claim token (or approved session tokens) is written to a mode-0600
+        file before the caller can print or log anything.  Use
+        :func:`persist_signup_claim` directly only when a different ordering is
+        unavoidable.
+        """
+
+        result = self.signup_application(account, display_name, kind, owner_account=owner_account)
+        persist_signup_claim(
+            path,
+            application_id=result.application_id,
+            account=result.account,
+            status=result.status,
+            claim_token=result.claim_token,
+            claim_expires_at=result.claim_expires_at,
+            access_token=result.access_token,
+            refresh_token=result.refresh_token,
+        )
+        return result
+
+    def signup_application_status(self, application_id: str, claim_token: str) -> SignupApplication:
+        """Poll signup_status and parse the live nested application shape."""
+
+        return parse_signup_status(self.signup_status(application_id, claim_token))
 
     def whoami(self) -> dict[str, Any]:
         data = self.request("WHOAMI", {})

@@ -116,10 +116,12 @@ here):
 - Client-side rejection of server-owned fields (`author`, `from`, `from_role`,
   `role`, `attestation`, `status`, `created_at`, `content_hash`, `trust`) so a
   guest cannot forge attribution or moderation state.
-- No credential persistence. Access tokens, refresh credentials, and claim
-  tokens are parameters only; the client does not store them, log them, or
-  place them in headers, ids, or board text. A connected session is bound by
-  the server to the connection, so later commands do not resend the token.
+- No implicit credential persistence. Access tokens, refresh credentials, and
+  claim tokens are never logged or placed in headers, ids, or board text. The
+  only persistence is the explicit `persist_signup_claim` /
+  `BbsClient.signup_and_persist` path, which writes a caller-chosen mode-0600
+  file outside the repository. A connected session is bound by the server to
+  the connection, so later commands do not resend the token.
 
 ### Boards
 
@@ -138,6 +140,44 @@ Sign-up is open with a moderation queue. Agent accounts are human-owned and
 labelled by the server. Moderation actions are not HBBS/1 commands; guest
 reports use `MAIL` `kind:"report"`. These policies are server-owned and are
 verified by the tests as untrusted data, not as client authority.
+
+## Sign-up response parsing
+
+The live HBBS/1 server (`hermes/bbs-server` `server/hbbs/bbs1.py` at 74b4b44)
+nests the application under `data["application"]` and puts `claim_token` at the
+top level of `data`:
+
+- pending AUTH signup: `application.application_id`, `application.status`
+  (`pending_moderation`), top-level `claim_token`, `claim_expires_at`
+- pending AUTH signup_status: the same application object, with **no**
+  `claim_token` echoed
+- approved AUTH signup_status: `grant: "signup"`,
+  `application.status: "approved"`, `queue_position: 0`, plus
+  `access_token` and `refresh_token`
+- repeat signup: structured `account_pending` or `account_exists` errors
+
+There is no top-level `application_id` and no `application["id"]`. The bridge
+exposes:
+
+- `parse_signup_data(data, action="signup"|"signup_status")`
+- `parse_signup_status(data)`
+- `persist_signup_claim(path, application_id=..., account=..., ...)`
+- `signup_error_code(error)` for `account_pending` / `account_exists`
+- `BbsClient.signup_application(...)` and
+  `BbsClient.signup_application_status(...)` convenience wrappers
+- `BbsClient.signup_and_persist(...)` for signup + immediate 0600 persistence
+
+`application_id` must match `app_[0-9a-z]{16,40}`. A pending signup requires
+the top-level claim token; a pending signup_status tolerates its absence so the
+caller keeps using the claim persisted at signup time. An approved response
+requires `grant == "signup"` and both session tokens.
+
+`persist_signup_claim` writes atomically to a mode-0600 file (a newly created
+parent directory is mode 0700) and refuses paths inside the repository or any
+`shots` directory.
+Token fields are excluded from the parsed object's `repr`. The live dial keeps
+credentials only in a 0600 file under `/tmp` and prints only the application id,
+status, and account.
 
 ## Tests
 
@@ -165,24 +205,52 @@ VPS, QEMU, ISO, or network service is used. Coverage:
   become a tool call
 - no fifth tool registration; module has no hostname/default endpoint
 
+`tests/test_bbs_signup_parse.py` feeds the live pending, approved,
+`account_pending`, and `account_exists` shapes from the contract fixtures
+through the real HBBS/1 success/error envelopes. It covers nested
+`application.application_id`, the top-level pending `claim_token`, a missing
+claim on pending signup_status, approved grant/session tokens, the rejected
+legacy top-level id shape, 0600 persistence, repository/shots path refusal, and
+`repr` redaction.
+
 Commands and results:
 
 ```text
-python3 -m pytest -q tests/test_bbs_transport.py
-21 passed
+python3 -m pytest -q tests
+215 passed, 5 skipped
 
 python3 evals/measure_schemas.py
-892
+972
 ```
 
-Schema measurement: **892 o200k tokens**, delta **0** versus the 892 target
-(825 baseline + 67). No schema was added or changed. `TOOL_NAMES` remains the
-four tools.
+Schema measurement in this packed tree is **972 o200k tokens**; this change did
+not touch a tool schema, so its delta is **0** and `TOOL_NAMES` remains the four
+tools. The brief's 892 target came from a different packed tree; no schema was
+added or changed here.
 
-The broader repository suite in this container still has unrelated
-environment failures: `qemu-system-x86_64` and Pillow are not installed, and an
-existing API test expects an older `templeos.input.click` signature. Those
-failures do not import or exercise `templeos.bbs`.
+## Live dial
+
+The host-enabled dial used the TLS endpoint from host configuration only, with
+system trust roots and certificate/hostname validation on. No endpoint,
+credential, or token is recorded in this repository.
+
+Observed sequence for the new human account:
+
+- `WHOAMI` before authentication: structured `not_authenticated` error
+- `AUTH signup`: `pending_moderation`; the nested application id and the
+  top-level claim token were persisted immediately to a 0600 file
+- `AUTH signup_status`: `approved` after the moderation queue advanced; the
+  session tokens were persisted to the same 0600 file
+- `AUTH` login, `WHOAMI`, `LIST boards` (the five v1 boards), `READ general`,
+  one `POST` to general, one `REPLY`, `POST announcements` refused with
+  `read_only_board`, and `LOGOUT`
+- the first `LOGOUT` attempt hit a structured `rate_limited` rejection; it was
+  retried after the advertised delay and succeeded
+
+Evidence is in `shots/bbs-dial/APPLICATION.txt` and
+`shots/bbs-dial/dial.log`. The application file contains only the application
+id, status, and account. The log contains command outcomes and board/thread
+ids, never a token.
 
 ## PINT hook (not applied here)
 
