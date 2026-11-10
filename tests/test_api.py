@@ -313,7 +313,11 @@ def test_router_mounts_when_fastapi_is_available(fresh, monkeypatch):
     monkeypatch.setattr("templeos.vm.start", lambda **k: _running_status())
     monkeypatch.setattr(
         "templeos.input.click",
-        lambda x, y, button="left", **kwargs: {"ok": True, "x": x, "y": y},
+        lambda x, y, button="left", settle_s=None, hold_s=None, **kwargs: {
+            "ok": True,
+            "x": x,
+            "y": y,
+        },
     )
 
     app = FastAPI()

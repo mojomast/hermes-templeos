@@ -41,6 +41,11 @@ CLICK_VIA = ("auto", "vmmouse", "msset", "relative")
 HOLYC_VIA = ("auto", "serial", "type")
 DEFAULT_DELAY_S = 0.09
 DEFAULT_HOLD_MS = 80
+# P5 evidence (feat/p5-webapp-demo 53ded9d): under TCG the old <=50 ms HolyC
+# key cadence garbled a long one-liner; ~90 ms per key printed "Hello from
+# Hermes" and 42. KVM keeps the snappy cap.
+HOLYC_TCG_DELAY_S = 0.09
+HOLYC_MAX_DELAY_S = 0.12
 CHUNK_CHARS = 32
 ABS_MAX = 32767
 # Bake-off: a click on 'Cmd Line' at this pixel opened Command Line Overview.
@@ -229,6 +234,21 @@ def _shifted_chord(names: Sequence[str]) -> bool:
     has_shift = any(c in _SHIFT_QCODES for c in names)
     has_key = any(c not in _MODIFIER_QCODES for c in names)
     return has_shift and has_key
+
+
+def _typing_delay(rt: Any, accel: str) -> float:
+    """Inter-key delay for HolyC typed at the prompt.
+
+    A zero ``type_delay_s`` remains the instantaneous unit-test seam. On live
+    guests KVM stays at the old <=50 ms cap; TCG takes the slower P5 cadence
+    (>=90 ms) because batched fast typing garbles a long HolyC line there.
+    """
+    base = float(getattr(rt, "type_delay_s", 0.0) or 0.0)
+    if base <= 0:
+        return 0.0
+    if accel and accel != "kvm":
+        return max(HOLYC_TCG_DELAY_S, min(base, HOLYC_MAX_DELAY_S))
+    return max(0.02, min(base, 0.05))
 
 
 def _send_key_cmd(qmp: Any, names: Sequence[str], *, hold_ms: int) -> None:
@@ -642,15 +662,21 @@ def holyc(source: str, *, via: str = "auto") -> dict[str, Any]:
                 except Exception as exc:
                     return _fail(str(exc) or "Serial write failed.", Code.SERIAL_NOT_READY, via="serial")
                 return _ok(via="serial", bytes=len(payload.encode("utf-8")))
-            # Live guests need a short inter-key delay so Shift chords stick under TCG.
-            # Unit tests bind type_delay_s=0 and stay instantaneous.
-            if not rt.type_delay_s:
-                delay = 0.0
-            else:
-                delay = max(0.02, min(float(rt.type_delay_s), 0.05))
+            # Live guests need an inter-key delay so Shift chords stick and a
+            # long HolyC line is not garbled. TCG uses the slower P5 cadence
+            # (feat/p5-webapp-demo 53ded9d); zero stays the unit-test seam.
+            accel = _accel(rt.qmp)
+            delay = _typing_delay(rt, accel)
             typed = type_text(payload, delay_s=delay)
             if typed.get("ok") is False:
                 return typed
-            return _ok(via="type", typed=typed.get("typed"), bytes=len(payload.encode("utf-8")))
+            return _ok(
+                via="type",
+                typed=typed.get("typed"),
+                bytes=len(payload.encode("utf-8")),
+                accel=accel or None,
+                key_delay_s=delay,
+                tcg_slow=bool(delay and accel != "kvm"),
+            )
     except ScreenError as exc:
         return exc.envelope

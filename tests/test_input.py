@@ -11,6 +11,7 @@ from templeos.arbiter import Arbiter, get_arbiter, reset_arbiter
 from templeos.input import (
     CMD_LINE,
     HOLYC_MAX_BYTES,
+    HOLYC_TCG_DELAY_S,
     click,
     holyc,
     move,
@@ -19,7 +20,7 @@ from templeos.input import (
     type_text,
     unbind,
 )
-from templeos.screen import bind
+from templeos.screen import bind, get_runtime
 from templeos.tools import handle_input
 from tests.fakes import MIN_PNG, FakeQMP, FakeSerial
 
@@ -212,6 +213,38 @@ def test_holyc_auto_prefers_type_until_guest_serial_ready(tos_home):
     huge = holyc("x" * (HOLYC_MAX_BYTES + 1))
     assert huge["ok"] is False
     assert huge["code"] == "invalid_args"
+
+
+def test_holyc_tcg_types_slower_per_key(tos_home, monkeypatch):
+    """P5 evidence: default-speed HolyC garbles under TCG; slower per-key works."""
+    qmp = _bind(tos_home)
+    qmp.accel = "tcg"
+    # Old live default capped every character at 50 ms, which P5 showed can
+    # garble a long one-liner on TCG.
+    get_runtime().type_delay_s = 0.05
+    monkeypatch.setattr("templeos.vm._runtime", None, raising=False)
+    sleeps: list[float] = []
+    monkeypatch.setattr("templeos.input.time.sleep", lambda seconds: sleeps.append(float(seconds)))
+
+    one_liner = '"Hello from Hermes\\n"; 6*7;'
+    result = holyc(one_liner, via="type")
+    assert result["ok"] is True
+    assert result["via"] == "type"
+    assert result["accel"] == "tcg"
+    assert result["tcg_slow"] is True
+    assert result["key_delay_s"] >= HOLYC_TCG_DELAY_S
+    # Every shifted chord reaches the guest as separate per-key QMP events
+    # (never one batched packet where Shift can be dropped), and the chord is
+    # held for the adaptive TCG hold.
+    key_batches = [b for b in qmp.events if b and b[0].get("type") == "key"]
+    assert key_batches
+    for batch in key_batches:
+        downs = [ev["data"]["key"]["data"] for ev in batch if ev["data"]["down"]]
+        if "shift" in downs:
+            assert downs == ["shift"], "shift must not be batched with its key under TCG"
+    assert any(s >= HOLYC_TCG_DELAY_S for s in sleeps)
+    assert any(s >= 0.12 for s in sleeps)
+    assert result["typed"] == len(one_liner) + 1  # payload appends the newline
 
 
 def test_input_goes_through_the_arbiter_queue(tos_home):
