@@ -64,7 +64,7 @@ export const TerryCompanion = {
 };
 
 /** Canvas sprite that plays atlas rows or v2 clip strips via requestAnimationFrame. */
-export function TerryCompanionOverlay({ api, animation, costume, hidden, enabled, speech }) {
+export function TerryCompanionOverlay({ api, animation, costume, hidden, enabled, speech, sprite, spriteRow }) {
   const canvasRef = useRef(null);
   const [ready, setReady] = useState(false);
   const [error, setError] = useState("");
@@ -321,6 +321,15 @@ export function TerryCompanionOverlay({ api, animation, costume, hidden, enabled
   if (enabled === false) return null;
   if (hidden) return null;
 
+  const staticSheet = typeof sprite === "string" && sprite ? sprite : "";
+  const row = Math.max(0, Number(spriteRow) || 0);
+  const spriteStyle = staticSheet
+    ? {
+        backgroundImage: `url("${staticSheet}")`,
+        backgroundPosition: `0 -${row * 104}px`,
+      }
+    : undefined;
+
   return jsxs("aside", {
     className: "tos-companion-dock",
     "data-testid": "companion-dock",
@@ -335,14 +344,16 @@ export function TerryCompanionOverlay({ api, animation, costume, hidden, enabled
           })
         : jsx("div", { className: "tos-companion-bubble-slot", "aria-hidden": "true" }),
       jsxs("div", {
-        className: "tos-companion",
+        className: "tos-companion" + (staticSheet ? " tos-companion-static" : ""),
         "data-testid": "companion",
         "data-animation": hostAnim || "idle",
         "data-costume": costume || "base",
         title: "Terry companion — fan tribute to Terry A. Davis. Triple-click to dance.",
+        style: spriteStyle,
         onClick: onTerryClick,
-        children: [
-          ready
+        children: staticSheet
+          ? null
+          : ready
             ? jsx("canvas", {
                 ref: canvasRef,
                 className: "tos-companion-canvas",
@@ -355,7 +366,6 @@ export function TerryCompanionOverlay({ api, animation, costume, hidden, enabled
                 "data-testid": "companion-loading",
                 children: error || "…",
               }),
-        ],
       }),
     ],
   });

@@ -207,6 +207,70 @@ def set_enabled_override(value: bool | None) -> None:
     save_prefs()
 
 
+_OFF_TOKENS = {"0", "false", "no", "off", "none", "disabled"}
+_ON_TOKENS = {"1", "true", "yes", "on", "terry"}
+
+
+def _config_companion_value(ctx: Any) -> Any:
+    """Best-effort read of the plugin config ``companion`` setting from ctx."""
+    if ctx is None:
+        return None
+    for attr in ("config", "settings", "plugin_config"):
+        try:
+            value = getattr(ctx, attr, None)
+        except Exception:
+            continue
+        if callable(value):
+            try:
+                value = value()
+            except Exception:
+                continue
+        if not isinstance(value, dict):
+            continue
+        if "companion" in value:
+            return value.get("companion")
+        nested = value.get("templeos")
+        if isinstance(nested, dict) and "companion" in nested:
+            return nested.get("companion")
+    for meth in ("get_config", "config_get"):
+        fn = getattr(ctx, meth, None)
+        if not callable(fn):
+            continue
+        for key in ("companion", "templeos.companion"):
+            try:
+                value = fn(key)
+            except Exception:
+                continue
+            if value is not None:
+                return value
+    return None
+
+
+def apply_config(ctx: Any) -> bool | None:
+    """Apply the plugin's ``companion:`` setting to the process state.
+
+    Returns the resolved enabled flag, or None when the config does not set one.
+    Env ``TEMPLEOS_COMPANION`` still wins inside ``companion_enabled()``.
+    """
+    raw = _config_companion_value(ctx)
+    if raw is None:
+        return None
+    if isinstance(raw, bool):
+        resolved = raw
+    else:
+        token = str(raw).strip().lower()
+        if token in _OFF_TOKENS:
+            resolved = False
+        elif token in _ON_TOKENS:
+            resolved = True
+        else:
+            return None
+    # Config is load-time policy, not a user preference: do not persist it.
+    with _LOCK:
+        _STATE["enabled_override"] = resolved
+    return resolved
+
+
 def reset_state() -> None:
     """Clear companion counters (tests)."""
     with _LOCK:
@@ -694,6 +758,7 @@ def register_hooks(ctx: Any) -> list[str]:
     """
     if not hasattr(ctx, "register_hook"):
         return []
+    apply_config(ctx)
     registered: list[str] = []
     for name, fn in _make_hooks().items():
         assert name in HOOK_NAMES
