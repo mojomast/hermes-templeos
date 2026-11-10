@@ -57,6 +57,13 @@ export function createApi(rest) {
     log: () => call("/log"),
     doctor: () => call("/doctor"),
     setup: (body) => call("/setup", { method: "POST", body: body || {} }),
+    companion: () => call("/companion"),
+    companionSet: (body) => call("/companion", { method: "POST", body: body || {} }),
+    companionAtlas: (opts) =>
+      call(joinPath("/companion/atlas", opts && opts.costume ? { costume: opts.costume } : null)),
+    companionClips: () => call("/companion/clips"),
+    companionClip: (opts) => call(joinPath("/companion/clip", { name: opts && opts.name ? opts.name : "" })),
+    companionSay: (body) => call("/companion", { method: "POST", body: body || {} }),
   };
 }
 

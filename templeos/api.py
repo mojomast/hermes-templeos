@@ -50,6 +50,10 @@ ROUTE_SNAPSHOTS = "/snapshots"
 ROUTE_LOG = "/log"
 ROUTE_SETUP = "/setup"
 ROUTE_DOCTOR = "/doctor"
+ROUTE_COMPANION = "/companion"
+ROUTE_COMPANION_ATLAS = "/companion/atlas"
+ROUTE_COMPANION_CLIPS = "/companion/clips"
+ROUTE_COMPANION_CLIP = "/companion/clip"
 
 _LOG_LOCK = threading.Lock()
 _LOG: deque[dict[str, Any]] = deque(maxlen=LOG_MAX)
@@ -396,6 +400,12 @@ def status_payload() -> dict[str, Any]:
     except NotImplementedError:
         body["setup_needed"] = body["setup_needed"] or _setup_needed(body.get("checks"), doctor_body, body.get("code"))
         body["agent_busy"] = agent_is_busy()
+        try:
+            from templeos.companion import snapshot as companion_snapshot
+
+            body["companion"] = companion_snapshot()
+        except Exception:
+            body["companion"] = {"enabled": False, "character": "terry", "animation": "idle"}
         return body
     except Exception as exc:
         body["ok"] = False
@@ -403,6 +413,12 @@ def status_payload() -> dict[str, Any]:
         body["code"] = Code.DOCTOR_FAILED
         body["fix"] = CODE_FIX[Code.DOCTOR_FAILED]
         body["setup_needed"] = True
+        try:
+            from templeos.companion import snapshot as companion_snapshot
+
+            body["companion"] = companion_snapshot()
+        except Exception:
+            body["companion"] = {"enabled": False, "character": "terry", "animation": "idle"}
         return body
 
     body["vm_implemented"] = True
@@ -452,6 +468,12 @@ def status_payload() -> dict[str, Any]:
     body["sockets"] = _sanitize_sockets(body.get("sockets"))
     # Re-apply arbiter last so VM status cannot clobber control state.
     body.update(get_arbiter().snapshot())
+    try:
+        from templeos.companion import snapshot as companion_snapshot
+
+        body["companion"] = companion_snapshot()
+    except Exception:
+        body["companion"] = {"enabled": False, "character": "terry", "animation": "idle"}
     return body
 
 
@@ -485,6 +507,13 @@ def set_control(body: dict[str, Any] | None) -> dict[str, Any]:
         summary=f"mode {mode}",
         source="user",
     )
+    if mode == "user":
+        try:
+            from templeos.companion import note_user_driving
+
+            note_user_driving()
+        except Exception:
+            pass
     return _json_ok(**snap, agent_busy=agent_is_busy())
 
 
@@ -725,11 +754,57 @@ def vm_action(body: dict[str, Any] | None) -> dict[str, Any]:
         name, name_err = _snapshot_name(body.get("name") or body.get("snapshot"))
         if name_err:
             return name_err
+        try:
+            from templeos.companion import note_vm_booting
+
+            note_vm_booting(True)
+        except Exception:
+            pass
         result = _from_impl(vm.start, flavor=flavor, snapshot=name, unit="vm.start")
+        if result.get("ok"):
+            try:
+                from templeos.companion import note_vm_running
+
+                note_vm_running()
+            except Exception:
+                pass
+        else:
+            try:
+                from templeos.companion import note_vm_crash
+
+                note_vm_crash("vm_start_failed")
+            except Exception:
+                pass
     elif op == "stop":
         result = _from_impl(vm.stop, unit="vm.stop")
+        try:
+            from templeos.companion import note_vm_running
+
+            note_vm_running()
+        except Exception:
+            pass
     else:
+        try:
+            from templeos.companion import note_vm_booting
+
+            note_vm_booting(True)
+        except Exception:
+            pass
         result = _from_impl(vm.reset, unit="vm.reset")
+        if result.get("ok"):
+            try:
+                from templeos.companion import note_vm_running
+
+                note_vm_running()
+            except Exception:
+                pass
+        else:
+            try:
+                from templeos.companion import note_vm_crash
+
+                note_vm_crash("vm_reset_failed")
+            except Exception:
+                pass
     note_agent_action(tool="templeos_vm", op=op, ok=bool(result.get("ok")), code=result.get("code"), source="user")
     if result.get("ok"):
         status = status_payload()
@@ -884,6 +959,43 @@ def _frame_since(request: Any) -> str | None:
     return str(since).strip().strip('"')
 
 
+
+def companion_control(body: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Apply companion settings from the pane (costume / enabled override)."""
+    body = body or {}
+    try:
+        from templeos import companion as companion_mod
+    except Exception as exc:
+        return _json_err(f"Companion unavailable: {exc}", Code.NOT_IMPLEMENTED)
+    if "enabled" in body:
+        raw = body.get("enabled")
+        if raw is None:
+            companion_mod.set_enabled_override(None)
+        else:
+            companion_mod.set_enabled_override(bool(raw))
+    if "hidden" in body:
+        companion_mod.set_hidden(bool(body.get("hidden")))
+    if body.get("costume"):
+        companion_mod.set_costume(str(body.get("costume")))
+    if "say" in body or "speech" in body or "text" in body and body.get("op") == "say":
+        raw = body.get("say") if "say" in body else body.get("speech") if "speech" in body else body.get("text")
+        if raw is None or raw is False or raw == "":
+            companion_mod.clear_speech()
+        else:
+            hold = body.get("hold_s") or body.get("ttl_s")
+            companion_mod.say(str(raw), hold_s=float(hold) if hold is not None else None)
+    # Mirror config companion: off
+    mode = body.get("companion") or body.get("mode")
+    if isinstance(mode, str):
+        token = mode.strip().lower()
+        if token in {"off", "0", "false", "disabled", "none"}:
+            companion_mod.set_enabled_override(False)
+        elif token in {"terry", "on", "1", "true"}:
+            companion_mod.set_enabled_override(True)
+    snap = companion_mod.snapshot()
+    return _json_ok(companion=snap)
+
+
 def create_router():
     """Build the FastAPI router. Requires fastapi (provided by Hermes, or dev extra)."""
     if APIRouter is None or Request is None:
@@ -983,6 +1095,56 @@ def create_router():
         except ValueError as exc:
             return _json_err(str(exc), Code.INVALID_ARGS)
         return setup_payload(body)
+
+    @router.get("/companion")
+    def route_companion_get():
+        try:
+            from templeos.companion import snapshot as companion_snapshot
+
+            return _json_ok(companion=companion_snapshot())
+        except Exception as exc:
+            return _json_err(str(exc) or "Companion unavailable.", Code.NOT_IMPLEMENTED)
+
+    @router.post("/companion")
+    async def route_companion_post(request: Request):
+        try:
+            body = _json_body(await request.body())
+        except ValueError as exc:
+            return _json_err(str(exc), Code.INVALID_ARGS)
+        return companion_control(body)
+
+    @router.get("/companion/atlas")
+    def route_companion_atlas(request: Request):
+        costume = None
+        if request.query_params is not None:
+            costume = request.query_params.get("costume")
+        try:
+            from templeos.companion import atlas_payload
+
+            return atlas_payload(costume)
+        except Exception as exc:
+            return _json_err(str(exc) or "Companion atlas unavailable.", Code.NOT_IMPLEMENTED)
+
+    @router.get("/companion/clips")
+    def route_companion_clips():
+        try:
+            from templeos.companion import clips_manifest
+
+            return clips_manifest()
+        except Exception as exc:
+            return _json_err(str(exc) or "Companion clips unavailable.", Code.NOT_IMPLEMENTED)
+
+    @router.get("/companion/clip")
+    def route_companion_clip(request: Request):
+        name = request.query_params.get("name") if request.query_params is not None else None
+        try:
+            from templeos.companion import clip_payload
+
+            return clip_payload(str(name or ""))
+        except Exception as exc:
+            return _json_err(str(exc) or "Companion clip unavailable.", Code.NOT_IMPLEMENTED)
+
+
 
     return router
 

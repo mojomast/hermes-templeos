@@ -1,0 +1,11 @@
+{
+  "image": "exhaling.png",
+  "cell": [
+    192,
+    208
+  ],
+  "duration_ms": 3200,
+  "loop": false,
+  "count": 65,
+  "frame_ms": 50.0
+}
