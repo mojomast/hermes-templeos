@@ -78,8 +78,6 @@ test("Terry dock is the second child of .tos-stage-row, to the right of the disp
     initial: {
       skipLoad: true,
       theme: "hermes",
-      companionSprite: "data:image/png;base64,AA==",
-      companionSpriteRow: 3,
       frameUrl: "data:image/png;base64,AA==",
       status: readyStatus(),
     },
@@ -97,9 +95,11 @@ test("Terry dock is the second child of .tos-stage-row, to the right of the disp
   assert.ok(dock.props.children.indexOf(bubble) < dock.props.children.length - 1);
 
   const terry = byTestId(node, "companion")[0];
-  assert.match(String(terry.props.className), /tos-companion-static/);
-  assert.match(terry.props.style.backgroundImage, /^url\("data:image\/png;base64,/);
-  assert.equal(terry.props.style.backgroundPosition, "0 37.5%");
+  assert.match(String(terry.props.className), /tos-companion/);
+  assert.equal(terry.props["data-costume"], "base");
+  const canvas = findAll(terry, (item) => item.type === "canvas");
+  assert.equal(canvas.length, 1);
+  assert.equal(canvas[0].props["data-companion-v4"], "1");
 });
 
 test("Hide Terry hides the dock and the toggle flips to Show Terry", () => {
@@ -160,7 +160,8 @@ test("P2 Hermes theme stays the default with a dark pane and reserved dock width
   assert.match(CSS, /\.tos-companion-bubble\s*\{[^}]*max-width:\s*min\(100%,\s*340px\)/s);
   assert.match(CSS, /\.tos-companion-bubble-slot\s*\{[^}]*position:\s*absolute/s);
   assert.match(CSS, /\.tos-companion-static\s*\{[^}]*background-size:\s*800% 900%/s);
-  assert.match(CSS, /\.tos-companion-canvas\s*\{[^}]*image-rendering:\s*pixelated/s);
+  assert.match(CSS, /\.tos-companion-canvas\s*\{[^}]*image-rendering:\s*auto/s);
+  assert.doesNotMatch(CSS, /\.tos-companion-canvas\s*\{[^}]*image-rendering:\s*pixelated/s);
 });
 
 test("built plugin carries the dock, bubble lane, and Hermes dark theme", () => {
@@ -173,10 +174,10 @@ test("built plugin carries the dock, bubble lane, and Hermes dark theme", () => 
   assert.match(PLUGIN, /tos-hermes-ink/);
 });
 
-test("overlay without a static sheet still renders the live canvas path", () => {
+test("overlay renders the live v4 canvas path", () => {
   resetFiber();
   const node = rerender(TerryCompanionOverlay, {
-    api: { companionAtlas: () => Promise.resolve({ ok: true }) },
+    api: { companionClip: () => Promise.resolve({ ok: true }) },
     animation: "idle",
     costume: "base",
     hidden: false,
@@ -184,5 +185,8 @@ test("overlay without a static sheet still renders the live canvas path", () => 
     speech: null,
   });
   assert.equal(node.props["data-testid"], "companion-dock");
-  assert.equal(byTestId(node, "companion-loading").length, 1);
+  const canvas = findAll(node, (item) => item.type === "canvas");
+  assert.equal(canvas.length, 1);
+  assert.equal(canvas[0].props["data-companion-v4"], "1");
+  assert.equal(byTestId(node, "companion-loading").length, 0);
 });

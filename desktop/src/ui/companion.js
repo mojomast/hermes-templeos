@@ -1,8 +1,9 @@
-/** Terry companion atlas + v2 clip overlay for the TempleOS pane.
+/** Terry companion v4 high-resolution rig for the TempleOS pane.
  *
  * Fan tribute to Terry A. Davis — not affiliated with TempleOS or his estate.
- * Loads the nine-row atlas and on-demand clip strips through ctx.rest.
- * Hide / costume preferences persist through the plugin backend (plugin data dir).
+ * Loads the trimmed 3.5x part bundle and baked clips through ctx.rest, then
+ * renders the rig with a smooth, devicePixelRatio-aware canvas. No 192x208
+ * atlas is upscaled here.
  *
  * Speech bubbles: call TerryCompanion.say(text) (also POST /companion {say})
  * to render a bubble to the left/above of Terry. Text is supplied by the
@@ -11,51 +12,39 @@
 
 import { useEffect, useRef, useState } from "react";
 import { jsx, jsxs } from "react/jsx-runtime";
-import { blobUrlFromBase64, revokeUrl } from "./api.js";
+import { renderScene, sampleClip, speechPlate } from "./terry_v4.js";
 
-const RICH_CLIPS = {
-  vm_booting: true,
-  celebrate_short: true,
-  greet: true,
-  nod: true,
-  stretch: true,
-  relieved: true,
-  typing: true,
-  talking: true,
-  smoking: true,
-  exhaling: true,
-  dance: true,
+const CLIP_NAMES = new Set([
+  "idle",
+  "typing",
+  "talking",
+  "vm_booting",
+  "celebrate_short",
+  "failed",
+  "greet",
+  "dance",
+  "smoking",
+  "exhaling",
+  "waiting",
+  "review",
+  "nod",
+  "relieved",
+  "stretch",
+]);
+
+const HOST_MAP = {
+  waving: "greet",
+  greet: "greet",
+  jumping: "celebrate_short",
 };
 
 const IDLE_VARIETY = ["stretch", "smoking", "exhaling"];
 const LONG_IDLE_MS = 22000;
 const IDLE_RETRY_MS = 14000;
 const IDLE_CHANCE = 0.4;
+const DANCE_CHANCE = 0.04;
 const TRIPLE_MS = 650;
-// atlas.png is 8x9 cells and .tos-companion-static draws it at 800% x 900%,
-// so one cell fills the box. A row is then a percentage of the surplus
-// height: row 0 = 0%, row 8 = 100%.
-const ROWS = 9;
-
-function rowFor(atlas, name) {
-  const rows = (atlas && atlas.rows) || [];
-  for (let i = 0; i < rows.length; i += 1) {
-    if (rows[i] && rows[i].name === name) return rows[i];
-  }
-  return rows[0] || null;
-}
-
-function clipFrames(clip) {
-  if (!clip) return [];
-  if (clip.frames && clip.frames.length) return clip.frames;
-  const count = Number(clip.count) || 0;
-  const cell = clip.cell || [192, 208];
-  const w = cell[0] || 192;
-  const h = cell[1] || 208;
-  const frames = [];
-  for (let i = 0; i < count; i += 1) frames.push({ x: i * w, y: 0, w: w, h: h });
-  return frames;
-}
+const GREET_MS = 2400;
 
 /** Public hook used by the pane and by other UI. Wired when the overlay mounts. */
 export const TerryCompanion = {
@@ -67,23 +56,30 @@ export const TerryCompanion = {
   _say: null,
 };
 
-/** Canvas sprite that plays atlas rows or v2 clip strips via requestAnimationFrame. */
-export function TerryCompanionOverlay({ api, animation, costume, hidden, enabled, speech, sprite, spriteRow }) {
+function hostClip(name) {
+  return HOST_MAP[name] || name || "idle";
+}
+
+/** Canvas rig that plays baked v4 clips via requestAnimationFrame. */
+export function TerryCompanionOverlay({ api, animation, costume, hidden, enabled, speech }) {
   const canvasRef = useRef(null);
   const [ready, setReady] = useState(false);
   const [error, setError] = useState("");
   const [bubble, setBubble] = useState((speech && speech.text) || "");
-  const packRef = useRef(null);
+  const bundleRef = useRef(null);
   const clipsRef = useRef(new Map());
   const animRef = useRef(animation || "idle");
   const localRef = useRef({ name: "", until: 0, follow: "" });
   const idleAtRef = useRef(0);
+  const greetedRef = useRef(false);
   const rafRef = useRef(0);
   const startRef = useRef(0);
   const lastNameRef = useRef("");
   const clicksRef = useRef([]);
+  const bubbleRef = useRef(bubble);
 
   const hostAnim = animation || "idle";
+  bubbleRef.current = bubble;
 
   useEffect(() => {
     const text = speech && speech.active !== false ? String((speech && speech.text) || "") : "";
@@ -104,99 +100,28 @@ export function TerryCompanionOverlay({ api, animation, costume, hidden, enabled
     };
   }, [api]);
 
-  useEffect(() => {
-    if (hidden || enabled === false) {
-      setReady(false);
-      return undefined;
-    }
-    let cancelled = false;
-    const chosen = costume || "base";
-    Promise.resolve(api.companionAtlas({ costume: chosen }))
-      .then((body) => {
-        if (cancelled) return;
-        if (!body || body.ok === false || !body.data || !body.atlas) {
-          setError((body && body.error) || "Could not load Terry atlas.");
-          setReady(false);
-          return;
-        }
-        const url = blobUrlFromBase64(body.data, body.mime || "image/png");
-        const image = new Image();
-        image.onload = () => {
-          if (cancelled) {
-            revokeUrl(url);
-            return;
-          }
-          const prev = packRef.current;
-          if (prev && prev.url) revokeUrl(prev.url);
-          packRef.current = { url, image, atlas: body.atlas, costume: body.costume || chosen };
-          setError("");
-          setReady(true);
-        };
-        image.onerror = () => {
-          revokeUrl(url);
-          if (!cancelled) {
-            setError("Terry atlas image failed to decode.");
-            setReady(false);
-          }
-        };
-        image.src = url;
-      })
-      .catch((err) => {
-        if (!cancelled) {
-          setError((err && err.message) || "Terry atlas request failed.");
-          setReady(false);
-        }
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [api, costume, hidden, enabled]);
-
-  useEffect(() => {
-    return () => {
-      if (rafRef.current) cancelAnimationFrame(rafRef.current);
-      const prev = packRef.current;
-      if (prev && prev.url) revokeUrl(prev.url);
-      packRef.current = null;
-      clipsRef.current.forEach((entry) => {
-        if (entry && entry.url) revokeUrl(entry.url);
-      });
-      clipsRef.current = new Map();
-    };
-  }, []);
-
   function ensureClip(name) {
-    if (!RICH_CLIPS[name]) return Promise.resolve(null);
-    const cached = clipsRef.current.get(name);
-    if (cached && cached.image) return Promise.resolve(cached);
+    const token = hostClip(name);
+    if (!CLIP_NAMES.has(token)) return Promise.resolve(null);
+    const cached = clipsRef.current.get(token);
+    if (cached && cached.clip) return Promise.resolve(cached.clip);
     if (cached && cached.pending) return cached.pending;
-    const pending = Promise.resolve(api.companionClip({ name }))
+    if (typeof api.companionClip !== "function") return Promise.resolve(null);
+    const pending = Promise.resolve(api.companionClip({ name: "v4:" + token }))
       .then((body) => {
-        if (!body || body.ok === false || !body.data || !body.clip) {
-          clipsRef.current.delete(name);
+        if (!body || body.ok === false || !body.clip) {
+          clipsRef.current.delete(token);
           return null;
         }
-        return new Promise((resolve) => {
-          const url = blobUrlFromBase64(body.data, body.mime || "image/png");
-          const image = new Image();
-          image.onload = () => {
-            const entry = { url, image, clip: body.clip, name };
-            clipsRef.current.set(name, entry);
-            resolve(entry);
-          };
-          image.onerror = () => {
-            revokeUrl(url);
-            clipsRef.current.delete(name);
-            resolve(null);
-          };
-          image.src = url;
-        });
+        const entry = { clip: body.clip, name: token };
+        clipsRef.current.set(token, entry);
+        return entry.clip;
       })
       .catch(() => {
-        clipsRef.current.delete(name);
+        clipsRef.current.delete(token);
         return null;
       });
-    clipsRef.current.set(name, { pending });
+    clipsRef.current.set(token, { pending });
     return pending;
   }
 
@@ -223,6 +148,94 @@ export function TerryCompanionOverlay({ api, animation, costume, hidden, enabled
   }
 
   useEffect(() => {
+    if (hidden || enabled === false) {
+      setReady(false);
+      return undefined;
+    }
+    if (bundleRef.current) {
+      setReady(true);
+      return undefined;
+    }
+    if (typeof api.companionClip !== "function") {
+      setError("Terry v4 is not available in this host.");
+      setReady(false);
+      return undefined;
+    }
+    let cancelled = false;
+    Promise.resolve(api.companionClip({ name: "v4:bundle" }))
+      .then((body) => {
+        if (cancelled) return null;
+        if (!body || body.ok === false || !body.registry) {
+          setError((body && body.error) || "Could not load the Terry v4 rig.");
+          setReady(false);
+          return null;
+        }
+        const images = new Map();
+        const entries = Object.entries(body.parts || {});
+        return Promise.all(
+          entries.map(
+            ([path, data]) =>
+              new Promise((resolve) => {
+                if (typeof Image === "undefined") {
+                  resolve();
+                  return;
+                }
+                const image = new Image();
+                image.onload = () => {
+                  images.set(path, image);
+                  resolve();
+                };
+                image.onerror = () => resolve();
+                image.src = "data:image/png;base64," + data;
+              })
+          )
+        ).then(() => {
+          if (cancelled) return;
+          bundleRef.current = {
+            registry: body.registry,
+            speech: body.speech || { events: [], duration_ms: 2600 },
+            smoke: body.smoke || {},
+            costumes: body.costumes || {},
+            images,
+          };
+          setError("");
+          setReady(true);
+          ensureClip("idle");
+          ensureClip(hostClip(hostAnim));
+        });
+      })
+      .catch((err) => {
+        if (!cancelled) {
+          setError((err && err.message) || "Terry v4 request failed.");
+          setReady(false);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [api, hidden, enabled]);
+
+  useEffect(() => {
+    if (ready) ensureClip(hostClip(hostAnim));
+  }, [ready, hostAnim]);
+
+  useEffect(() => {
+    if (!ready || hidden || enabled === false) return undefined;
+    if (!greetedRef.current && hostClip(hostAnim) === "idle") {
+      greetedRef.current = true;
+      playLocal("greet", GREET_MS, "");
+    }
+    return undefined;
+  }, [ready, hostAnim, hidden, enabled]);
+
+  useEffect(() => {
+    return () => {
+      if (rafRef.current) cancelAnimationFrame(rafRef.current);
+      rafRef.current = 0;
+    };
+  }, []);
+
+  useEffect(() => {
     if (!ready || hidden || enabled === false) {
       if (rafRef.current) cancelAnimationFrame(rafRef.current);
       rafRef.current = 0;
@@ -230,45 +243,51 @@ export function TerryCompanionOverlay({ api, animation, costume, hidden, enabled
     }
     const canvas = canvasRef.current;
     if (!canvas) return undefined;
-    const ctx = canvas.getContext("2d");
-    if (!ctx) return undefined;
     startRef.current = performance.now();
     lastNameRef.current = "";
     idleAtRef.current = performance.now();
 
     const tick = (now) => {
+      const bundle = bundleRef.current;
+      if (!bundle) {
+        rafRef.current = requestAnimationFrame(tick);
+        return;
+      }
       const local = localRef.current;
       if (local.name && now >= local.until) {
         const follow = local.follow;
         localRef.current = { name: "", until: 0, follow: "" };
-        if (follow) {
-          const nextDur = follow === "exhaling" ? 3200 : 1500;
-          playLocal(follow, nextDur, "");
-        }
+        if (follow) playLocal(follow, follow === "exhaling" ? 3200 : 1500, "");
       }
       const busyHost = hostAnim !== "idle";
       if (busyHost && localRef.current.name && localRef.current.name !== "dance") {
         localRef.current = { name: "", until: 0, follow: "" };
       }
-      // Dance yields if a real host state takes over (tool, error, boot…).
       if (busyHost && localRef.current.name === "dance" && hostAnim !== "idle") {
         localRef.current = { name: "", until: 0, follow: "" };
       }
 
-      let name = (localRef.current.name && now < localRef.current.until && localRef.current.name) || hostAnim || "idle";
-      animRef.current = name;
+      let name =
+        (localRef.current.name && now < localRef.current.until && localRef.current.name) ||
+        hostClip(hostAnim) ||
+        "idle";
+      // A live bubble speaks with the discrete whole-head plates.
+      if (bubbleRef.current) name = "talking";
 
-      if (name === "idle") {
+      if (name === "idle" && !localRef.current.name) {
         if (!idleAtRef.current) idleAtRef.current = now;
-        if (now - idleAtRef.current >= LONG_IDLE_MS && !localRef.current.name) {
+        if (now - idleAtRef.current >= LONG_IDLE_MS) {
           idleAtRef.current = now + IDLE_RETRY_MS;
-          if (Math.random() < IDLE_CHANCE) {
+          const roll = Math.random();
+          if (roll < DANCE_CHANCE) {
+            playLocal("dance", 7200, "");
+            name = "dance";
+          } else if (roll < DANCE_CHANCE + IDLE_CHANCE) {
             const pick = IDLE_VARIETY[Math.floor(Math.random() * IDLE_VARIETY.length)];
             const dur = pick === "stretch" ? 3400 : pick === "smoking" ? 5600 : 3200;
             const follow = pick === "smoking" && Math.random() < 0.55 ? "exhaling" : "";
             playLocal(pick, dur, follow);
             name = pick;
-            animRef.current = name;
           }
         }
       } else if (!localRef.current.name) {
@@ -278,40 +297,26 @@ export function TerryCompanionOverlay({ api, animation, costume, hidden, enabled
       if (name !== lastNameRef.current) {
         startRef.current = now;
         lastNameRef.current = name;
-        if (RICH_CLIPS[name]) ensureClip(name);
+        ensureClip(name);
       }
+      animRef.current = name;
 
-      const pack = packRef.current;
-      const clipEntry = clipsRef.current.get(name);
-      let image = null;
-      let frames = [];
-      let frameMs = 183;
-      let loop = true;
-      if (clipEntry && clipEntry.image && clipEntry.clip) {
-        image = clipEntry.image;
-        frames = clipFrames(clipEntry.clip);
-        frameMs = Number(clipEntry.clip.frame_ms) || 50;
-        loop = clipEntry.clip.loop !== false;
-      } else if (pack && pack.image && pack.atlas) {
-        const row = rowFor(pack.atlas, name);
-        image = pack.image;
-        frames = (row && row.frames) || [];
-        frameMs = (row && Number(row.frame_ms)) || Number(pack.atlas.loop_ms) / Math.max(1, frames.length) || 183;
-        loop = true;
-      }
-
-      const cw = 192;
-      const ch = 208;
-      if (canvas.width !== cw) canvas.width = cw;
-      if (canvas.height !== ch) canvas.height = ch;
-      ctx.clearRect(0, 0, cw, ch);
-      if (image && frames.length) {
+      let clip = clipsRef.current.get(name) && clipsRef.current.get(name).clip;
+      if (!clip) clip = clipsRef.current.get("idle") && clipsRef.current.get("idle").clip;
+      if (clip) {
         const elapsed = Math.max(0, now - startRef.current);
-        let index;
-        if (loop) index = Math.floor(elapsed / frameMs) % frames.length;
-        else index = Math.min(frames.length - 1, Math.floor(elapsed / frameMs));
-        const frame = frames[index];
-        ctx.drawImage(image, frame.x, frame.y, frame.w, frame.h, 0, 0, cw, ch);
+        const frame = sampleClip(clip, elapsed);
+        if (frame) {
+          if (name === "talking") {
+            const duration = Number(bundle.speech.duration_ms) || 2600;
+            frame.variants.head_base = speechPlate(
+              bundle.speech.events,
+              elapsed % duration,
+              frame.variants.head_base
+            );
+          }
+          renderScene(canvas, bundle, bundle.images, frame, costume || "base", { time: elapsed, smoke: true });
+        }
       }
       rafRef.current = requestAnimationFrame(tick);
     };
@@ -320,20 +325,10 @@ export function TerryCompanionOverlay({ api, animation, costume, hidden, enabled
       if (rafRef.current) cancelAnimationFrame(rafRef.current);
       rafRef.current = 0;
     };
-  }, [ready, hidden, enabled, hostAnim, api]);
+  }, [ready, hidden, enabled, hostAnim, costume]);
 
   if (enabled === false) return null;
   if (hidden) return null;
-
-  const staticSheet = typeof sprite === "string" && sprite ? sprite : "";
-  const row = Math.max(0, Math.min(ROWS - 1, Number(spriteRow) || 0));
-  const rowPct = (row / (ROWS - 1)) * 100;
-  const spriteStyle = staticSheet
-    ? {
-        backgroundImage: `url("${staticSheet}")`,
-        backgroundPosition: `0 ${rowPct}%`,
-      }
-    : undefined;
 
   return jsxs("aside", {
     className: "tos-companion-dock",
@@ -349,28 +344,31 @@ export function TerryCompanionOverlay({ api, animation, costume, hidden, enabled
           })
         : jsx("div", { className: "tos-companion-bubble-slot", "aria-hidden": "true" }),
       jsxs("div", {
-        className: "tos-companion" + (staticSheet ? " tos-companion-static" : ""),
+        className: "tos-companion",
         "data-testid": "companion",
         "data-animation": hostAnim || "idle",
         "data-costume": costume || "base",
         title: "Terry companion — fan tribute to Terry A. Davis. Triple-click to dance.",
-        style: spriteStyle,
         onClick: onTerryClick,
-        children: staticSheet
-          ? null
-          : ready
-            ? jsx("canvas", {
-                ref: canvasRef,
-                className: "tos-companion-canvas",
-                width: 192,
-                height: 208,
-                "aria-hidden": "true",
-              })
-            : jsx("div", {
+        children: [
+          jsx("canvas", {
+            ref: canvasRef,
+            className: "tos-companion-canvas",
+            "data-companion-v4": "1",
+            "data-animation": hostAnim || "idle",
+            "data-costume": costume || "base",
+            width: 192,
+            height: 208,
+            "aria-hidden": "true",
+          }),
+          error
+            ? jsx("div", {
                 className: "tos-companion-loading",
                 "data-testid": "companion-loading",
-                children: error || "…",
-              }),
+                children: error,
+              })
+            : null,
+        ],
       }),
     ],
   });

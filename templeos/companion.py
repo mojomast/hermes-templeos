@@ -14,6 +14,7 @@ from __future__ import annotations
 import base64
 import json
 import os
+from functools import lru_cache
 import threading
 import time
 from pathlib import Path
@@ -21,6 +22,7 @@ from typing import Any, Callable
 
 PLUGIN_ROOT = Path(__file__).resolve().parents[1]
 ASSETS_ROOT = PLUGIN_ROOT / "desktop" / "assets" / "companion" / "terry"
+V4_ROOT = ASSETS_ROOT / "v4"
 
 ENV_COMPANION = "TEMPLEOS_COMPANION"
 COSTUMES = ("base", "cowboy", "wizard", "chef")
@@ -553,6 +555,13 @@ def clip_payload(name: str) -> dict[str, Any]:
             "fix": "Set TEMPLEOS_COMPANION=terry or companion: terry to enable.",
         }
     token = str(name or "").strip().lower()
+    # The v4 rig reuses the existing clip route so the pane needs no new
+    # endpoint: v4:bundle returns the part/registry envelope, and
+    # v4:<preset> returns one baked high-res clip.
+    if token in {"v4", "v4:bundle", "v4-bundle"}:
+        return v4_bundle_payload()
+    if token.startswith("v4:"):
+        return v4_preset_payload(token[3:])
     if token not in RICH_CLIPS:
         return {
             "ok": False,
@@ -593,6 +602,146 @@ def clip_payload(name: str) -> dict[str, Any]:
         "clip": meta,
         "bytes": png_path.stat().st_size,
         "costume": "base",
+    }
+
+
+V4_COSTUME_VARIANTS = {
+    "base": {},
+    "cowboy": {"cap": "cowboy", "torso_overlay": "cowboy_vest"},
+    "wizard": {"cap": "wizard", "torso_overlay": "wizard_robe"},
+    "chef": {"cap": "chef", "torso_overlay": "chef_apron"},
+}
+
+
+def _v4_path(rel: str) -> Path | None:
+    token = str(rel or "").replace("\\", "/").strip()
+    if not token or token.startswith("/") or ".." in token.split("/"):
+        return None
+    try:
+        path = (V4_ROOT / token).resolve()
+        path.relative_to(V4_ROOT.resolve())
+    except (OSError, ValueError):
+        return None
+    return path
+
+
+def _v4_json(name: str) -> dict[str, Any]:
+    path = _v4_path(name)
+    if path is None or not path.is_file():
+        raise FileNotFoundError(name)
+    data = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(data, dict):
+        raise ValueError(f"{name} is not a JSON object")
+    return data
+
+
+@lru_cache(maxsize=1)
+def _v4_png_payloads() -> dict[str, str]:
+    payloads: dict[str, str] = {}
+    for folder in (V4_ROOT / "parts", V4_ROOT / "smoke" / "assets"):
+        if not folder.is_dir():
+            continue
+        for path in sorted(folder.rglob("*.png")):
+            rel = path.relative_to(V4_ROOT).as_posix()
+            payloads[rel] = base64.b64encode(path.read_bytes()).decode("ascii")
+    return payloads
+
+
+@lru_cache(maxsize=1)
+def _v4_baked() -> dict[str, Any]:
+    return _v4_json("baked-presets.json")
+
+
+def clear_v4_cache() -> None:
+    _v4_png_payloads.cache_clear()
+    _v4_baked.cache_clear()
+
+
+def v4_bundle_payload() -> dict[str, Any]:
+    """Registry, rig, speech and base64 part images for the high-res rig."""
+    if not companion_enabled():
+        return {
+            "ok": False,
+            "error": "Companion is off.",
+            "code": "companion_off",
+            "fix": "Set TEMPLEOS_COMPANION=terry or companion: terry to enable.",
+        }
+    if not V4_ROOT.is_dir():
+        return {
+            "ok": False,
+            "error": "Missing Terry v4 asset bundle.",
+            "code": "companion_asset_missing",
+            "fix": "Reinstall the plugin so desktop/assets/companion/terry/v4 is present.",
+        }
+    try:
+        registry = _v4_json("parts.json")
+        rig = _v4_json("rig.json")
+        speech = _v4_json("speech.json")
+        smoke = _v4_json("smoke/smoke.json")
+        parts = _v4_png_payloads()
+    except Exception as exc:
+        return {
+            "ok": False,
+            "error": str(exc) or "Terry v4 bundle is unreadable.",
+            "code": "companion_asset_missing",
+            "fix": "Reinstall the plugin so desktop/assets/companion/terry/v4 is complete.",
+        }
+    return {
+        "ok": True,
+        "error": None,
+        "code": None,
+        "fix": None,
+        "registry": registry,
+        "rig": rig,
+        "speech": speech,
+        "smoke": smoke,
+        "costumes": V4_COSTUME_VARIANTS,
+        "parts": parts,
+        "bytes": sum(len(value) for value in parts.values()),
+    }
+
+
+def v4_preset_payload(name: str) -> dict[str, Any]:
+    """One baked clip from baked-presets.json (idle, typing, talking, ...)."""
+    if not companion_enabled():
+        return {
+            "ok": False,
+            "error": "Companion is off.",
+            "code": "companion_off",
+            "fix": "Set TEMPLEOS_COMPANION=terry or companion: terry to enable.",
+        }
+    token = str(name or "").strip().lower()
+    try:
+        baked = _v4_baked()
+    except Exception:
+        return {
+            "ok": False,
+            "error": "Missing Terry v4 baked presets.",
+            "code": "companion_asset_missing",
+            "fix": "Reinstall the plugin so desktop/assets/companion/terry/v4 is present.",
+        }
+    if token not in baked:
+        return {
+            "ok": False,
+            "error": f"Unknown companion preset {name!r}.",
+            "code": "invalid_args",
+            "fix": "Use one of: " + ", ".join(sorted(baked)) + ".",
+        }
+    clip = baked[token]
+    if not isinstance(clip, dict) or not isinstance(clip.get("frames"), list):
+        return {
+            "ok": False,
+            "error": f"Companion preset {token!r} is malformed.",
+            "code": "companion_asset_missing",
+            "fix": "Reinstall the plugin so desktop/assets/companion/terry/v4 is complete.",
+        }
+    return {
+        "ok": True,
+        "error": None,
+        "code": None,
+        "fix": None,
+        "name": token,
+        "clip": clip,
     }
 
 
@@ -673,10 +822,9 @@ def _make_hooks() -> dict[str, Callable[..., Any]]:
             _STATE["tool_inflight"] = max(0, int(_STATE.get("tool_inflight") or 0) - 1)
         if _tool_ok(kwargs):
             with _LOCK:
-                flip = not bool(_STATE.get("success_flip"))
-                _STATE["success_flip"] = flip
+                _STATE["success_flip"] = not bool(_STATE.get("success_flip"))
                 _STATE["recovering"] = False
-            _pulse(ANIM_CELEBRATE if flip else ANIM_JUMPING, reason="tool_ok")
+            _pulse(ANIM_CELEBRATE, reason="tool_ok")
         else:
             with _LOCK:
                 _STATE["recovering"] = True
@@ -725,9 +873,8 @@ def _make_hooks() -> dict[str, Callable[..., Any]]:
         with _LOCK:
             _STATE["tool_inflight"] = max(0, int(_STATE.get("tool_inflight") or 0) - 1)
         with _LOCK:
-            flip = not bool(_STATE.get("success_flip"))
-            _STATE["success_flip"] = flip
-        _pulse(ANIM_CELEBRATE if flip else ANIM_JUMPING, reason="subagent_done")
+            _STATE["success_flip"] = not bool(_STATE.get("success_flip"))
+        _pulse(ANIM_CELEBRATE, reason="subagent_done")
 
     return {
         "on_session_start": on_session_start,

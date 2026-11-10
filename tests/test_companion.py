@@ -48,10 +48,10 @@ def test_state_mapping_tool_and_stream():
     companion.reset_state()
     hooks["pre_tool_call"]()
     hooks["post_tool_call"](ok=True)
-    # Second success alternates onto the atlas jump row.
+    # Every success uses the v4 celebrate_short clip.
     hooks["pre_tool_call"]()
     hooks["post_tool_call"](ok=True)
-    assert companion.resolve_animation() == "jumping"
+    assert companion.resolve_animation() == "celebrate_short"
     companion.reset_state()
     hooks["pre_tool_call"]()
     hooks["post_tool_call"](ok=False)
@@ -157,6 +157,52 @@ def test_clip_respects_off_switch(monkeypatch):
     monkeypatch.setenv("TEMPLEOS_COMPANION", "off")
     assert companion.clips_manifest()["code"] == "companion_off"
     assert companion.clip_payload("dance")["code"] == "companion_off"
+
+
+def test_v4_bundle_has_high_res_parts_and_no_omitted_stubs():
+    body = companion.v4_bundle_payload()
+    assert body["ok"] is True
+    assert body["registry"]["cell"] == [192, 208]
+    assert body["rig"]["root_scale"] == 0.9
+    assert "cowboy" in body["costumes"]
+    assert "talk_a" in body["registry"]["slots"]["head_base"]["variants"]
+    assert "parts/head_base/talk_a.png" in body["parts"]
+    assert "parts/torso_overlay/cowboy_vest.png" in body["parts"]
+    # The tiny face stubs were not rebuilt from masters.
+    assert "parts/eye_l/open.png" not in body["parts"]
+    assert "parts/mouth/neutral.png" not in body["parts"]
+    assert body["bytes"] < 25 * 1024 * 1024
+    raw = base64.b64decode(body["parts"]["parts/head_base/talk_a.png"])
+    assert raw[:8] == b"\x89PNG\r\n\x1a\n"
+
+
+def test_v4_presets_include_the_event_map():
+    for name in ("idle", "typing", "talking", "vm_booting", "celebrate_short", "failed", "greet", "dance", "smoking"):
+        body = companion.v4_preset_payload(name)
+        assert body["ok"] is True, name
+        assert body["name"] == name
+        assert body["clip"]["frames"], name
+        assert body["clip"]["duration_ms"] > 0
+    assert companion.v4_preset_payload("../atlas")["code"] == "invalid_args"
+
+
+def test_v4_reuses_the_clip_route_without_new_endpoints():
+    bundle = companion.clip_payload("v4:bundle")
+    assert bundle["ok"] is True
+    assert "parts/head_base/neutral.png" in bundle["parts"]
+    clip = companion.clip_payload("v4:talking")
+    assert clip["ok"] is True
+    assert clip["name"] == "talking"
+    assert len(clip["clip"]["frames"]) == 156
+    assert companion.clip_payload("v4:not-a-clip")["code"] == "invalid_args"
+
+
+def test_v4_payloads_respect_off_switch(monkeypatch):
+    monkeypatch.setenv("TEMPLEOS_COMPANION", "off")
+    assert companion.v4_bundle_payload()["code"] == "companion_off"
+    assert companion.v4_preset_payload("idle")["code"] == "companion_off"
+    assert companion.clip_payload("v4:bundle")["code"] == "companion_off"
+    assert companion.clip_payload("v4:idle")["code"] == "companion_off"
 
 
 def test_config_companion_off_and_hide_toggle(monkeypatch, tmp_path):
