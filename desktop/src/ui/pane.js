@@ -2,6 +2,7 @@ import { jsx, jsxs } from "react/jsx-runtime";
 import { useEffect, useRef, useState } from "react";
 import { createApi, blobUrlFromBase64, revokeUrl, errorText, isAbortError } from "./api.js";
 import { getHostTransport } from "./host.js";
+import { HERMES_ASSETS, nextTheme } from "./theme.js";
 import {
   GOLDEN_SNAPSHOT,
   accelLabel,
@@ -22,6 +23,18 @@ import {
 
 function documentIsHidden() {
   return typeof document !== "undefined" && document.visibilityState === "hidden";
+}
+
+function themeStyle(theme) {
+  if (theme !== "hermes") return undefined;
+  return {
+    "--tos-hermes-header": `url("${HERMES_ASSETS.paneHeader}")`,
+    "--tos-hermes-wallpaper": `url("${HERMES_ASSETS.wallpaper}")`,
+    "--tos-hermes-mark": `url("${HERMES_ASSETS.mark}")`,
+    "--tos-hermes-chat": `url("${HERMES_ASSETS.iconChat}")`,
+    "--tos-hermes-nous": `url("${HERMES_ASSETS.iconNous}")`,
+    "--tos-hermes-capy": `url("${HERMES_ASSETS.iconCapy}")`,
+  };
 }
 
 function applyStatus(body, setStatus) {
@@ -63,6 +76,7 @@ export function TempleOSPane({ transport, initial } = {}) {
   const [focused, setFocused] = useState(!!(initial && initial.focused));
   const [busy, setBusy] = useState((initial && initial.busy) || "");
   const [hidden, setHidden] = useState(!!(initial && initial.hidden));
+  const [theme, setTheme] = useState((initial && initial.theme) || "hermes");
   const [unchanged, setUnchanged] = useState(!!(initial && initial.unchanged));
   const [viewport] = useState((initial && initial.viewport) || { width: 1280, height: 960 });
   const prevUrl = useRef((initial && initial.frameUrl) || "");
@@ -267,6 +281,8 @@ export function TempleOSPane({ transport, initial } = {}) {
     "data-testid": "pane",
     "data-mode": status.mode,
     "data-running": running ? "1" : "0",
+    "data-theme": theme,
+    style: themeStyle(theme),
     children: [
       jsxs("header", {
         className: "tos-top",
@@ -278,7 +294,7 @@ export function TempleOSPane({ transport, initial } = {}) {
               jsxs("div", {
                 children: [
                   jsx("strong", { children: "TempleOS" }),
-                  jsx("em", { children: "Shared guest" }),
+                  jsx("em", { children: theme === "hermes" ? "Temple of Hermes" : "Shared guest" }),
                 ],
               }),
             ],
@@ -292,6 +308,15 @@ export function TempleOSPane({ transport, initial } = {}) {
             "data-mode": status.mode,
             "data-paused": status.agent_paused ? "1" : "0",
             children: chip,
+          }),
+          jsx("button", {
+            type: "button",
+            className: "tos-btn tos-theme",
+            "data-testid": "theme-toggle",
+            "aria-label": "Switch pane theme",
+            title: theme === "hermes" ? "Switch to VGA chrome" : "Switch to Temple of Hermes theme",
+            onClick: () => setTheme(nextTheme(theme)),
+            children: theme === "hermes" ? "Temple" : "VGA",
           }),
         ],
       }),
