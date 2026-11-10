@@ -32,6 +32,10 @@ const LONG_IDLE_MS = 22000;
 const IDLE_RETRY_MS = 14000;
 const IDLE_CHANCE = 0.4;
 const TRIPLE_MS = 650;
+// atlas.png is 8x9 cells and .tos-companion-static draws it at 800% x 900%,
+// so one cell fills the box. A row is then a percentage of the surplus
+// height: row 0 = 0%, row 8 = 100%.
+const ROWS = 9;
 
 function rowFor(atlas, name) {
   const rows = (atlas && atlas.rows) || [];
@@ -322,11 +326,12 @@ export function TerryCompanionOverlay({ api, animation, costume, hidden, enabled
   if (hidden) return null;
 
   const staticSheet = typeof sprite === "string" && sprite ? sprite : "";
-  const row = Math.max(0, Number(spriteRow) || 0);
+  const row = Math.max(0, Math.min(ROWS - 1, Number(spriteRow) || 0));
+  const rowPct = (row / (ROWS - 1)) * 100;
   const spriteStyle = staticSheet
     ? {
         backgroundImage: `url("${staticSheet}")`,
-        backgroundPosition: `0 -${row * 104}px`,
+        backgroundPosition: `0 ${rowPct}%`,
       }
     : undefined;
 

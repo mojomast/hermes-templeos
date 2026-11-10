@@ -358,6 +358,30 @@ const shots = {
       log,
     }),
   },
+  "terry-big.png": {
+    size: "1920,1240",
+    html: render({
+      theme: "hermes",
+      scale: 2,
+      viewport: { width: 1920, height: 1240 },
+      frameUrl: tinkeros,
+      companionSprite: terryAtlas,
+      companionSpriteRow: 3,
+      log,
+      status: {
+        ...ready,
+        agent_busy: true,
+        companion: {
+          enabled: true,
+          hidden: false,
+          character: "terry",
+          animation: "typing",
+          costume: "base",
+          speech: { active: true, text: "Hello from Hermes" },
+        },
+      },
+    }),
+  },
   "terry-hermes-hidden.png": {
     size: "1920,1240",
     html: render({

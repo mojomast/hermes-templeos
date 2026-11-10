@@ -280,12 +280,11 @@ export function TempleOSPane({ transport, initial } = {}) {
   const size = guestSize(status.flavor, status);
   const forced = initial && initial.scale;
   const companionVisible = !companionHidden && !(status.companion && status.companion.enabled === false);
-  // Reserve the dock column (and its speech-bubble lane) plus the log column
-  // before picking an integer scale, so Terry and the bubble never push the
-  // guest display or the log off-screen.
-  const dockPx = companionVisible ? 220 : 0;
-  const logPx = 272;
-  const widthRoom = (viewport.width || 0) - 28 - dockPx - logPx;
+  // The wide right rail holds the Agent Log above the huge Terry dock, so
+  // reserve that single rail (not a separate dock + log pair) before picking
+  // an integer scale. This keeps the whole guest display on screen.
+  const railPx = companionVisible ? 600 : 320;
+  const widthRoom = (viewport.width || 0) - 28 - railPx;
   const scaled = forced
     ? { scale: Number(forced), width: size.width * Number(forced), height: size.height * Number(forced) }
     : integerScale(Math.max(size.width, widthRoom), Math.max(size.height, (viewport.height || 0) - 200), size.width, size.height);
