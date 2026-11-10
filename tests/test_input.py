@@ -33,17 +33,28 @@ def _reset_runtime(tos_home):
     reset_arbiter()
 
 
-def _bind(tos_home, *, flavor: str = "tinkeros", serial=None, abs_mouse: bool = True, last_pointer=None):
+def _bind(
+    tos_home,
+    *,
+    flavor: str = "tinkeros",
+    serial=None,
+    abs_mouse: bool = True,
+    last_pointer=None,
+    type_delay_s: float = 0,
+    accel: str | None = None,
+):
     qmp = FakeQMP(abs_mouse=abs_mouse)
     qmp.connect(tos_home / "qmp.sock")
     qmp.framebuffer = MIN_PNG
+    if accel:
+        qmp.accel = accel
     bind(
         qmp=qmp,
         serial=serial,
         flavor=flavor,
         state_dir=tos_home,
         last_pointer=last_pointer,
-        type_delay_s=0,
+        type_delay_s=type_delay_s,
     )
     return qmp
 
@@ -107,6 +118,25 @@ def test_shift_chords_send_down_then_up_events(tos_home):
     assert [ev["data"]["key"]["data"] for ev in ups] == ["apostrophe", "shift"]
     assert all(not ev["data"]["down"] for ev in ups)
     assert qmp.keys[0] == ["shift", "apostrophe"]
+
+
+def test_tcg_shift_chord_keeps_the_p4_sequential_down_up_path(tos_home):
+    # P4 regression guard: under TCG a shifted chord is pressed down in order,
+    # held, then released in reverse. Do not fold it back into one batch.
+    qmp = _bind(tos_home, type_delay_s=0.09, accel="tcg")
+    result = type_text('"', delay_s=0.12)
+    assert result["ok"] is True
+    key_batches = [batch for batch in qmp.events if batch and batch[0].get("type") == "key"]
+    first_two = key_batches[:2]
+    assert [batch[0]["data"]["key"]["data"] for batch in first_two] == ["shift", "apostrophe"]
+    assert all(batch[0]["data"]["down"] for batch in first_two)
+    up_codes = [
+        ev["data"]["key"]["data"]
+        for batch in key_batches[2:]
+        for ev in batch
+        if not ev["data"]["down"]
+    ]
+    assert up_codes[:2] == ["apostrophe", "shift"]
 
 
 def test_send_keys_parses_combos_and_esc(tos_home):
@@ -212,6 +242,60 @@ def test_holyc_auto_prefers_type_until_guest_serial_ready(tos_home):
     huge = holyc("x" * (HOLYC_MAX_BYTES + 1))
     assert huge["ok"] is False
     assert huge["code"] == "invalid_args"
+
+
+def test_holyc_tcg_uses_slow_per_key_typing_by_default(tos_home):
+    # P5 evidence: default-speed HolyC typing garbled under TCG. op=holyc must
+    # select the P4 per-key route with a slower inter-key gap, not a batched
+    # send-key chord, without any monkeypatch of the input helpers.
+    qmp = _bind(tos_home, type_delay_s=0.09, accel="tcg")
+    result = holyc('"Hi";', via="type")
+    assert result["ok"] is True
+    assert result["via"] == "type"
+    assert result["accel"] == "tcg"
+    assert result["per_key"] is True
+    assert result["delay_s"] >= 0.12
+    # The slow path sends each qcode down as its own event, so the recording
+    # is flat shift/apostrophe/... rather than a batched chord.
+    flat = [code for chord in qmp.keys for code in chord]
+    assert flat == [
+        "shift", "apostrophe",
+        "shift", "h",
+        "i",
+        "shift", "apostrophe",
+        "semicolon",
+        "ret",
+    ]
+    # Every key-down uses its own input-send-event: the slow TCG path.
+    key_batches = [batch for batch in qmp.events if batch and batch[0].get("type") == "key"]
+    assert key_batches
+    down_batches = [
+        batch
+        for batch in key_batches
+        if any(ev["data"]["down"] for ev in batch)
+    ]
+    assert len(down_batches) == len(flat)
+    assert all(len(batch) == 1 for batch in down_batches)
+
+
+def test_holyc_kvm_keeps_the_fast_typing_path(tos_home):
+    qmp = _bind(tos_home, type_delay_s=0.09, accel="kvm")
+    result = holyc('"Hi";', via="type")
+    assert result["ok"] is True
+    assert result["accel"] == "kvm"
+    assert result["per_key"] is False
+    assert result["delay_s"] <= 0.05
+    # KVM keeps batched chords and ends with the newline's ret key.
+    assert qmp.keys[0] == ["shift", "apostrophe"]
+    assert qmp.keys[-1] == ["ret"]
+
+
+def test_holyc_zero_delay_unit_seam_stays_instant(tos_home):
+    _bind(tos_home, type_delay_s=0, accel="tcg")
+    result = holyc("Dir;", via="type")
+    assert result["ok"] is True
+    assert result["delay_s"] == 0.0
+    assert result["per_key"] is False
 
 
 def test_input_goes_through_the_arbiter_queue(tos_home):

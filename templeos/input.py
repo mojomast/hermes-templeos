@@ -41,6 +41,10 @@ CLICK_VIA = ("auto", "vmmouse", "msset", "relative")
 HOLYC_VIA = ("auto", "serial", "type")
 DEFAULT_DELAY_S = 0.09
 DEFAULT_HOLD_MS = 80
+# P5 evidence: default-speed HolyC typing garbled under TCG. op=holyc keeps the
+# proven P4 per-key route and adds a slower inter-key gap unless the accel is KVM.
+TCG_HOLYC_DELAY_S = 0.12
+TCG_HOLYC_DELAY_MAX_S = 0.30
 CHUNK_CHARS = 32
 ABS_MAX = 32767
 # Bake-off: a click on 'Cmd Line' at this pixel opened Command Line Overview.
@@ -642,15 +646,30 @@ def holyc(source: str, *, via: str = "auto") -> dict[str, Any]:
                 except Exception as exc:
                     return _fail(str(exc) or "Serial write failed.", Code.SERIAL_NOT_READY, via="serial")
                 return _ok(via="serial", bytes=len(payload.encode("utf-8")))
-            # Live guests need a short inter-key delay so Shift chords stick under TCG.
-            # Unit tests bind type_delay_s=0 and stay instantaneous.
+            # P5: default-speed HolyC typing garbled under TCG ("6*7;" -> "67;",
+            # Shift-quoted text reordered). P4 already sends TCG keys one at a
+            # time; give the slow guest a wider inter-key gap as well. KVM and
+            # the type_delay_s=0 unit seam keep their existing speed.
+            accel = _accel(rt.qmp)
             if not rt.type_delay_s:
                 delay = 0.0
-            else:
+            elif accel == "kvm":
                 delay = max(0.02, min(float(rt.type_delay_s), 0.05))
+            else:
+                delay = min(
+                    TCG_HOLYC_DELAY_MAX_S,
+                    max(TCG_HOLYC_DELAY_S, float(rt.type_delay_s)),
+                )
             typed = type_text(payload, delay_s=delay)
             if typed.get("ok") is False:
                 return typed
-            return _ok(via="type", typed=typed.get("typed"), bytes=len(payload.encode("utf-8")))
+            return _ok(
+                via="type",
+                typed=typed.get("typed"),
+                bytes=len(payload.encode("utf-8")),
+                delay_s=delay,
+                accel=accel or "unknown",
+                per_key=bool(delay and accel != "kvm"),
+            )
     except ScreenError as exc:
         return exc.envelope

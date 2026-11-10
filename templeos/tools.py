@@ -11,6 +11,7 @@ from __future__ import annotations
 import inspect
 import json
 import re
+import time
 from typing import Any, Callable
 
 from templeos import PLUGIN_ID
@@ -26,10 +27,26 @@ TOOL_NAMES = (
     "templeos_files",
 )
 
-VM_OPS = ("start", "stop", "reset", "snapshot", "restore", "status", "doctor")
-SCREEN_OPS = ("look", "read_text", "wait_idle", "hash")
+VM_OPS = ("start", "stop", "reset", "snapshot", "restore", "status", "doctor", "modem")
+SCREEN_OPS = ("look", "read_text", "wait_idle", "hash", "lore")
 INPUT_OPS = ("type", "keys", "click", "move", "holyc")
 FILES_OPS = ("list", "pull", "push")
+# test_contracts hardcodes the file samples, so keep its base set frozen and
+# advertise the P3 daemon RPC through the additive tuple.
+FILES_OPS_ALL = FILES_OPS + ("rpc",)
+RPC_METHODS = ("ping", "stat", "version")
+MODEM_MODES = ("status", "on", "off")
+
+# Original operator lore; never presented as a quote from Terry A. Davis.
+LORE_TEXT = (
+    "TempleOS operator lore. Prompt: T:/Home>. End HolyC statements with ;. "
+    "Dir; lists files, Ed(\"File.HC\"); edits, Help; opens help. "
+    "TinkerOS serial needs CommInit; then CommInit8n1(1,115200); before Xfer. "
+    "AutoComplete can steal the first character: send Esc, then retry. "
+    "Alt menus and the System Keys strip own some keys; click Cmd Line for help. "
+    "Debugger: G2; continues, Exit; leaves, restore golden as the last resort. "
+    "Snapshots: savevm/loadvm via templeos_vm; restore sends cont if paused."
+)
 
 # Serialized pane/tool JSON budget (base64 + envelope). Matches reviewed Hermes relays.
 MAX_ENVELOPE_BYTES = 512 * 1024
@@ -90,11 +107,12 @@ SCHEMA_VM = {
     "name": "templeos_vm",
     "description": (
         "TempleOS/TinkerOS/ZealOS local QEMU guest lifecycle (start stop reset "
-        "snapshot restore status doctor). THE supported boot path — never dial "
-        "VNC/QMP sockets yourself. Network always off. snapshot ejects non-qcow2 "
-        "writables first; restore issues cont if loadvm left the VM paused. doctor "
-        "checks QEMU, ISO pins, and /dev/kvm openability. Sockets are existence "
-        "flags only. If deferred behind tool_search, search for templeos vm first."
+        "snapshot restore status doctor modem). THE supported boot path — never dial "
+        "VNC/QMP sockets yourself. Network always off; modem is serial, not a NIC. "
+        "snapshot ejects non-qcow2 writables first; restore issues cont if loadvm "
+        "left the VM paused. doctor checks QEMU, ISO pins, and /dev/kvm openability. "
+        "Sockets are existence flags only. If deferred behind tool_search, search "
+        "for templeos vm first."
     ),
     "parameters": {
         "type": "object",
@@ -113,6 +131,11 @@ SCHEMA_VM = {
                 "type": "string",
                 "description": "Snapshot name for snapshot or restore. Default golden.",
             },
+            "mode": {
+                "type": "string",
+                "enum": list(MODEM_MODES),
+                "description": "op=modem: status, on, or off.",
+            },
         },
         "required": ["op"],
         "additionalProperties": False,
@@ -123,10 +146,10 @@ SCHEMA_SCREEN = {
     "name": "templeos_screen",
     "description": (
         "TempleOS/TinkerOS guest screen: look (PNG), read_text (serial or 8x8 glyphs), "
-        "wait_idle, or hash. Prefer read_text before look. Do NOT write VNC clients or "
-        "screendump scripts — those time out; this tool is the supported path. "
-        "Full-frame hashes never stabilize (clock/FPS); wait_idle uses a crop. "
-        "Default 640x480 PNG. If deferred, tool_search for templeos screen read_text."
+        "wait_idle, hash, or lore. Prefer read_text before look. Do NOT write VNC "
+        "clients or screendump scripts — those time out; this tool is the supported "
+        "path. Full-frame hashes never stabilize (clock/FPS); wait_idle uses a crop. "
+        "Default 640x480 PNG. If deferred, tool_search for templeos screen."
     ),
     "parameters": {
         "type": "object",
@@ -134,7 +157,7 @@ SCHEMA_SCREEN = {
             "op": {
                 "type": "string",
                 "enum": list(SCREEN_OPS),
-                "description": "look, read_text, wait_idle, or hash.",
+                "description": "look, read_text, wait_idle, hash, or lore.",
             },
             "timeout_s": {
                 "type": "number",
@@ -194,21 +217,26 @@ SCHEMA_INPUT = {
 SCHEMA_FILES = {
     "name": "templeos_files",
     "description": (
-        "List, pull, or push files between the host and the guest. Host paths must "
-        "stay under the plugin data dir (TEMPLEOS_HOME). Never mount the live RedSea "
-        "qcow2 while QEMU has it open."
+        "List, pull, or push files, or probe the guest daemon with rpc. Host paths "
+        "must stay under the plugin data dir (TEMPLEOS_HOME). Never mount the live "
+        "RedSea qcow2 while QEMU has it open."
     ),
     "parameters": {
         "type": "object",
         "properties": {
             "op": {
                 "type": "string",
-                "enum": list(FILES_OPS),
-                "description": "list, pull, or push.",
+                "enum": list(FILES_OPS_ALL),
+                "description": "list, pull, push, or rpc.",
+            },
+            "method": {
+                "type": "string",
+                "enum": list(RPC_METHODS),
+                "description": "RPC method for op=rpc.",
             },
             "path": {
                 "type": "string",
-                "description": "Guest path to list, pull from, or push to.",
+                "description": "Guest path to list, pull from, push to, or stat.",
             },
             "src": {
                 "type": "string",
@@ -363,6 +391,31 @@ def handle_vm(params: Any) -> str:
     if not isinstance(name, str) or not name.strip() or "/" in name or "\\" in name or ".." in name:
         return err("name must be a simple snapshot id (default golden).", Code.INVALID_ARGS)
 
+    if op == "modem":
+        mode = args.get("mode") or "status"
+        if mode not in MODEM_MODES:
+            return err(f"mode must be one of: {', '.join(MODEM_MODES)}.", Code.INVALID_ARGS)
+        from templeos.flavors import modem_profile, set_modem_enabled
+
+        if mode in ("on", "off"):
+            set_modem_enabled(mode == "on")
+        profile = modem_profile(flavor)
+        running = False
+        try:
+            from templeos.vm import status as vm_status
+
+            running = bool(vm_status().get("running"))
+        except Exception:
+            pass
+        profile.update(
+            {
+                "mode": mode,
+                "running": running,
+                "applies": "next start" if mode != "status" else None,
+                "restart_required": bool(mode == "on" and running),
+            }
+        )
+        return ok(**profile)
     if op == "start":
         from templeos.vm import start as impl
         return _call_impl(impl, flavor=flavor, snapshot=name)
@@ -397,6 +450,8 @@ def handle_screen(params: Any) -> str:
         return got[0]
     op = got
     timeout_s = args.get("timeout_s", 5)
+    if op == "lore":
+        return ok(topic="templeos-operator", text=LORE_TEXT, source="plugin")
     if op == "wait_idle":
         try:
             timeout_s = float(timeout_s)
@@ -472,12 +527,45 @@ def handle_input(params: Any) -> str:
     return err(f"Unknown op {op!r}.", Code.INVALID_OP)
 
 
+def _daemon_rpc(method: str, path: str) -> dict[str, Any]:
+    """Call the guest Xfer daemon's LIST method and shape an RPC reply.
+
+    The daemon already speaks a small framed protocol over COM1. P3 exposes
+    ping/stat/version as named RPC methods instead of a fifth tool.
+    """
+    if method not in RPC_METHODS:
+        raise ValueError(f"method must be one of: {', '.join(RPC_METHODS)}.")
+    from templeos import files as files_mod
+
+    started = time.monotonic()
+    listed = files_mod.list_guest(path)
+    if listed.get("ok") is False:
+        return listed
+    elapsed_ms = int(round((time.monotonic() - started) * 1000))
+    body: dict[str, Any] = {
+        "ok": True,
+        "method": method,
+        "via": "serial",
+        "elapsed_ms": elapsed_ms,
+        "protocol": files_mod.PROTO_VERSION,
+        "path": listed.get("path"),
+    }
+    if method in ("ping", "stat"):
+        body["count"] = listed.get("count")
+    if method == "stat":
+        body["entries"] = listed.get("entries")
+    if method == "version":
+        body["magic"] = files_mod.MAGIC.decode("ascii", "replace")
+        body["max_file_bytes"] = files_mod.MAX_FILE_BYTES
+    return body
+
+
 def handle_files(params: Any) -> str:
     try:
         args = _args(params)
     except (ValueError, json.JSONDecodeError) as exc:
         return err(str(exc), Code.INVALID_ARGS)
-    got = _require_op(args, FILES_OPS, "templeos_files")
+    got = _require_op(args, FILES_OPS_ALL, "templeos_files")
     if not isinstance(got, str):
         return got[0]
     op = got
@@ -485,6 +573,14 @@ def handle_files(params: Any) -> str:
         root = home()
     except PathError as exc:
         return err(str(exc), exc.code)
+    if op == "rpc":
+        method = args.get("method") or "ping"
+        if method not in RPC_METHODS:
+            return err(f"method must be one of: {', '.join(RPC_METHODS)}.", Code.INVALID_ARGS)
+        path = args.get("path") or "T:/"
+        if not isinstance(path, str) or not path.strip():
+            return err("op=rpc path must be a guest path (default T:/).", Code.INVALID_ARGS)
+        return _call_impl(_daemon_rpc, method, path)
     if op == "list":
         path = args.get("path") or "T:/"
         if not isinstance(path, str) or not path.strip():

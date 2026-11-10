@@ -1,7 +1,7 @@
 """Pinned guest flavors, ISO URLs/hashes, and proven QEMU flag fragments.
 
-Hashes and launch flags come from the 9 Nov 2026 bake-off in
-/workspace/templeos-bakeoff. Network is always off. QEMU itself is never bundled.
+Hashes and launch flags come from the 9 Nov 2026 bake-off. Network is
+always off. QEMU itself is never bundled.
 """
 
 from __future__ import annotations
@@ -37,6 +37,7 @@ FLAVORS: dict[str, dict[str, Any]] = {
         "bus": "ide",
         "mouse": "vmmouse",
         "serial": "comm",
+        "modem": "com2",
         # Crop the title-bar clock/FPS and the System Keys chrome for stable hashes.
         "hash_crop": {"x": 0, "y": 24, "w": 520, "h": 446},
     },
@@ -54,6 +55,7 @@ FLAVORS: dict[str, dict[str, Any]] = {
         "bus": "ide",
         "mouse": "msset",
         "serial": "outu8",
+        "modem": "com2",
         "hash_crop": {"x": 0, "y": 24, "w": 640, "h": 456},
     },
     "zealos": {
@@ -71,6 +73,7 @@ FLAVORS: dict[str, dict[str, Any]] = {
         "bus": "ahci",
         "mouse": "relative",
         "serial": "outu8",
+        "modem": "com2",
         "hash_crop": {"x": 0, "y": 24, "w": 1024, "h": 744},
     },
 }
@@ -130,13 +133,54 @@ def machine_args(*, accel: str = "tcg") -> list[str]:
     ]
 
 
+MODEM_SOCK = "modem.sock"
+_MODEM_ENABLED = False
+
+
+def set_modem_enabled(enabled: bool) -> bool:
+    """Opt in/out of the COM2 serial modem for the next start in this process."""
+    global _MODEM_ENABLED
+    _MODEM_ENABLED = bool(enabled)
+    return _MODEM_ENABLED
+
+
+def modem_enabled() -> bool:
+    return _MODEM_ENABLED
+
+
+def modem_socket(com1: Path) -> Path:
+    """The modem chardev sits beside COM1 under the plugin socket dir."""
+    return Path(com1).with_name(MODEM_SOCK)
+
+
+def modem_profile(flavor_id: str | None = None) -> dict[str, Any]:
+    """Public modem facts. A modem is a serial line, never a NIC."""
+    rec = get_flavor(flavor_id)
+    return {
+        "modem": "on" if _MODEM_ENABLED else "off",
+        "enabled": _MODEM_ENABLED,
+        "transport": "serial",
+        "com": 2,
+        "device": rec.get("modem", "com2"),
+        "network": "off",
+        "flavor": rec["id"],
+    }
+
+
 def socket_args(*, qmp: Path, vnc: Path, com1: Path) -> list[str]:
-    """Unix-only QMP, VNC and COM1. Never a TCP VNC port."""
-    return [
+    """Unix-only QMP, VNC and COM1. Never a TCP VNC port.
+
+    When the modem option is enabled, COM2 is an extra unix ``-serial`` line.
+    That is a serial modem, not a network device: ``-nic none`` is unchanged.
+    """
+    args = [
         "-qmp", f"unix:{qmp},server=on,wait=off",
         "-vnc", f"unix:{vnc}",
         "-serial", f"unix:{com1},server=on,wait=off",
     ]
+    if _MODEM_ENABLED:
+        args += ["-serial", f"unix:{modem_socket(com1)},server=on,wait=off"]
+    return args
 
 
 def disk_args(flavor_id: str | None, iso: Path, disk: Path) -> list[str]:
