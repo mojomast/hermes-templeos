@@ -99,7 +99,7 @@ test("Terry dock is the second child of .tos-stage-row, to the right of the disp
   const terry = byTestId(node, "companion")[0];
   assert.match(String(terry.props.className), /tos-companion-static/);
   assert.match(terry.props.style.backgroundImage, /^url\("data:image\/png;base64,/);
-  assert.equal(terry.props.style.backgroundPosition, "0 -312px");
+  assert.equal(terry.props.style.backgroundPosition, "0 37.5%");
 });
 
 test("Hide Terry hides the dock and the toggle flips to Show Terry", () => {
@@ -153,10 +153,14 @@ test("P2 Hermes theme stays the default with a dark pane and reserved dock width
 
   assert.match(CSS, /\.tos-pane\[data-theme="hermes"\]/);
   assert.match(CSS, /background:[^;]*var\(--tos-hermes-ink\)/s);
-  assert.match(CSS, /\.tos-stage-row\s*\{[^}]*flex-direction:\s*row/s);
-  assert.match(CSS, /\.tos-companion-dock\s*\{[^}]*flex:\s*0 0 var\(--tos-companion-width/s);
-  assert.match(CSS, /\.tos-companion-bubble\s*\{[^}]*max-width:\s*100%/s);
-  assert.match(CSS, /\.tos-companion-bubble-slot\s*\{[^}]*min-height:\s*44px/s);
+  assert.match(CSS, /\.tos-stage-row\s*\{[^}]*display:\s*contents/s);
+  assert.match(CSS, /\.tos-companion-dock\s*\{[^}]*grid-column:\s*2/s);
+  assert.match(CSS, /\.tos-companion-dock\s*\{[^}]*height:\s*var\(--tos-companion-h,\s*750px\)/s);
+  assert.match(CSS, /\.tos-companion\s*\{[^}]*height:\s*var\(--tos-companion-h,\s*750px\)/s);
+  assert.match(CSS, /\.tos-companion-bubble\s*\{[^}]*max-width:\s*min\(100%,\s*340px\)/s);
+  assert.match(CSS, /\.tos-companion-bubble-slot\s*\{[^}]*position:\s*absolute/s);
+  assert.match(CSS, /\.tos-companion-static\s*\{[^}]*background-size:\s*800% 900%/s);
+  assert.match(CSS, /\.tos-companion-canvas\s*\{[^}]*image-rendering:\s*pixelated/s);
 });
 
 test("built plugin carries the dock, bubble lane, and Hermes dark theme", () => {
