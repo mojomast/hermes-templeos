@@ -536,6 +536,54 @@ const shots = {
       { animation: "talking", costume: "base", time: 900, clips: ["idle", "talking"] }
     ),
   },
+  "pint2-idle.png": {
+    size: "1920,1240",
+    html: render(
+      {
+        theme: "hermes",
+        scale: 2,
+        viewport: { width: 1920, height: 1240 },
+        frameUrl: tinkeros,
+        status: {
+          ...ready,
+          companion: {
+            enabled: true,
+            hidden: false,
+            character: "terry",
+            animation: "idle",
+            costume: "base",
+            speech: { active: false, text: "" },
+          },
+        },
+      },
+      { animation: "idle", costume: "base", time: 420, clips: ["idle", "greet"] }
+    ),
+  },
+  "pint2-typing.png": {
+    size: "1920,1240",
+    html: render(
+      {
+        theme: "hermes",
+        scale: 2,
+        viewport: { width: 1920, height: 1240 },
+        frameUrl: tinkeros,
+        log,
+        status: {
+          ...ready,
+          agent_busy: true,
+          companion: {
+            enabled: true,
+            hidden: false,
+            character: "terry",
+            animation: "typing",
+            costume: "base",
+            speech: { active: false, text: "" },
+          },
+        },
+      },
+      { animation: "typing", costume: "base", time: 800, clips: ["idle", "typing"] }
+    ),
+  },
   "v4-costume.png": {
     size: "1920,1240",
     html: render(

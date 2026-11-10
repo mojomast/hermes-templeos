@@ -160,3 +160,35 @@ def test_v4_is_not_a_nearest_neighbor_upscale():
         assert mean_all > 0.5, f"{shot.name}: figure looks like a flat NN upscale"
         assert mean_edge > 0.75, f"{shot.name}: edges carry no real high-res detail"
         assert flat_fraction < 0.25, f"{shot.name}: figure has a regular duplicated-pixel grid"
+
+
+PINT2_SHOTS = (
+    V4_DIR / "pint2-idle.png",
+    V4_DIR / "pint2-typing.png",
+)
+
+
+def test_pint2_shots_are_huge_and_sharp():
+    for shot in PINT2_SHOTS:
+        assert shot.exists(), f"missing {shot}; run shoot_pane for pint2 idle/typing"
+        with Image.open(shot) as raw:
+            image = raw.convert("RGB")
+            assert image.size == (1920, 1240), f"{shot.name} is not 1920x1240"
+        bbox = v4_figure_bbox(image)
+        assert bbox is not None, f"no Terry figure pixels in {shot.name}"
+        x0, y0, x1, y1 = bbox
+        width = x1 - x0 + 1
+        height = y1 - y0 + 1
+        print(f"{shot.name}: bbox=({x0},{y0})-({x1},{y1}) size={width}x{height} height={height}px")
+        assert x0 >= 1300, f"{shot.name}: Terry must stay in the right rail"
+        assert y1 >= 1020, f"{shot.name}: Terry must reach the bottom of the pane"
+        assert height >= 600, f"{shot.name}: Terry figure is only {height}px tall"
+        figure = image.crop((x0, y0, x1 + 1, y1 + 1))
+        mean_all, mean_edge, flat_fraction = nearest_neighbor_residual(figure)
+        print(
+            f"{shot.name}: nn_residual_all={mean_all:.3f} "
+            f"nn_residual_edges={mean_edge:.3f} flat_edge_fraction={flat_fraction:.3f}"
+        )
+        assert mean_all > 0.5, f"{shot.name}: figure looks like a flat NN upscale"
+        assert mean_edge > 0.75, f"{shot.name}: edges carry no real high-res detail"
+        assert flat_fraction < 0.25, f"{shot.name}: figure has a regular duplicated-pixel grid"

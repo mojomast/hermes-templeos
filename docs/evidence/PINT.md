@@ -128,3 +128,36 @@ QEMU was TCG only (`-accel tcg`, no KVM), with the sandbox QEMU 8.2.2.
   verified through the base tree, docs, and tests rather than `git merge`.
 - P5 remains parked until Kyle supplies a model credential; this patch only
   cites its TCG evidence.
+
+## PINT2 follow-up (this landing)
+
+The first PINT sandbox had no remotes, so the accepted refs below were merged
+in PINT2 onto `feat/plugin-integration` starting at
+`efb5a3a1d31791b1bae207286ed8a68bf5b6406b`. `git fetch origin` was used on
+the box; the launcher result for att_bc27e2cc1d3f0e2e was empty (`{}`) and
+the sandbox was already gone, so the same specified merges were replayed here
+and verified.
+
+| Branch | SHA | Notes |
+| --- | --- | --- |
+| start (PINT) | `feat/plugin-integration` `efb5a3a1d31791b1bae207286ed8a68bf5b6406b` | chat_bridge + click stub kept |
+| Terry BIG | `feat/terry-big` `c944fc27800263e2600e2bf2d4914ea6060b5299` | merged first |
+| Terry v4 | `feat/terry-v4` `f2b7a60c0c2d9235a60dce969f8333aaf120526f` | v4 wins over big; high-res huge rig |
+| P3 guest ops | `feat/p3-guest-ops` `a197b02a26aa35ebb04a840d207d37d4bc0aab89` | full branch: modem/lore/rpc + holyc TCG 120–300 ms cadence |
+| BBS transport | `feat/bbs-transport` `f1ff8fb349ac1ca7dd7387b056dd04c386048927` | merged |
+| BBS skill | `feat/bbs-skill` `26687bf3d3343913395c9747347794e9aacad68b` | merged |
+
+P3 `input.py` / `tests/test_input.py` conflicts were resolved by keeping P3's
+120–300 ms TCG cadence, returning both PINT (`key_delay_s`, `tcg_slow`) and
+P3 (`delay_s`, `per_key`) result fields, and keeping both test suites. Chat
+bridge and the test_api `settle_s`/`hold_s` stub were not dropped.
+
+| Check | Result |
+| --- | --- |
+| Tools | still exactly 4 (`templeos_vm`, `templeos_screen`, `templeos_input`, `templeos_files`) |
+| o200k | before 892, after 972, delta +80 |
+| pytest (TEMPLEOS_SMOKE unset) | 190 passed, 5 skipped (fastapi missing on the box; 4 are live-smoke skips) |
+| JS pane tests | 28 passed, 0 failed |
+| Screenshots | `shots/terry/pint2-idle.png` PIL height 673px, nn_residual_edges 1.600, flat_edge 0.001; `shots/terry/pint2-typing.png` PIL height 673px, nn_residual_edges 1.355, flat_edge 0.000 (1920x1240, via `desktop/shoot_pane.mjs`; not viewed in-model) |
+
+Never merged to `feat/improvements` or `main`. No tag. No force-push.
