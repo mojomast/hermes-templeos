@@ -378,6 +378,9 @@ export function TempleOSPane({ transport, initial } = {}) {
         className: "tos-body",
         children: [
           jsxs("div", {
+            className: "tos-stage-row",
+            children: [
+          jsxs("div", {
             className: "tos-stage",
             children: [
               jsxs("div", {
@@ -417,6 +420,16 @@ export function TempleOSPane({ transport, initial } = {}) {
                 : jsx("p", { className: "tos-hatch tos-hatch-idle", "data-testid": "keyboard-hatch", children: "Click the screen to type. Esc releases the keyboard." }),
             ],
           }),
+              jsx(TerryCompanionOverlay, {
+                api: api,
+                animation: (status.companion && status.companion.animation) || "idle",
+                costume: companionCostume,
+                hidden: companionHidden,
+                enabled: !(status.companion && status.companion.enabled === false),
+                speech: (status.companion && status.companion.speech) || null,
+              }),
+            ],
+          }),
           jsxs("section", {
             className: "tos-log",
             "data-testid": "agent-log",
@@ -437,13 +450,6 @@ export function TempleOSPane({ transport, initial } = {}) {
             ],
           }),
         ],
-      }),
-      jsx(TerryCompanionOverlay, {
-        api: api,
-        animation: (status.companion && status.companion.animation) || "idle",
-        costume: companionCostume,
-        hidden: companionHidden,
-        enabled: !(status.companion && status.companion.enabled === false),
       }),
       error ? jsx("div", { className: "tos-error", "data-testid": "error", children: error }) : null,
       info ? jsx("div", { className: "tos-info", "data-testid": "info", children: info }) : null,

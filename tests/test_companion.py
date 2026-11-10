@@ -42,7 +42,14 @@ def test_state_mapping_tool_and_stream():
     assert companion.resolve_animation() == "waiting"
     hooks["post_llm_call"]()
     hooks["pre_tool_call"]()
-    assert companion.resolve_animation() == "running"
+    assert companion.resolve_animation() == "typing"
+    hooks["post_tool_call"](ok=True)
+    assert companion.resolve_animation() == "celebrate_short"
+    companion.reset_state()
+    hooks["pre_tool_call"]()
+    hooks["post_tool_call"](ok=True)
+    # Second success alternates onto the atlas jump row.
+    hooks["pre_tool_call"]()
     hooks["post_tool_call"](ok=True)
     assert companion.resolve_animation() == "jumping"
     companion.reset_state()
@@ -56,9 +63,18 @@ def test_state_mapping_tool_and_stream():
     # review sticky wins over waving
     assert companion.resolve_animation() == "review"
     hooks["on_human_input_resolved"]()
+    assert companion.resolve_animation() == "nod"
+    companion.reset_state()
+    hooks["on_session_start"]()
+    assert companion.resolve_animation() == "greet"
     companion.reset_state()
     companion.note_vm_booting(True)
-    assert companion.resolve_animation() in {"running-right", "running-left"}
+    assert companion.resolve_animation() == "vm_booting"
+    hooks["on_stream_start"]()
+    # Boot takes priority over talking.
+    assert companion.resolve_animation() == "vm_booting"
+    companion.note_vm_running()
+    assert companion.resolve_animation() == "talking"
 
 
 def test_status_payload_includes_companion(monkeypatch, tmp_path):
@@ -102,3 +118,42 @@ def test_atlas_respects_off_switch(monkeypatch):
     body = companion.atlas_payload("base")
     assert body["ok"] is False
     assert body["code"] == "companion_off"
+
+
+def test_relieved_after_failed_recovers():
+    hooks = companion._make_hooks()
+    hooks["post_tool_call"](ok=False)
+    assert companion.resolve_animation() == "failed"
+    with companion._LOCK:
+        companion._STATE["until"] = 0.0
+    assert companion.resolve_animation() == "relieved"
+
+
+def test_say_bubble_and_clip_payloads():
+    snap = companion.say("Hello from the pane")
+    assert snap["active"] is True
+    assert snap["text"] == "Hello from the pane"
+    body = companion.snapshot()
+    assert body["speech"]["text"] == "Hello from the pane"
+    companion.clear_speech()
+    assert companion.snapshot()["speech"]["active"] is False
+
+    denied = companion.clip_payload("../atlas")
+    assert denied["ok"] is False
+
+    manifest = companion.clips_manifest()
+    assert manifest["ok"] is True
+    names = [c["name"] for c in manifest["manifest"]["clips"]]
+    assert names == list(companion.RICH_CLIPS)
+    clip = companion.clip_payload("typing")
+    assert clip["ok"] is True
+    raw = base64.b64decode(clip["data"])
+    assert raw[:8] == b"\x89PNG\r\n\x1a\n"
+    assert clip["clip"]["cell"] == [192, 208]
+    assert clip["clip"]["loop"] is True
+
+
+def test_clip_respects_off_switch(monkeypatch):
+    monkeypatch.setenv("TEMPLEOS_COMPANION", "off")
+    assert companion.clips_manifest()["code"] == "companion_off"
+    assert companion.clip_payload("dance")["code"] == "companion_off"

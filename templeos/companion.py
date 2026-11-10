@@ -36,12 +36,50 @@ ANIM_RUNNING_LEFT = "running-left"
 ANIM_JUMPING = "jumping"
 ANIM_FAILED = "failed"
 ANIM_REVIEW = "review"
+ANIM_VM_BOOTING = "vm_booting"
+ANIM_CELEBRATE = "celebrate_short"
+ANIM_GREET = "greet"
+ANIM_NOD = "nod"
+ANIM_STRETCH = "stretch"
+ANIM_RELIEVED = "relieved"
+ANIM_TYPING = "typing"
+ANIM_TALKING = "talking"
+ANIM_SMOKING = "smoking"
+ANIM_EXHALING = "exhaling"
+ANIM_DANCE = "dance"
+# Pre-baked v2 clip names (desktop/assets/companion/terry/clips/).
+RICH_CLIPS = (
+    ANIM_VM_BOOTING,
+    ANIM_CELEBRATE,
+    ANIM_GREET,
+    ANIM_NOD,
+    ANIM_STRETCH,
+    ANIM_RELIEVED,
+    ANIM_TYPING,
+    ANIM_TALKING,
+    ANIM_SMOKING,
+    ANIM_EXHALING,
+    ANIM_DANCE,
+)
 
 ONESHOT_S = {
     ANIM_WAVING: 2.2,
     ANIM_JUMPING: 1.3,
     ANIM_FAILED: 2.0,
+    ANIM_GREET: 2.4,
+    ANIM_CELEBRATE: 1.8,
+    ANIM_NOD: 1.2,
+    ANIM_STRETCH: 3.4,
+    ANIM_RELIEVED: 2.4,
+    ANIM_EXHALING: 3.2,
+    ANIM_SMOKING: 5.6,
+    ANIM_DANCE: 7.2,
 }
+
+ONESHOT_ANIMS = frozenset(ONESHOT_S)
+
+SAY_MAX_CHARS = 240
+SAY_DEFAULT_S = 6.0
 
 # Hooks we register. Every name is in Hermes VALID_HOOKS (v0.23.0).
 HOOK_NAMES: tuple[str, ...] = (
@@ -186,6 +224,11 @@ def reset_state() -> None:
                 "vm_crashed": False,
                 "hidden": False,
                 "enabled_override": None,
+                "thinking": False,
+                "recovering": False,
+                "success_flip": False,
+                "speech_text": "",
+                "speech_until": 0.0,
             }
         )
 
@@ -227,6 +270,7 @@ def note_vm_crash(reason: str = "vm_crash") -> None:
     with _LOCK:
         _STATE["booting"] = False
         _STATE["vm_crashed"] = True
+        _STATE["recovering"] = True
     _pulse(ANIM_FAILED, reason=reason)
 
 
@@ -234,37 +278,89 @@ def note_user_driving() -> None:
     _pulse(ANIM_WAVING, reason="user_driving")
 
 
+def _approval_granted(kwargs: dict[str, Any]) -> bool:
+    choice = kwargs.get("choice") or kwargs.get("decision") or kwargs.get("approved")
+    if isinstance(choice, bool):
+        return choice
+    token = str(choice or "").strip().lower()
+    if token in {"deny", "denied", "reject", "rejected", "no", "false", "0", "block", "cancelled", "canceled"}:
+        return False
+    # Unknown or empty choice: treat human-input resolved / approval response as granted.
+    return True
+
+
+def say(text: str, *, hold_s: float | None = None) -> dict[str, Any]:
+    """Queue a speech bubble. Callers supply the text; nothing is invented."""
+    raw = " ".join(str(text or "").split())
+    if len(raw) > SAY_MAX_CHARS:
+        raw = raw[: SAY_MAX_CHARS - 1].rstrip() + "…"
+    hold = SAY_DEFAULT_S if hold_s is None else max(0.8, float(hold_s))
+    with _LOCK:
+        _STATE["speech_text"] = raw
+        _STATE["speech_until"] = (_now() + hold) if raw else 0.0
+    return speech_snapshot()
+
+
+def clear_speech() -> None:
+    with _LOCK:
+        _STATE["speech_text"] = ""
+        _STATE["speech_until"] = 0.0
+
+
+def speech_snapshot() -> dict[str, Any]:
+    with _LOCK:
+        text = str(_STATE.get("speech_text") or "")
+        until = float(_STATE.get("speech_until") or 0.0)
+        if not text or until <= _now():
+            if text:
+                _STATE["speech_text"] = ""
+                _STATE["speech_until"] = 0.0
+            return {"text": "", "active": False}
+        return {"text": text, "active": True, "remaining_ms": int(max(0, (until - _now()) * 1000))}
+
+
 def resolve_animation() -> str:
-    """Pick the current atlas row from sticky flags + one-shot timers."""
+    """Pick the current clip or atlas row from sticky flags + one-shot timers."""
     with _LOCK:
         if not companion_enabled():
             return ANIM_IDLE
         now = _now()
         until = float(_STATE.get("until") or 0.0)
         oneshot = str(_STATE.get("animation") or ANIM_IDLE)
-        oneshot_live = until > now and oneshot in {ANIM_WAVING, ANIM_JUMPING, ANIM_FAILED}
+        oneshot_live = until > now and oneshot in ONESHOT_ANIMS
 
         if _STATE.get("awaiting_human"):
             return ANIM_REVIEW
-        if _STATE.get("vm_crashed") and oneshot_live and oneshot == ANIM_FAILED:
-            return ANIM_FAILED
         if oneshot_live and oneshot == ANIM_FAILED:
             return ANIM_FAILED
-        if oneshot_live and oneshot == ANIM_JUMPING:
-            return ANIM_JUMPING
+        if oneshot_live and oneshot == ANIM_RELIEVED:
+            return ANIM_RELIEVED
+        # Failed hold just ended: play relieved as the recovery.
+        if (not oneshot_live) and oneshot == ANIM_FAILED and _STATE.get("recovering"):
+            _STATE["recovering"] = False
+            _STATE["vm_crashed"] = False
+            hold = ONESHOT_S[ANIM_RELIEVED]
+            _STATE["animation"] = ANIM_RELIEVED
+            _STATE["until"] = now + hold
+            _STATE["reason"] = "recovered"
+            return ANIM_RELIEVED
+        if oneshot_live and oneshot in {ANIM_CELEBRATE, ANIM_JUMPING}:
+            return oneshot
         if _STATE.get("booting"):
-            return ANIM_RUNNING_RIGHT if _STATE.get("boot_side") == "right" else ANIM_RUNNING_LEFT
+            return ANIM_VM_BOOTING
         if int(_STATE.get("tool_inflight") or 0) > 0:
-            return ANIM_RUNNING
+            return ANIM_TYPING
         if _STATE.get("streaming"):
+            return ANIM_TALKING
+        if _STATE.get("thinking"):
             return ANIM_WAITING
-        if oneshot_live and oneshot == ANIM_WAVING:
-            return ANIM_WAVING
-        if until <= now:
-            _STATE["animation"] = ANIM_IDLE
-            _STATE["reason"] = ""
-            if _STATE.get("vm_crashed"):
-                _STATE["vm_crashed"] = False
+        if oneshot_live:
+            return oneshot
+        _STATE["animation"] = ANIM_IDLE
+        _STATE["reason"] = ""
+        if _STATE.get("vm_crashed"):
+            _STATE["vm_crashed"] = False
+        _STATE["recovering"] = False
         return ANIM_IDLE
 
 
@@ -272,6 +368,7 @@ def snapshot() -> dict[str, Any]:
     """Shape nested under status_payload()['companion']."""
     anim = resolve_animation()
     with _LOCK:
+        speech = speech_snapshot()
         return {
             "enabled": companion_enabled(),
             "hidden": bool(_STATE.get("hidden")),
@@ -285,10 +382,13 @@ def snapshot() -> dict[str, Any]:
                 "No official TempleOS affiliation."
             ),
             "costumes": list(COSTUMES),
+            "clips": list(RICH_CLIPS),
             "tool_inflight": int(_STATE.get("tool_inflight") or 0),
             "streaming": bool(_STATE.get("streaming")),
+            "thinking": bool(_STATE.get("thinking")),
             "booting": bool(_STATE.get("booting")),
             "awaiting_human": bool(_STATE.get("awaiting_human")),
+            "speech": speech,
         }
 
 
@@ -345,6 +445,93 @@ def atlas_payload(costume: str | None = None) -> dict[str, Any]:
     }
 
 
+def _clips_dir() -> Path:
+    return ASSETS_ROOT / "clips"
+
+
+def clips_manifest() -> dict[str, Any]:
+    """List pre-baked v2 clips (no image payload)."""
+    if not companion_enabled():
+        return {
+            "ok": False,
+            "error": "Companion is off.",
+            "code": "companion_off",
+            "fix": "Set TEMPLEOS_COMPANION=terry or companion: terry to enable.",
+        }
+    path = _clips_dir() / "manifest.json"
+    if not path.is_file():
+        return {
+            "ok": False,
+            "error": "Companion clip manifest is missing.",
+            "code": "companion_asset_missing",
+            "fix": "Reinstall the plugin so desktop/assets/companion/terry/clips is present.",
+        }
+    try:
+        path.resolve().relative_to(ASSETS_ROOT.resolve())
+    except ValueError:
+        return {
+            "ok": False,
+            "error": "Companion asset path escaped the asset root.",
+            "code": "path_escape",
+            "fix": "Report a bug; do not load companion assets from elsewhere.",
+        }
+    meta = json.loads(path.read_text(encoding="utf-8"))
+    return {"ok": True, "error": None, "code": None, "fix": None, "manifest": meta}
+
+
+def clip_payload(name: str) -> dict[str, Any]:
+    """Load one pre-baked clip strip as a ctx.rest-safe JSON envelope (base64)."""
+    if not companion_enabled():
+        return {
+            "ok": False,
+            "error": "Companion is off.",
+            "code": "companion_off",
+            "fix": "Set TEMPLEOS_COMPANION=terry or companion: terry to enable.",
+        }
+    token = str(name or "").strip().lower()
+    if token not in RICH_CLIPS:
+        return {
+            "ok": False,
+            "error": f"Unknown companion clip {name!r}.",
+            "code": "invalid_args",
+            "fix": "Use one of: " + ", ".join(RICH_CLIPS) + ".",
+        }
+    folder = _clips_dir()
+    png_path = folder / f"{token}.png"
+    json_path = folder / f"{token}.json"
+    if not png_path.is_file() or not json_path.is_file():
+        return {
+            "ok": False,
+            "error": f"Missing Terry clip {token!r}.",
+            "code": "companion_asset_missing",
+            "fix": "Reinstall the plugin so desktop/assets/companion/terry/clips is present.",
+        }
+    try:
+        png_path.resolve().relative_to(ASSETS_ROOT.resolve())
+        json_path.resolve().relative_to(ASSETS_ROOT.resolve())
+    except ValueError:
+        return {
+            "ok": False,
+            "error": "Companion asset path escaped the asset root.",
+            "code": "path_escape",
+            "fix": "Report a bug; do not load companion assets from elsewhere.",
+        }
+    meta = json.loads(json_path.read_text(encoding="utf-8"))
+    data = base64.b64encode(png_path.read_bytes()).decode("ascii")
+    return {
+        "ok": True,
+        "error": None,
+        "code": None,
+        "fix": None,
+        "name": token,
+        "mime": "image/png",
+        "data": data,
+        "clip": meta,
+        "bytes": png_path.stat().st_size,
+        "costume": "base",
+    }
+
+
 def _tool_ok(kwargs: dict[str, Any]) -> bool:
     """Best-effort success detection for post_tool_call payloads."""
     for key in ("ok", "success"):
@@ -373,7 +560,7 @@ def _tool_ok(kwargs: dict[str, Any]) -> bool:
 
 def _make_hooks() -> dict[str, Callable[..., Any]]:
     def on_session_start(**kwargs: Any) -> None:
-        _pulse(ANIM_WAVING, reason="session_start")
+        _pulse(ANIM_GREET, reason="session_start")
 
     def on_session_end(**kwargs: Any) -> None:
         with _LOCK:
@@ -384,19 +571,24 @@ def _make_hooks() -> dict[str, Callable[..., Any]]:
             _STATE["animation"] = ANIM_IDLE
             _STATE["until"] = 0.0
             _STATE["reason"] = "session_end"
+            _STATE["thinking"] = False
+            _STATE["recovering"] = False
+            _STATE["speech_text"] = ""
+            _STATE["speech_until"] = 0.0
 
     def pre_llm_call(**kwargs: Any) -> None:
         with _LOCK:
-            _STATE["streaming"] = True
+            _STATE["thinking"] = True
             _STATE["reason"] = "thinking"
 
     def post_llm_call(**kwargs: Any) -> None:
         with _LOCK:
-            _STATE["streaming"] = False
+            _STATE["thinking"] = False
 
     def on_stream_start(**kwargs: Any) -> None:
         with _LOCK:
             _STATE["streaming"] = True
+            _STATE["thinking"] = False
             _STATE["reason"] = "streaming"
 
     def on_stream_delta(**kwargs: Any) -> None:
@@ -416,11 +608,19 @@ def _make_hooks() -> dict[str, Callable[..., Any]]:
         with _LOCK:
             _STATE["tool_inflight"] = max(0, int(_STATE.get("tool_inflight") or 0) - 1)
         if _tool_ok(kwargs):
-            _pulse(ANIM_JUMPING, reason="tool_ok")
+            with _LOCK:
+                flip = not bool(_STATE.get("success_flip"))
+                _STATE["success_flip"] = flip
+                _STATE["recovering"] = False
+            _pulse(ANIM_CELEBRATE if flip else ANIM_JUMPING, reason="tool_ok")
         else:
+            with _LOCK:
+                _STATE["recovering"] = True
             _pulse(ANIM_FAILED, reason="tool_error")
 
     def api_request_error(**kwargs: Any) -> None:
+        with _LOCK:
+            _STATE["recovering"] = True
         _pulse(ANIM_FAILED, reason="api_error")
 
     def pre_approval_request(**kwargs: Any) -> None:
@@ -431,6 +631,8 @@ def _make_hooks() -> dict[str, Callable[..., Any]]:
     def post_approval_response(**kwargs: Any) -> None:
         with _LOCK:
             _STATE["awaiting_human"] = False
+        if _approval_granted(kwargs):
+            _pulse(ANIM_NOD, reason="approval_granted")
 
     def on_human_input_request(**kwargs: Any) -> None:
         with _LOCK:
@@ -440,10 +642,12 @@ def _make_hooks() -> dict[str, Callable[..., Any]]:
     def on_human_input_resolved(**kwargs: Any) -> None:
         with _LOCK:
             _STATE["awaiting_human"] = False
+        _pulse(ANIM_NOD, reason="human_input_received")
 
     def agent_loop_stopped(**kwargs: Any) -> None:
         with _LOCK:
             _STATE["streaming"] = False
+            _STATE["thinking"] = False
             _STATE["tool_inflight"] = 0
             _STATE["awaiting_human"] = False
         _pulse(ANIM_WAVING, reason="loop_stopped", hold_s=1.2)
@@ -456,7 +660,10 @@ def _make_hooks() -> dict[str, Callable[..., Any]]:
     def subagent_stop(**kwargs: Any) -> None:
         with _LOCK:
             _STATE["tool_inflight"] = max(0, int(_STATE.get("tool_inflight") or 0) - 1)
-        _pulse(ANIM_JUMPING, reason="subagent_done", hold_s=1.0)
+        with _LOCK:
+            flip = not bool(_STATE.get("success_flip"))
+            _STATE["success_flip"] = flip
+        _pulse(ANIM_CELEBRATE if flip else ANIM_JUMPING, reason="subagent_done")
 
     return {
         "on_session_start": on_session_start,

@@ -52,6 +52,8 @@ ROUTE_SETUP = "/setup"
 ROUTE_DOCTOR = "/doctor"
 ROUTE_COMPANION = "/companion"
 ROUTE_COMPANION_ATLAS = "/companion/atlas"
+ROUTE_COMPANION_CLIPS = "/companion/clips"
+ROUTE_COMPANION_CLIP = "/companion/clip"
 
 _LOG_LOCK = threading.Lock()
 _LOG: deque[dict[str, Any]] = deque(maxlen=LOG_MAX)
@@ -975,6 +977,13 @@ def companion_control(body: dict[str, Any] | None = None) -> dict[str, Any]:
         companion_mod.set_hidden(bool(body.get("hidden")))
     if body.get("costume"):
         companion_mod.set_costume(str(body.get("costume")))
+    if "say" in body or "speech" in body or "text" in body and body.get("op") == "say":
+        raw = body.get("say") if "say" in body else body.get("speech") if "speech" in body else body.get("text")
+        if raw is None or raw is False or raw == "":
+            companion_mod.clear_speech()
+        else:
+            hold = body.get("hold_s") or body.get("ttl_s")
+            companion_mod.say(str(raw), hold_s=float(hold) if hold is not None else None)
     # Mirror config companion: off
     mode = body.get("companion") or body.get("mode")
     if isinstance(mode, str):
@@ -1115,6 +1124,26 @@ def create_router():
             return atlas_payload(costume)
         except Exception as exc:
             return _json_err(str(exc) or "Companion atlas unavailable.", Code.NOT_IMPLEMENTED)
+
+    @router.get("/companion/clips")
+    def route_companion_clips():
+        try:
+            from templeos.companion import clips_manifest
+
+            return clips_manifest()
+        except Exception as exc:
+            return _json_err(str(exc) or "Companion clips unavailable.", Code.NOT_IMPLEMENTED)
+
+    @router.get("/companion/clip")
+    def route_companion_clip(request: Request):
+        name = request.query_params.get("name") if request.query_params is not None else None
+        try:
+            from templeos.companion import clip_payload
+
+            return clip_payload(str(name or ""))
+        except Exception as exc:
+            return _json_err(str(exc) or "Companion clip unavailable.", Code.NOT_IMPLEMENTED)
+
 
 
     return router

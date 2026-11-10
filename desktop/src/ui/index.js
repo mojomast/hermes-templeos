@@ -31,4 +31,4 @@ export {
   flavorLabel,
 } from "./logic.js";
 
-export { TerryCompanionOverlay, CompanionControls } from "./companion.js";
+export { TerryCompanionOverlay, CompanionControls, TerryCompanion } from "./companion.js";

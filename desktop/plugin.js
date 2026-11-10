@@ -72,6 +72,9 @@ function createApi(rest) {
     companionSet: (body) => call("/companion", { method: "POST", body: body || {} }),
     companionAtlas: (opts) =>
       call(joinPath("/companion/atlas", opts && opts.costume ? { costume: opts.costume } : null)),
+    companionClips: () => call("/companion/clips"),
+    companionClip: (opts) => call(joinPath("/companion/clip", { name: opts && opts.name ? opts.name : "" })),
+    companionSay: (body) => call("/companion", { method: "POST", body: body || {} }),
   };
 }
 
@@ -142,13 +145,37 @@ const __m2 = (function () {
   const jsxs = __ext4;
   const blobUrlFromBase64 = __m0["blobUrlFromBase64"];
   const revokeUrl = __m0["revokeUrl"];
-/** Terry companion atlas overlay for the TempleOS pane.
+/** Terry companion atlas + v2 clip overlay for the TempleOS pane.
  *
  * Fan tribute to Terry A. Davis — not affiliated with TempleOS or his estate.
- * Loads atlas PNG+JSON through ctx.rest (/companion/atlas) into a Blob URL.
+ * Loads the nine-row atlas and on-demand clip strips through ctx.rest.
  * Hide / costume preferences persist through the plugin backend (plugin data dir).
+ *
+ * Speech bubbles: call TerryCompanion.say(text) (also POST /companion {say})
+ * to render a bubble to the left/above of Terry. Text is supplied by the
+ * caller; nothing is invented.
  */
 
+
+const RICH_CLIPS = {
+  vm_booting: true,
+  celebrate_short: true,
+  greet: true,
+  nod: true,
+  stretch: true,
+  relieved: true,
+  typing: true,
+  talking: true,
+  smoking: true,
+  exhaling: true,
+  dance: true,
+};
+
+const IDLE_VARIETY = ["stretch", "smoking", "exhaling"];
+const LONG_IDLE_MS = 22000;
+const IDLE_RETRY_MS = 14000;
+const IDLE_CHANCE = 0.4;
+const TRIPLE_MS = 650;
 
 function rowFor(atlas, name) {
   const rows = (atlas && atlas.rows) || [];
@@ -158,17 +185,64 @@ function rowFor(atlas, name) {
   return rows[0] || null;
 }
 
-/** Canvas sprite that plays the named atlas row via requestAnimationFrame. */
-function TerryCompanionOverlay({ api, animation, costume, hidden, enabled }) {
+function clipFrames(clip) {
+  if (!clip) return [];
+  if (clip.frames && clip.frames.length) return clip.frames;
+  const count = Number(clip.count) || 0;
+  const cell = clip.cell || [192, 208];
+  const w = cell[0] || 192;
+  const h = cell[1] || 208;
+  const frames = [];
+  for (let i = 0; i < count; i += 1) frames.push({ x: i * w, y: 0, w: w, h: h });
+  return frames;
+}
+
+/** Public hook used by the pane and by other UI. Wired when the overlay mounts. */
+const TerryCompanion = {
+  say(text, opts) {
+    const impl = TerryCompanion._say;
+    if (typeof impl === "function") return impl(text, opts);
+    return Promise.reject(new Error("Terry companion is not mounted."));
+  },
+  _say: null,
+};
+
+/** Canvas sprite that plays atlas rows or v2 clip strips via requestAnimationFrame. */
+function TerryCompanionOverlay({ api, animation, costume, hidden, enabled, speech }) {
   const canvasRef = useRef(null);
   const [ready, setReady] = useState(false);
   const [error, setError] = useState("");
+  const [bubble, setBubble] = useState((speech && speech.text) || "");
   const packRef = useRef(null);
+  const clipsRef = useRef(new Map());
   const animRef = useRef(animation || "idle");
+  const localRef = useRef({ name: "", until: 0, follow: "" });
+  const idleAtRef = useRef(0);
   const rafRef = useRef(0);
   const startRef = useRef(0);
+  const lastNameRef = useRef("");
+  const clicksRef = useRef([]);
 
-  animRef.current = animation || "idle";
+  const hostAnim = animation || "idle";
+
+  useEffect(() => {
+    const text = speech && speech.active !== false ? String((speech && speech.text) || "") : "";
+    setBubble(text);
+  }, [speech && speech.text, speech && speech.active]);
+
+  useEffect(() => {
+    TerryCompanion._say = (text, opts) => {
+      const raw = String(text || "").trim();
+      setBubble(raw);
+      if (typeof api.companionSay === "function") {
+        return Promise.resolve(api.companionSay({ say: raw, hold_s: opts && opts.hold_s })).catch(() => {});
+      }
+      return Promise.resolve();
+    };
+    return () => {
+      if (TerryCompanion._say) TerryCompanion._say = null;
+    };
+  }, [api]);
 
   useEffect(() => {
     if (hidden || enabled === false) {
@@ -224,8 +298,69 @@ function TerryCompanionOverlay({ api, animation, costume, hidden, enabled }) {
       const prev = packRef.current;
       if (prev && prev.url) revokeUrl(prev.url);
       packRef.current = null;
+      clipsRef.current.forEach((entry) => {
+        if (entry && entry.url) revokeUrl(entry.url);
+      });
+      clipsRef.current = new Map();
     };
   }, []);
+
+  function ensureClip(name) {
+    if (!RICH_CLIPS[name]) return Promise.resolve(null);
+    const cached = clipsRef.current.get(name);
+    if (cached && cached.image) return Promise.resolve(cached);
+    if (cached && cached.pending) return cached.pending;
+    const pending = Promise.resolve(api.companionClip({ name }))
+      .then((body) => {
+        if (!body || body.ok === false || !body.data || !body.clip) {
+          clipsRef.current.delete(name);
+          return null;
+        }
+        return new Promise((resolve) => {
+          const url = blobUrlFromBase64(body.data, body.mime || "image/png");
+          const image = new Image();
+          image.onload = () => {
+            const entry = { url, image, clip: body.clip, name };
+            clipsRef.current.set(name, entry);
+            resolve(entry);
+          };
+          image.onerror = () => {
+            revokeUrl(url);
+            clipsRef.current.delete(name);
+            resolve(null);
+          };
+          image.src = url;
+        });
+      })
+      .catch(() => {
+        clipsRef.current.delete(name);
+        return null;
+      });
+    clipsRef.current.set(name, { pending });
+    return pending;
+  }
+
+  function playLocal(name, durationMs, follow) {
+    localRef.current = {
+      name: name,
+      until: performance.now() + Math.max(200, Number(durationMs) || 1500),
+      follow: follow || "",
+    };
+    startRef.current = performance.now();
+    lastNameRef.current = name;
+    ensureClip(name);
+  }
+
+  function onTerryClick() {
+    const now = Date.now();
+    const clicks = clicksRef.current.filter((t) => now - t <= TRIPLE_MS);
+    clicks.push(now);
+    clicksRef.current = clicks;
+    if (clicks.length >= 3) {
+      clicksRef.current = [];
+      playLocal("dance", 7200, "");
+    }
+  }
 
   useEffect(() => {
     if (!ready || hidden || enabled === false) {
@@ -238,26 +373,85 @@ function TerryCompanionOverlay({ api, animation, costume, hidden, enabled }) {
     const ctx = canvas.getContext("2d");
     if (!ctx) return undefined;
     startRef.current = performance.now();
+    lastNameRef.current = "";
+    idleAtRef.current = performance.now();
 
     const tick = (now) => {
-      const pack = packRef.current;
-      if (!pack || !pack.image || !pack.atlas) {
-        rafRef.current = requestAnimationFrame(tick);
-        return;
+      const local = localRef.current;
+      if (local.name && now >= local.until) {
+        const follow = local.follow;
+        localRef.current = { name: "", until: 0, follow: "" };
+        if (follow) {
+          const nextDur = follow === "exhaling" ? 3200 : 1500;
+          playLocal(follow, nextDur, "");
+        }
       }
-      const row = rowFor(pack.atlas, animRef.current);
-      const cell = pack.atlas.cell || [192, 208];
-      const cw = cell[0] || 192;
-      const ch = cell[1] || 208;
+      const busyHost = hostAnim !== "idle";
+      if (busyHost && localRef.current.name && localRef.current.name !== "dance") {
+        localRef.current = { name: "", until: 0, follow: "" };
+      }
+      // Dance yields if a real host state takes over (tool, error, boot…).
+      if (busyHost && localRef.current.name === "dance" && hostAnim !== "idle") {
+        localRef.current = { name: "", until: 0, follow: "" };
+      }
+
+      let name = (localRef.current.name && now < localRef.current.until && localRef.current.name) || hostAnim || "idle";
+      animRef.current = name;
+
+      if (name === "idle") {
+        if (!idleAtRef.current) idleAtRef.current = now;
+        if (now - idleAtRef.current >= LONG_IDLE_MS && !localRef.current.name) {
+          idleAtRef.current = now + IDLE_RETRY_MS;
+          if (Math.random() < IDLE_CHANCE) {
+            const pick = IDLE_VARIETY[Math.floor(Math.random() * IDLE_VARIETY.length)];
+            const dur = pick === "stretch" ? 3400 : pick === "smoking" ? 5600 : 3200;
+            const follow = pick === "smoking" && Math.random() < 0.55 ? "exhaling" : "";
+            playLocal(pick, dur, follow);
+            name = pick;
+            animRef.current = name;
+          }
+        }
+      } else if (!localRef.current.name) {
+        idleAtRef.current = now;
+      }
+
+      if (name !== lastNameRef.current) {
+        startRef.current = now;
+        lastNameRef.current = name;
+        if (RICH_CLIPS[name]) ensureClip(name);
+      }
+
+      const pack = packRef.current;
+      const clipEntry = clipsRef.current.get(name);
+      let image = null;
+      let frames = [];
+      let frameMs = 183;
+      let loop = true;
+      if (clipEntry && clipEntry.image && clipEntry.clip) {
+        image = clipEntry.image;
+        frames = clipFrames(clipEntry.clip);
+        frameMs = Number(clipEntry.clip.frame_ms) || 50;
+        loop = clipEntry.clip.loop !== false;
+      } else if (pack && pack.image && pack.atlas) {
+        const row = rowFor(pack.atlas, name);
+        image = pack.image;
+        frames = (row && row.frames) || [];
+        frameMs = (row && Number(row.frame_ms)) || Number(pack.atlas.loop_ms) / Math.max(1, frames.length) || 183;
+        loop = true;
+      }
+
+      const cw = 192;
+      const ch = 208;
       if (canvas.width !== cw) canvas.width = cw;
       if (canvas.height !== ch) canvas.height = ch;
       ctx.clearRect(0, 0, cw, ch);
-      if (row && row.frames && row.frames.length) {
-        const frameMs = Number(row.frame_ms) || Number(pack.atlas.loop_ms) / row.frames.length || 183;
+      if (image && frames.length) {
         const elapsed = Math.max(0, now - startRef.current);
-        const index = Math.floor(elapsed / frameMs) % row.frames.length;
-        const frame = row.frames[index];
-        ctx.drawImage(pack.image, frame.x, frame.y, frame.w, frame.h, 0, 0, cw, ch);
+        let index;
+        if (loop) index = Math.floor(elapsed / frameMs) % frames.length;
+        else index = Math.min(frames.length - 1, Math.floor(elapsed / frameMs));
+        const frame = frames[index];
+        ctx.drawImage(image, frame.x, frame.y, frame.w, frame.h, 0, 0, cw, ch);
       }
       rafRef.current = requestAnimationFrame(tick);
     };
@@ -266,31 +460,47 @@ function TerryCompanionOverlay({ api, animation, costume, hidden, enabled }) {
       if (rafRef.current) cancelAnimationFrame(rafRef.current);
       rafRef.current = 0;
     };
-  }, [ready, hidden, enabled, animation]);
+  }, [ready, hidden, enabled, hostAnim, api]);
 
   if (enabled === false) return null;
   if (hidden) return null;
 
-  return jsxs("div", {
-    className: "tos-companion",
-    "data-testid": "companion",
-    "data-animation": animation || "idle",
-    "data-costume": costume || "base",
-    title: "Terry companion — fan tribute to Terry A. Davis",
+  return jsxs("aside", {
+    className: "tos-companion-dock",
+    "data-testid": "companion-dock",
+    "data-animation": animRef.current || hostAnim || "idle",
+    "aria-label": "Terry companion",
     children: [
-      ready
-        ? jsx("canvas", {
-            ref: canvasRef,
-            className: "tos-companion-canvas",
-            width: 192,
-            height: 208,
-            "aria-hidden": "true",
+      bubble
+        ? jsx("div", {
+            className: "tos-companion-bubble",
+            "data-testid": "companion-bubble",
+            children: bubble,
           })
-        : jsx("div", {
-            className: "tos-companion-loading",
-            "data-testid": "companion-loading",
-            children: error || "…",
-          }),
+        : jsx("div", { className: "tos-companion-bubble-slot", "aria-hidden": "true" }),
+      jsxs("div", {
+        className: "tos-companion",
+        "data-testid": "companion",
+        "data-animation": hostAnim || "idle",
+        "data-costume": costume || "base",
+        title: "Terry companion — fan tribute to Terry A. Davis. Triple-click to dance.",
+        onClick: onTerryClick,
+        children: [
+          ready
+            ? jsx("canvas", {
+                ref: canvasRef,
+                className: "tos-companion-canvas",
+                width: 192,
+                height: 208,
+                "aria-hidden": "true",
+              })
+            : jsx("div", {
+                className: "tos-companion-loading",
+                "data-testid": "companion-loading",
+                children: error || "…",
+              }),
+        ],
+      }),
     ],
   });
 }
@@ -319,9 +529,7 @@ function CompanionControls({ hidden, onToggleHidden, costume, onCostume, costume
             "data-testid": "companion-costume",
             value: costume || "base",
             onChange: (event) => onCostume && onCostume(event.target.value),
-            children: options.map((name) =>
-              jsx("option", { value: name, children: name }, name)
-            ),
+            children: options.map((name) => jsx("option", { value: name, children: name }, name)),
           }),
         ],
       }),
@@ -329,7 +537,7 @@ function CompanionControls({ hidden, onToggleHidden, costume, onCostume, costume
   });
 }
 
-  return { "TerryCompanionOverlay": TerryCompanionOverlay, "CompanionControls": CompanionControls };
+  return { "TerryCompanion": TerryCompanion, "TerryCompanionOverlay": TerryCompanionOverlay, "CompanionControls": CompanionControls };
 })();
 
 // desktop/src/ui/logic.js
@@ -1014,6 +1222,9 @@ function TempleOSPane({ transport, initial } = {}) {
         className: "tos-body",
         children: [
           jsxs("div", {
+            className: "tos-stage-row",
+            children: [
+          jsxs("div", {
             className: "tos-stage",
             children: [
               jsxs("div", {
@@ -1053,6 +1264,16 @@ function TempleOSPane({ transport, initial } = {}) {
                 : jsx("p", { className: "tos-hatch tos-hatch-idle", "data-testid": "keyboard-hatch", children: "Click the screen to type. Esc releases the keyboard." }),
             ],
           }),
+              jsx(TerryCompanionOverlay, {
+                api: api,
+                animation: (status.companion && status.companion.animation) || "idle",
+                costume: companionCostume,
+                hidden: companionHidden,
+                enabled: !(status.companion && status.companion.enabled === false),
+                speech: (status.companion && status.companion.speech) || null,
+              }),
+            ],
+          }),
           jsxs("section", {
             className: "tos-log",
             "data-testid": "agent-log",
@@ -1073,13 +1294,6 @@ function TempleOSPane({ transport, initial } = {}) {
             ],
           }),
         ],
-      }),
-      jsx(TerryCompanionOverlay, {
-        api: api,
-        animation: (status.companion && status.companion.animation) || "idle",
-        costume: companionCostume,
-        hidden: companionHidden,
-        enabled: !(status.companion && status.companion.enabled === false),
       }),
       error ? jsx("div", { className: "tos-error", "data-testid": "error", children: error }) : null,
       info ? jsx("div", { className: "tos-info", "data-testid": "info", children: info }) : null,
@@ -1174,11 +1388,11 @@ function createDesktopPlugin() {
 const __m6 = (function () {
 
 
-  return { "TempleOSPane": __m4["TempleOSPane"], "PANE_ID": __m5["PANE_ID"], "PANE_TITLE": __m5["PANE_TITLE"], "createPaneContribution": __m5["createPaneContribution"], "registerTempleOSPane": __m5["registerTempleOSPane"], "createDesktopPlugin": __m5["createDesktopPlugin"], "DEFAULT_WIDTH": __m3["DEFAULT_WIDTH"], "DEFAULT_HEIGHT": __m3["DEFAULT_HEIGHT"], "CONTROL_MODES": __m3["CONTROL_MODES"], "GOLDEN_SNAPSHOT": __m3["GOLDEN_SNAPSHOT"], "guestSize": __m3["guestSize"], "integerScale": __m3["integerScale"], "mapPointerToGuest": __m3["mapPointerToGuest"], "modeLabel": __m3["modeLabel"], "accelLabel": __m3["accelLabel"], "statusSummary": __m3["statusSummary"], "drivingChip": __m3["drivingChip"], "needsOnboarding": __m3["needsOnboarding"], "firstCheck": __m3["firstCheck"], "checkState": __m3["checkState"], "pollIntervalMs": __m3["pollIntervalMs"], "isReleaseHatch": __m3["isReleaseHatch"], "qcodeFor": __m3["qcodeFor"], "keyEventToPayload": __m3["keyEventToPayload"], "nextMode": __m3["nextMode"], "userMayInput": __m3["userMayInput"], "logLine": __m3["logLine"], "flavorLabel": __m3["flavorLabel"], "TerryCompanionOverlay": __m2["TerryCompanionOverlay"], "CompanionControls": __m2["CompanionControls"] };
+  return { "TempleOSPane": __m4["TempleOSPane"], "PANE_ID": __m5["PANE_ID"], "PANE_TITLE": __m5["PANE_TITLE"], "createPaneContribution": __m5["createPaneContribution"], "registerTempleOSPane": __m5["registerTempleOSPane"], "createDesktopPlugin": __m5["createDesktopPlugin"], "DEFAULT_WIDTH": __m3["DEFAULT_WIDTH"], "DEFAULT_HEIGHT": __m3["DEFAULT_HEIGHT"], "CONTROL_MODES": __m3["CONTROL_MODES"], "GOLDEN_SNAPSHOT": __m3["GOLDEN_SNAPSHOT"], "guestSize": __m3["guestSize"], "integerScale": __m3["integerScale"], "mapPointerToGuest": __m3["mapPointerToGuest"], "modeLabel": __m3["modeLabel"], "accelLabel": __m3["accelLabel"], "statusSummary": __m3["statusSummary"], "drivingChip": __m3["drivingChip"], "needsOnboarding": __m3["needsOnboarding"], "firstCheck": __m3["firstCheck"], "checkState": __m3["checkState"], "pollIntervalMs": __m3["pollIntervalMs"], "isReleaseHatch": __m3["isReleaseHatch"], "qcodeFor": __m3["qcodeFor"], "keyEventToPayload": __m3["keyEventToPayload"], "nextMode": __m3["nextMode"], "userMayInput": __m3["userMayInput"], "logLine": __m3["logLine"], "flavorLabel": __m3["flavorLabel"], "TerryCompanionOverlay": __m2["TerryCompanionOverlay"], "CompanionControls": __m2["CompanionControls"], "TerryCompanion": __m2["TerryCompanion"] };
 })();
 
 const TEMPLEOS_STYLE_ID = "templeos-desktop-styles";
-const TEMPLEOS_STYLES = "/* TempleOS pane. 16-color accents on Hermes chrome variables. */\n\n.tos-pane {\n  color-scheme: dark;\n  --tos-black: #000000;\n  --tos-navy: #0000aa;\n  --tos-yellow: #ffff55;\n  --tos-white: #ffffff;\n  --tos-ltgray: #aaaaaa;\n  --tos-dkgray: #555555;\n  --tos-cyan: #55ffff;\n  --tos-green: #55ff55;\n  --tos-red: #ff5555;\n  --tos-blue: #5555ff;\n  --tos-brown: #aa5500;\n  display: flex;\n  flex-direction: column;\n  gap: 10px;\n  padding: 12px 14px 16px;\n  color: var(--tos-yellow);\n  background:\n    linear-gradient(180deg, color-mix(in srgb, var(--tos-navy) 35%, var(--tos-black)) 0 52px, var(--tos-black) 52px);\n  font-family: \"IBM Plex Mono\", \"Lucida Console\", ui-monospace, monospace;\n  min-height: 100%;\n  box-sizing: border-box;\n}\n\n.tos-top,\n.tos-bar {\n  display: flex;\n  flex-wrap: wrap;\n  gap: 8px;\n  align-items: center;\n}\n\n.tos-brand {\n  display: flex;\n  gap: 8px;\n  align-items: center;\n  margin-right: 6px;\n}\n\n.tos-brand strong {\n  display: block;\n  font-size: 14px;\n  letter-spacing: 0.08em;\n  text-transform: uppercase;\n  color: var(--tos-yellow);\n}\n\n.tos-brand em {\n  display: block;\n  font-style: normal;\n  font-size: 10px;\n  letter-spacing: 0.16em;\n  text-transform: uppercase;\n  color: var(--tos-ltgray);\n}\n\n.tos-mark {\n  width: 22px;\n  height: 22px;\n  background:\n    linear-gradient(180deg, var(--tos-navy), #000055);\n  box-shadow: inset 0 0 0 1px var(--tos-yellow);\n}\n\n.tos-badge,\n.tos-chip,\n.tos-btn {\n  font: inherit;\n  color: var(--tos-yellow);\n  background: transparent;\n  border: 1px solid color-mix(in srgb, var(--tos-yellow) 55%, var(--tos-dkgray));\n  border-radius: 2px;\n  padding: 3px 9px;\n  letter-spacing: 0.02em;\n}\n\n.tos-badge,\n.tos-chip {\n  font-size: 11px;\n  text-transform: uppercase;\n}\n\n.tos-badge-accel {\n  color: var(--tos-cyan);\n  border-color: color-mix(in srgb, var(--tos-cyan) 50%, var(--tos-dkgray));\n}\n\n.tos-chip {\n  margin-left: auto;\n  border-radius: 999px;\n  color: var(--tos-ltgray);\n  text-transform: none;\n}\n\n.tos-btn {\n  cursor: pointer;\n  background: color-mix(in srgb, var(--tos-navy) 40%, transparent);\n}\n\n.tos-btn:hover:not(:disabled) {\n  background: color-mix(in srgb, var(--tos-navy) 80%, var(--tos-black));\n  border-color: var(--tos-yellow);\n}\n\n.tos-btn:disabled {\n  opacity: 0.4;\n  cursor: default;\n  color: var(--tos-ltgray);\n  border-color: var(--tos-dkgray);\n  background: transparent;\n}\n\n.tos-btn.is-on,\n.tos-primary {\n  background: color-mix(in srgb, var(--tos-navy) 85%, var(--tos-black));\n  border-color: var(--tos-yellow);\n  color: var(--tos-yellow);\n  font-weight: 650;\n}\n\n.tos-modes {\n  display: flex;\n  gap: 0;\n  margin-left: 4px;\n}\n\n.tos-modes .tos-btn {\n  border-radius: 0;\n}\n\n.tos-modes .tos-btn:first-child {\n  border-top-left-radius: 2px;\n  border-bottom-left-radius: 2px;\n}\n\n.tos-modes .tos-btn:last-child {\n  border-top-right-radius: 2px;\n  border-bottom-right-radius: 2px;\n}\n\n.tos-drive {\n  align-self: flex-start;\n  padding: 4px 12px;\n  border: 1px solid var(--tos-yellow);\n  background: color-mix(in srgb, var(--tos-navy) 70%, var(--tos-black));\n  color: var(--tos-yellow);\n  font-size: 12px;\n  letter-spacing: 0.04em;\n  text-transform: uppercase;\n}\n\n.tos-drive-agent {\n  border-color: var(--tos-cyan);\n  color: var(--tos-cyan);\n}\n\n.tos-drive-user {\n  border-color: var(--tos-green);\n  color: var(--tos-green);\n}\n\n.tos-onboard {\n  padding: 12px 14px;\n  border: 1px solid color-mix(in srgb, var(--tos-yellow) 50%, var(--tos-dkgray));\n  background: color-mix(in srgb, var(--tos-navy) 22%, var(--tos-black));\n}\n\n.tos-onboard h2,\n.tos-log h2 {\n  margin: 0 0 8px;\n  font-size: 13px;\n  font-weight: 650;\n  letter-spacing: 0.08em;\n  text-transform: uppercase;\n  color: var(--tos-yellow);\n}\n\n.tos-onboard p,\n.tos-hint,\n.tos-hatch,\n.tos-error,\n.tos-info,\n.tos-log,\n.tos-placeholder {\n  font-size: 13px;\n  line-height: 1.45;\n}\n\n.tos-onboard p,\n.tos-hint {\n  margin: 0 0 10px;\n  color: var(--tos-ltgray);\n  max-width: 62ch;\n}\n\n.tos-checks {\n  display: flex;\n  flex-wrap: wrap;\n  gap: 8px 18px;\n  margin: 0 0 12px;\n  padding: 0;\n  list-style: none;\n}\n\n.tos-check-ok { color: var(--tos-green); }\n.tos-check-no { color: var(--tos-red); }\n.tos-check-unknown { color: var(--tos-ltgray); }\n\n.tos-body {\n  display: grid;\n  grid-template-columns: max-content minmax(260px, 1fr);\n  gap: 12px;\n  align-items: start;\n  min-height: 0;\n}\n\n.tos-stage {\n  min-width: 0;\n}\n\n.tos-screen {\n  background: var(--tos-black);\n  border: 1px solid var(--tos-dkgray);\n  image-rendering: pixelated;\n  overflow: hidden;\n  outline: none;\n  cursor: crosshair;\n  box-shadow: 0 0 0 1px var(--tos-black);\n}\n\n.tos-screen img {\n  display: block;\n  image-rendering: pixelated;\n  image-rendering: crisp-edges;\n}\n\n.tos-screen.is-focused {\n  border-color: var(--tos-cyan);\n  box-shadow: 0 0 0 2px var(--tos-cyan);\n}\n\n.tos-placeholder {\n  display: flex;\n  align-items: center;\n  justify-content: center;\n  width: 100%;\n  height: 100%;\n  color: var(--tos-yellow);\n  text-align: center;\n  padding: 16px;\n  box-sizing: border-box;\n}\n\n.tos-hatch {\n  margin: 6px 0 0;\n  color: var(--tos-cyan);\n  font-size: 11px;\n  letter-spacing: 0.04em;\n}\n\n.tos-hatch-idle {\n  color: var(--tos-ltgray);\n}\n\n.tos-log {\n  min-height: 160px;\n  max-height: 520px;\n  overflow: auto;\n  padding: 10px 12px;\n  border: 1px solid color-mix(in srgb, var(--tos-yellow) 35%, var(--tos-dkgray));\n  background: color-mix(in srgb, var(--tos-navy) 18%, var(--tos-black));\n}\n\n.tos-log-line,\n.tos-log p {\n  margin: 0 0 6px;\n  color: var(--tos-ltgray);\n  white-space: nowrap;\n  overflow: hidden;\n  text-overflow: ellipsis;\n}\n\n.tos-log-agent { color: var(--tos-cyan); }\n.tos-log-user { color: var(--tos-yellow); }\n.tos-log-line.is-failed { color: var(--tos-red); }\n.tos-log-empty { color: var(--ui-text-tertiary, var(--tos-dkgray)); }\n\n.tos-error { color: var(--tos-red); }\n.tos-info { color: var(--tos-cyan); }\n\n@media (max-width: 900px) {\n  .tos-body {\n    grid-template-columns: 1fr;\n  }\n  .tos-chip {\n    margin-left: 0;\n  }\n}\n\n/* Terry companion overlay (fan tribute). */\n.tos-pane {\n  position: relative;\n}\n\n.tos-companion {\n  position: absolute;\n  right: 10px;\n  bottom: 10px;\n  z-index: 6;\n  width: 96px;\n  height: 104px;\n  pointer-events: none;\n  image-rendering: pixelated;\n  filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.55));\n}\n\n.tos-companion-canvas {\n  width: 96px;\n  height: 104px;\n  display: block;\n}\n\n.tos-companion-loading {\n  width: 96px;\n  height: 104px;\n  display: flex;\n  align-items: flex-end;\n  justify-content: center;\n  color: var(--tos-ltgray);\n  font-size: 10px;\n}\n\n.tos-companion-controls {\n  display: inline-flex;\n  gap: 6px;\n  align-items: center;\n  margin-left: auto;\n}\n\n.tos-companion-costume select {\n  font: inherit;\n  color: var(--tos-yellow);\n  background: var(--tos-black);\n  border: 1px solid color-mix(in srgb, var(--tos-yellow) 55%, var(--tos-dkgray));\n  border-radius: 2px;\n  padding: 2px 6px;\n}\n\n.tos-sr-only {\n  position: absolute;\n  width: 1px;\n  height: 1px;\n  padding: 0;\n  margin: -1px;\n  overflow: hidden;\n  clip: rect(0, 0, 0, 0);\n  white-space: nowrap;\n  border: 0;\n}\n";
+const TEMPLEOS_STYLES = "/* TempleOS pane. 16-color accents on Hermes chrome variables. */\n\n.tos-pane {\n  color-scheme: dark;\n  --tos-black: #000000;\n  --tos-navy: #0000aa;\n  --tos-yellow: #ffff55;\n  --tos-white: #ffffff;\n  --tos-ltgray: #aaaaaa;\n  --tos-dkgray: #555555;\n  --tos-cyan: #55ffff;\n  --tos-green: #55ff55;\n  --tos-red: #ff5555;\n  --tos-blue: #5555ff;\n  --tos-brown: #aa5500;\n  display: flex;\n  flex-direction: column;\n  gap: 10px;\n  padding: 12px 14px 16px;\n  color: var(--tos-yellow);\n  background:\n    linear-gradient(180deg, color-mix(in srgb, var(--tos-navy) 35%, var(--tos-black)) 0 52px, var(--tos-black) 52px);\n  font-family: \"IBM Plex Mono\", \"Lucida Console\", ui-monospace, monospace;\n  min-height: 100%;\n  box-sizing: border-box;\n}\n\n.tos-top,\n.tos-bar {\n  display: flex;\n  flex-wrap: wrap;\n  gap: 8px;\n  align-items: center;\n}\n\n.tos-brand {\n  display: flex;\n  gap: 8px;\n  align-items: center;\n  margin-right: 6px;\n}\n\n.tos-brand strong {\n  display: block;\n  font-size: 14px;\n  letter-spacing: 0.08em;\n  text-transform: uppercase;\n  color: var(--tos-yellow);\n}\n\n.tos-brand em {\n  display: block;\n  font-style: normal;\n  font-size: 10px;\n  letter-spacing: 0.16em;\n  text-transform: uppercase;\n  color: var(--tos-ltgray);\n}\n\n.tos-mark {\n  width: 22px;\n  height: 22px;\n  background:\n    linear-gradient(180deg, var(--tos-navy), #000055);\n  box-shadow: inset 0 0 0 1px var(--tos-yellow);\n}\n\n.tos-badge,\n.tos-chip,\n.tos-btn {\n  font: inherit;\n  color: var(--tos-yellow);\n  background: transparent;\n  border: 1px solid color-mix(in srgb, var(--tos-yellow) 55%, var(--tos-dkgray));\n  border-radius: 2px;\n  padding: 3px 9px;\n  letter-spacing: 0.02em;\n}\n\n.tos-badge,\n.tos-chip {\n  font-size: 11px;\n  text-transform: uppercase;\n}\n\n.tos-badge-accel {\n  color: var(--tos-cyan);\n  border-color: color-mix(in srgb, var(--tos-cyan) 50%, var(--tos-dkgray));\n}\n\n.tos-chip {\n  margin-left: auto;\n  border-radius: 999px;\n  color: var(--tos-ltgray);\n  text-transform: none;\n}\n\n.tos-btn {\n  cursor: pointer;\n  background: color-mix(in srgb, var(--tos-navy) 40%, transparent);\n}\n\n.tos-btn:hover:not(:disabled) {\n  background: color-mix(in srgb, var(--tos-navy) 80%, var(--tos-black));\n  border-color: var(--tos-yellow);\n}\n\n.tos-btn:disabled {\n  opacity: 0.4;\n  cursor: default;\n  color: var(--tos-ltgray);\n  border-color: var(--tos-dkgray);\n  background: transparent;\n}\n\n.tos-btn.is-on,\n.tos-primary {\n  background: color-mix(in srgb, var(--tos-navy) 85%, var(--tos-black));\n  border-color: var(--tos-yellow);\n  color: var(--tos-yellow);\n  font-weight: 650;\n}\n\n.tos-modes {\n  display: flex;\n  gap: 0;\n  margin-left: 4px;\n}\n\n.tos-modes .tos-btn {\n  border-radius: 0;\n}\n\n.tos-modes .tos-btn:first-child {\n  border-top-left-radius: 2px;\n  border-bottom-left-radius: 2px;\n}\n\n.tos-modes .tos-btn:last-child {\n  border-top-right-radius: 2px;\n  border-bottom-right-radius: 2px;\n}\n\n.tos-drive {\n  align-self: flex-start;\n  padding: 4px 12px;\n  border: 1px solid var(--tos-yellow);\n  background: color-mix(in srgb, var(--tos-navy) 70%, var(--tos-black));\n  color: var(--tos-yellow);\n  font-size: 12px;\n  letter-spacing: 0.04em;\n  text-transform: uppercase;\n}\n\n.tos-drive-agent {\n  border-color: var(--tos-cyan);\n  color: var(--tos-cyan);\n}\n\n.tos-drive-user {\n  border-color: var(--tos-green);\n  color: var(--tos-green);\n}\n\n.tos-onboard {\n  padding: 12px 14px;\n  border: 1px solid color-mix(in srgb, var(--tos-yellow) 50%, var(--tos-dkgray));\n  background: color-mix(in srgb, var(--tos-navy) 22%, var(--tos-black));\n}\n\n.tos-onboard h2,\n.tos-log h2 {\n  margin: 0 0 8px;\n  font-size: 13px;\n  font-weight: 650;\n  letter-spacing: 0.08em;\n  text-transform: uppercase;\n  color: var(--tos-yellow);\n}\n\n.tos-onboard p,\n.tos-hint,\n.tos-hatch,\n.tos-error,\n.tos-info,\n.tos-log,\n.tos-placeholder {\n  font-size: 13px;\n  line-height: 1.45;\n}\n\n.tos-onboard p,\n.tos-hint {\n  margin: 0 0 10px;\n  color: var(--tos-ltgray);\n  max-width: 62ch;\n}\n\n.tos-checks {\n  display: flex;\n  flex-wrap: wrap;\n  gap: 8px 18px;\n  margin: 0 0 12px;\n  padding: 0;\n  list-style: none;\n}\n\n.tos-check-ok { color: var(--tos-green); }\n.tos-check-no { color: var(--tos-red); }\n.tos-check-unknown { color: var(--tos-ltgray); }\n\n.tos-body {\n  display: grid;\n  grid-template-columns: max-content minmax(260px, 1fr);\n  gap: 12px;\n  align-items: start;\n  min-height: 0;\n}\n\n.tos-stage {\n  min-width: 0;\n}\n\n.tos-screen {\n  background: var(--tos-black);\n  border: 1px solid var(--tos-dkgray);\n  image-rendering: pixelated;\n  overflow: hidden;\n  outline: none;\n  cursor: crosshair;\n  box-shadow: 0 0 0 1px var(--tos-black);\n}\n\n.tos-screen img {\n  display: block;\n  image-rendering: pixelated;\n  image-rendering: crisp-edges;\n}\n\n.tos-screen.is-focused {\n  border-color: var(--tos-cyan);\n  box-shadow: 0 0 0 2px var(--tos-cyan);\n}\n\n.tos-placeholder {\n  display: flex;\n  align-items: center;\n  justify-content: center;\n  width: 100%;\n  height: 100%;\n  color: var(--tos-yellow);\n  text-align: center;\n  padding: 16px;\n  box-sizing: border-box;\n}\n\n.tos-hatch {\n  margin: 6px 0 0;\n  color: var(--tos-cyan);\n  font-size: 11px;\n  letter-spacing: 0.04em;\n}\n\n.tos-hatch-idle {\n  color: var(--tos-ltgray);\n}\n\n.tos-log {\n  min-height: 160px;\n  max-height: 520px;\n  overflow: auto;\n  padding: 10px 12px;\n  border: 1px solid color-mix(in srgb, var(--tos-yellow) 35%, var(--tos-dkgray));\n  background: color-mix(in srgb, var(--tos-navy) 18%, var(--tos-black));\n}\n\n.tos-log-line,\n.tos-log p {\n  margin: 0 0 6px;\n  color: var(--tos-ltgray);\n  white-space: nowrap;\n  overflow: hidden;\n  text-overflow: ellipsis;\n}\n\n.tos-log-agent { color: var(--tos-cyan); }\n.tos-log-user { color: var(--tos-yellow); }\n.tos-log-line.is-failed { color: var(--tos-red); }\n.tos-log-empty { color: var(--ui-text-tertiary, var(--tos-dkgray)); }\n\n.tos-error { color: var(--tos-red); }\n.tos-info { color: var(--tos-cyan); }\n\n@media (max-width: 900px) {\n  .tos-body {\n    grid-template-columns: 1fr;\n  }\n  .tos-chip {\n    margin-left: 0;\n  }\n}\n\n/* Terry companion dock (fan tribute). Sits to the right of the guest\n   screen, with reserved space to the left/above of Terry for speech bubbles. */\n.tos-stage-row {\n  display: flex;\n  flex-direction: row;\n  align-items: flex-end;\n  gap: 10px;\n  min-width: 0;\n}\n\n.tos-companion-dock {\n  flex: 0 0 200px;\n  width: 200px;\n  min-height: 168px;\n  display: flex;\n  flex-direction: column;\n  justify-content: flex-end;\n  align-items: stretch;\n  gap: 6px;\n  box-sizing: border-box;\n}\n\n.tos-companion-bubble {\n  align-self: flex-start;\n  max-width: 184px;\n  padding: 6px 9px;\n  border: 1px solid color-mix(in srgb, var(--tos-yellow) 55%, var(--tos-dkgray));\n  border-radius: 10px 10px 2px 10px;\n  background: color-mix(in srgb, var(--tos-navy) 70%, var(--tos-black));\n  color: var(--tos-yellow);\n  font-size: 11px;\n  line-height: 1.35;\n  letter-spacing: 0.01em;\n  pointer-events: none;\n}\n\n.tos-companion-bubble-slot {\n  min-height: 8px;\n  flex: 1 1 auto;\n  pointer-events: none;\n}\n\n.tos-companion {\n  position: relative;\n  align-self: flex-end;\n  z-index: 6;\n  width: 96px;\n  height: 104px;\n  pointer-events: auto;\n  cursor: pointer;\n  image-rendering: pixelated;\n  filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.55));\n}\n\n.tos-companion-canvas {\n  width: 96px;\n  height: 104px;\n  display: block;\n}\n\n.tos-companion-loading {\n  width: 96px;\n  height: 104px;\n  display: flex;\n  align-items: flex-end;\n  justify-content: center;\n  color: var(--tos-ltgray);\n  font-size: 10px;\n}\n\n.tos-companion-controls {\n  display: inline-flex;\n  gap: 6px;\n  align-items: center;\n  margin-left: auto;\n}\n\n.tos-companion-costume select {\n  font: inherit;\n  color: var(--tos-yellow);\n  background: var(--tos-black);\n  border: 1px solid color-mix(in srgb, var(--tos-yellow) 55%, var(--tos-dkgray));\n  border-radius: 2px;\n  padding: 2px 6px;\n}\n\n.tos-sr-only {\n  position: absolute;\n  width: 1px;\n  height: 1px;\n  padding: 0;\n  margin: -1px;\n  overflow: hidden;\n  clip: rect(0, 0, 0, 0);\n  white-space: nowrap;\n  border: 0;\n}\n\n@media (max-width: 900px) {\n  .tos-stage-row {\n    flex-wrap: wrap;\n  }\n}\n";
 
 function injectTempleOSStyles() {
   if (typeof document === "undefined") return false;
@@ -1220,6 +1434,7 @@ export const GOLDEN_SNAPSHOT = __m6["GOLDEN_SNAPSHOT"];
 export const PANE_ID = __m6["PANE_ID"];
 export const PANE_TITLE = __m6["PANE_TITLE"];
 export const TempleOSPane = __m6["TempleOSPane"];
+export const TerryCompanion = __m6["TerryCompanion"];
 export const TerryCompanionOverlay = __m6["TerryCompanionOverlay"];
 export const accelLabel = __m6["accelLabel"];
 export const checkState = __m6["checkState"];

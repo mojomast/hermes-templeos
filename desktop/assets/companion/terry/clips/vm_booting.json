@@ -1,0 +1,11 @@
+{
+  "image": "vm_booting.png",
+  "cell": [
+    192,
+    208
+  ],
+  "duration_ms": 3600,
+  "loop": true,
+  "count": 72,
+  "frame_ms": 50.0
+}
