@@ -102,6 +102,50 @@ test("Terry dock is the second child of .tos-stage-row, to the right of the disp
   assert.equal(canvas[0].props["data-companion-v4"], "1");
 });
 
+test("Agent log sits under the screen and Terry keeps the right column", () => {
+  resetFiber();
+  const node = rerender(TempleOSPane, {
+    transport: { rest: () => Promise.resolve({ ok: true }) },
+    initial: {
+      skipLoad: true,
+      frameUrl: "data:image/png;base64,AA==",
+      status: readyStatus(),
+      log: [{ id: "1", source: "agent", ok: true, text: "started the vm" }],
+    },
+  });
+  const stage = findAll(node, (item) => String(item.props.className || "").split(" ").includes("tos-stage"))[0];
+  const stageIds = [];
+  walk(stage, (item) => {
+    if (item.props["data-testid"]) stageIds.push(item.props["data-testid"]);
+  });
+  assert.ok(stageIds.indexOf("screen") >= 0);
+  assert.ok(stageIds.indexOf("screen") < stageIds.indexOf("keyboard-hatch"));
+  assert.ok(stageIds.indexOf("keyboard-hatch") < stageIds.indexOf("agent-log"));
+  assert.equal(stageIds.includes("companion-dock"), false);
+
+  const stack = findAll(stage, (item) => String(item.props.className || "").split(" ").includes("tos-screen-stack"))[0];
+  const screen = byTestId(stage, "screen")[0];
+  assert.equal(stack.props.style.width, screen.props.style.width);
+  const log = byTestId(stage, "agent-log")[0];
+  assert.match(String(log.props.className), /tos-log/);
+  assert.match(texts(log), /Agent log/);
+
+  const dock = byTestId(node, "companion-dock")[0];
+  const dockIds = [];
+  walk(dock, (item) => {
+    if (item.props["data-testid"]) dockIds.push(item.props["data-testid"]);
+  });
+  assert.equal(dockIds.includes("agent-log"), false);
+  assert.equal(dockIds.includes("screen"), false);
+
+  assert.match(CSS, /\.tos-log\s*\{[^}]*height:\s*210px/s);
+  assert.match(CSS, /\.tos-log\s*\{[^}]*max-height:\s*240px/s);
+  assert.match(CSS, /\.tos-log\s*\{[^}]*overflow:\s*auto/s);
+  assert.match(CSS, /\.tos-screen-stack\s*\{[^}]*flex-direction:\s*column/s);
+  assert.doesNotMatch(CSS, /\.tos-log\s*\{[^}]*grid-column:\s*2/s);
+  assert.doesNotMatch(CSS, /\.tos-log\s*\{[^}]*z-index:\s*8/s);
+});
+
 test("Hide Terry hides the dock and the toggle flips to Show Terry", () => {
   resetFiber();
   const node = rerender(TempleOSPane, {

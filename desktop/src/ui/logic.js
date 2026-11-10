@@ -52,15 +52,17 @@ function positive(value, fallback) {
   return fallback;
 }
 
-/** Largest aspect-preserving scale that fits in the viewport after the right rail.
+/** Largest aspect-preserving scale that fits beside Terry and above the log.
+ *  railWidth is Terry's column only. logHeight comes out of the vertical space.
  *  Fractional CSS scales are allowed. A zero measurement falls back to 1x. */
-export function fitGuestDisplay(viewport, guest, railWidth, gap = 12) {
+export function fitGuestDisplay(viewport, guest, railWidth, gap = 12, logHeight = 0) {
   const gw = positive(guest && guest.width, DEFAULT_WIDTH);
   const gh = positive(guest && guest.height, DEFAULT_HEIGHT);
   const rail = Math.max(0, Number(railWidth) || 0);
   const gutter = Math.max(0, Number(gap) || 0);
+  const log = Math.max(0, Number(logHeight) || 0);
   const availableWidth = Math.max(0, (Number(viewport && viewport.width) || 0) - rail - gutter);
-  const availableHeight = Math.max(0, Number(viewport && viewport.height) || 0);
+  const availableHeight = Math.max(0, (Number(viewport && viewport.height) || 0) - log);
   if (availableWidth <= 0 || availableHeight <= 0) {
     return { scale: 1, width: gw, height: gh, availableWidth: availableWidth, availableHeight: availableHeight };
   }
@@ -73,6 +75,7 @@ export function fitGuestDisplay(viewport, guest, railWidth, gap = 12) {
 export function measureScreenSpace(metrics, gap = 12) {
   const gutter = Math.max(0, Number(gap) || 0);
   const hatch = Math.max(0, Number(metrics && metrics.hatchHeight) || 0);
+  const log = Math.max(0, Number(metrics && metrics.logHeight) || 0);
   const height = Math.max(0, (Number(metrics && metrics.stageHeight) || 0) - hatch);
   const railW = Math.max(0, Number(metrics && metrics.railWidth) || 0);
   const railLeft = metrics ? metrics.railLeft : null;
@@ -88,11 +91,11 @@ export function measureScreenSpace(metrics, gap = 12) {
     const body = Number(metrics && metrics.bodyWidth) || 0;
     const stage = Number(metrics && metrics.stageWidth) || 0;
     const width = body > 0 ? body : stage + railW + gutter;
-    return { width: width, height: height, rail: railW, gap: gutter };
+    return { width: width, height: height, rail: railW, gap: gutter, log: log };
   }
   const stage = Number(metrics && metrics.stageWidth) || 0;
   const body = Number(metrics && metrics.bodyWidth) || 0;
-  return { width: stage > 0 ? stage : body, height: height, rail: 0, gap: gutter };
+  return { width: stage > 0 ? stage : body, height: height, rail: 0, gap: gutter, log: log };
 }
 
 export function maxScreenWidth(availableWidth, availableHeight, guestWidth, guestHeight) {
@@ -139,7 +142,7 @@ export function serializeScreenPref(pref) {
   return JSON.stringify({ mode: mode, width: width });
 }
 
-export function screenDisplay(pref, viewport, guest, railWidth, gap = 12, forcedScale) {
+export function screenDisplay(pref, viewport, guest, railWidth, gap = 12, forcedScale, logHeight = 0) {
   const gw = positive(guest && guest.width, DEFAULT_WIDTH);
   const gh = positive(guest && guest.height, DEFAULT_HEIGHT);
   const mode = pref && pref.mode === "manual" ? "manual" : "fit";
@@ -154,7 +157,7 @@ export function screenDisplay(pref, viewport, guest, railWidth, gap = 12, forced
       availableHeight: gh * scale,
     };
   }
-  const fit = fitGuestDisplay(viewport, { width: gw, height: gh }, railWidth, gap);
+  const fit = fitGuestDisplay(viewport, { width: gw, height: gh }, railWidth, gap, logHeight);
   if (mode !== "manual") return { mode: "fit", ...fit };
   const known = fit.availableWidth > 0 && fit.availableHeight > 0;
   const max = known
