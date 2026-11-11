@@ -1,6 +1,6 @@
 <div align="center">
 
-# TempleOS
+# TempleOS for Hermes
 
 **A local TempleOS-family guest in QEMU. The Hermes agent and you share one live screen.**
 
