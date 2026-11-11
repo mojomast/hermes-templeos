@@ -703,3 +703,38 @@ def test_module_contains_no_bbs_hostname_or_vps_default() -> None:
     assert "BEGIN PRIVATE KEY" not in source
     assert "TOH_BBS_ENDPOINT=" not in source
     assert "tailscale" not in source.lower()
+
+
+def test_digest_and_download_wire_shapes():
+    assert "DIGEST" in bbs.COMMANDS
+    assert "DOWNLOAD" in bbs.COMMANDS
+    frame = bbs.encode_request("DIGEST", {"limit": 5}, frame_id="digest-1")
+    parsed = bbs.Frame
+    assert frame.startswith(b"HBBS/1 REQ digest-1 DIGEST ")
+    frame = bbs.encode_request("DOWNLOAD", {"board": "holyc", "post_id": "post_1"})
+    assert b"DOWNLOAD" in frame
+    with pytest.raises(bbs.BbsValidationError):
+        bbs.encode_request("DIGEST", {"limit": 0})
+    with pytest.raises(bbs.BbsValidationError):
+        bbs.encode_request("DOWNLOAD", {"board": "holyc", "post_id": "x", "host": "evil"})
+    with pytest.raises(bbs.BbsValidationError):
+        bbs.encode_request("DOWNLOAD", {"board": "holyc"})
+
+
+def test_client_digest_and_download_helpers_use_the_documented_commands():
+    client = bbs.BbsClient()
+    seen: list[tuple[str, dict]] = []
+
+    def fake_request(command, args=None, **kwargs):
+        seen.append((command, dict(args or {})))
+        return {"ok": True}
+
+    client.request = fake_request
+    assert client.digest(limit=7) == {"ok": True}
+    assert client.download("post_1") == {"ok": True}
+    assert client.download("post_2", board="general") == {"ok": True}
+    assert seen == [
+        ("DIGEST", {"limit": 7}),
+        ("DOWNLOAD", {"board": "holyc", "post_id": "post_1"}),
+        ("DOWNLOAD", {"board": "general", "post_id": "post_2"}),
+    ]

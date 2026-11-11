@@ -27,13 +27,25 @@ TOOL_NAMES = (
     "templeos_files",
 )
 
-VM_OPS = ("start", "stop", "reset", "snapshot", "restore", "status", "doctor", "modem", "flavor")
+VM_OPS = (
+    "start",
+    "stop",
+    "reset",
+    "snapshot",
+    "restore",
+    "status",
+    "doctor",
+    "modem",
+    "flavor",
+    "session_start",
+    "bbs_digest",
+)
 SCREEN_OPS = ("look", "read_text", "wait_idle", "hash", "lore")
 INPUT_OPS = ("type", "keys", "click", "move", "holyc")
 FILES_OPS = ("list", "pull", "push")
 # test_contracts hardcodes the file samples, so keep its base set frozen and
 # advertise the P3 daemon RPC through the additive tuple.
-FILES_OPS_ALL = FILES_OPS + ("rpc",)
+FILES_OPS_ALL = FILES_OPS + ("rpc", "codeshare_fetch")
 RPC_METHODS = ("ping", "stat", "version")
 MODEM_MODES = ("status", "on", "off")
 
@@ -110,7 +122,7 @@ SCHEMA_VM = {
         "snapshot restore status doctor modem). THE supported boot path — never dial "
         "VNC/QMP sockets yourself. Network always off; modem is serial, not a NIC. "
         "snapshot ejects non-qcow2 writables first; restore issues cont if loadvm "
-        "left the VM paused. doctor checks QEMU, ISO pins, and /dev/kvm openability. op=flavor lists or selects the guest image (default templeoh / Temple of Hermes 0.1.2; tinkeros, templeos, and zealos stay selectable), fetches the pinned ISO if needed, and applies it on the next boot if the VM is running. "
+        "left the VM paused. doctor checks QEMU, ISO pins, and /dev/kvm openability. op=flavor lists or selects the guest image (default templeoh / Temple of Hermes 0.1.2; tinkeros, templeos, and zealos stay selectable), fetches the pinned ISO if needed, and applies it on the next boot if the VM is running. session_start reads the guest journal/projects summary; bbs_digest asks only the configured bbs endpoint for a compact digest. "
         "Sockets are existence flags only. If deferred behind tool_search, search "
         "for templeos vm first."
     ),
@@ -135,6 +147,14 @@ SCHEMA_VM = {
                 "type": "string",
                 "enum": list(MODEM_MODES),
                 "description": "op=modem: status, on, or off.",
+            },
+            "limit": {
+                "type": "integer",
+                "description": "op=session_start journal lines (default 5, max 10).",
+            },
+            "handle": {
+                "type": "string",
+                "description": "Guest Home handle for session_start/bbs ops.",
             },
         },
         "required": ["op"],
@@ -217,9 +237,10 @@ SCHEMA_INPUT = {
 SCHEMA_FILES = {
     "name": "templeos_files",
     "description": (
-        "List, pull, or push files, or probe the guest daemon with rpc. Host paths "
-        "must stay under the plugin data dir (TEMPLEOS_HOME). Never mount the live "
-        "RedSea qcow2 while QEMU has it open."
+        "List, pull, or push files, probe the guest daemon with rpc, or fetch a "
+        "holyc-board post into the guest Src folder. Host paths must stay under the "
+        "plugin data dir (TEMPLEOS_HOME). Never mount the live RedSea qcow2 while "
+        "QEMU has it open. codeshare_fetch never runs fetched code on the host."
     ),
     "parameters": {
         "type": "object",
@@ -245,6 +266,18 @@ SCHEMA_FILES = {
             "dest": {
                 "type": "string",
                 "description": "Confined host path to pull into.",
+            },
+            "id": {
+                "type": "string",
+                "description": "Post id for op=codeshare_fetch.",
+            },
+            "run": {
+                "type": "boolean",
+                "description": "Run fetched source inside the guest only (default false).",
+            },
+            "handle": {
+                "type": "string",
+                "description": "Guest Home handle for the Src folder.",
             },
         },
         "required": ["op"],
@@ -373,11 +406,17 @@ def _call_impl(fn: Callable[..., Any], *a: Any, **k: Any) -> str:
 
 # --- handlers ---
 
+VM_OP_ALIASES = {"digest": "bbs_digest", "bbs": "bbs_digest"}
+
+
 def handle_vm(params: Any) -> str:
     try:
         args = _args(params)
     except (ValueError, json.JSONDecodeError) as exc:
         return err(str(exc), Code.INVALID_ARGS)
+    if isinstance(args.get("op"), str) and args["op"].strip() in VM_OP_ALIASES:
+        args = dict(args)
+        args["op"] = VM_OP_ALIASES[args["op"].strip()]
     got = _require_op(args, VM_OPS, "templeos_vm")
     if not isinstance(got, str):
         return got[0]
@@ -416,6 +455,14 @@ def handle_vm(params: Any) -> str:
     if not isinstance(name, str) or not name.strip() or "/" in name or "\\" in name or ".." in name:
         return err("name must be a simple snapshot id (default golden).", Code.INVALID_ARGS)
 
+    if op == "session_start":
+        from templeos.session import session_start as impl
+
+        return _call_impl(impl, limit=args.get("limit", 5), handle=args.get("handle"))
+    if op == "bbs_digest":
+        from templeos.session import bbs_digest as impl
+
+        return _call_impl(impl, limit=10)
     if op == "modem":
         mode = args.get("mode") or "status"
         if mode not in MODEM_MODES:
@@ -585,11 +632,17 @@ def _daemon_rpc(method: str, path: str) -> dict[str, Any]:
     return body
 
 
+FILES_OP_ALIASES = {"fetch": "codeshare_fetch", "codeshare": "codeshare_fetch"}
+
+
 def handle_files(params: Any) -> str:
     try:
         args = _args(params)
     except (ValueError, json.JSONDecodeError) as exc:
         return err(str(exc), Code.INVALID_ARGS)
+    if isinstance(args.get("op"), str) and args["op"].strip() in FILES_OP_ALIASES:
+        args = dict(args)
+        args["op"] = FILES_OP_ALIASES[args["op"].strip()]
     got = _require_op(args, FILES_OPS_ALL, "templeos_files")
     if not isinstance(got, str):
         return got[0]
@@ -606,6 +659,16 @@ def handle_files(params: Any) -> str:
         if not isinstance(path, str) or not path.strip():
             return err("op=rpc path must be a guest path (default T:/).", Code.INVALID_ARGS)
         return _call_impl(_daemon_rpc, method, path)
+    if op == "codeshare_fetch":
+        post = args.get("id") or args.get("path")
+        if not isinstance(post, str) or not post.strip():
+            return err("op=codeshare_fetch requires id (a post id).", Code.INVALID_ARGS)
+        run = args.get("run", False)
+        if not isinstance(run, bool):
+            return err("run must be true or false.", Code.INVALID_ARGS)
+        from templeos.session import codeshare_fetch as impl
+
+        return _call_impl(impl, post.strip(), run=run, handle=args.get("handle"))
     if op == "list":
         path = args.get("path") or "T:/"
         if not isinstance(path, str) or not path.strip():
