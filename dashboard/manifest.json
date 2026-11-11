@@ -1,8 +1,8 @@
 {
   "name": "templeos",
   "label": "TempleOS",
-  "description": "Watch and co-drive a local TempleOS (TinkerOS) QEMU guest with the agent. The Desktop pane talks only through ctx.rest.",
+  "description": "Watch and co-drive a local TempleOS-family QEMU guest (default Temple of Hermes 0.1.2) with the agent. The Desktop pane talks only through ctx.rest.",
   "icon": "Monitor",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "api": "plugin_api.py"
 }

@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.1.1
+
+- Default flavor is Temple of Hermes 0.1.2 (`templeoh` / `temple-of-hermes`),
+  pinned to the official GitHub release ISO (`TempleOfHermes-0.1.2.ISO`,
+  SHA-256 `9afc98ed2bb15a3ff26ebaca12ea392079292df6667b3c1c527fdd30d80cdb13`,
+  14,030,848 bytes). TinkerOS 5.20-rc10, TempleOS 5.03, and ZealOS stay
+  selectable.
+- The Desktop pane has a visible Guest OS picker (version + SHA state). The
+  choice persists through `GET`/`POST /settings` (`ctx.rest`) and
+  `templeos_vm op=flavor`. A missing ISO is fetched on the pinned-SHA path;
+  a running guest switches on the next boot, with a Reboot now control.
+
 ## Unreleased
 - Steer agents to the four `templeos_*` tools when Hermes Tool Search defers them: a system prompt section, skill v0.1.2, and tool descriptions require `tool_search`/`skill_view` and forbid VNC/socket workarounds. Prefer `templeos_input op=holyc` for HolyC one-liners. `register()` also installs pane agent-log hooks.
 - `templeos_vm op=start` (and other running-VM ops) reattach QMP/COM1 if QEMU is still alive after a gateway restart, instead of returning `vm_already_running` with no in-process binding.

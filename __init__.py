@@ -60,6 +60,14 @@ def register(ctx) -> None:
     except Exception:
         pass
 
+    # Persist plugin-config flavor (and other settings) at load time.
+    try:
+        from templeos.settings import apply_config
+
+        apply_config(ctx)
+    except Exception:
+        pass
+
     # Pane agent log: wrap handlers even when the dashboard router is not imported.
     try:
         from templeos.api import install_tool_log_hooks

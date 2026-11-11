@@ -21,7 +21,8 @@ from typing import Any, Callable
 
 from templeos import doctor as doctor_mod
 from templeos.envsafe import child_env
-from templeos.flavors import DISK_SIZE, FlavorError, get_flavor
+from templeos.flavors import DEFAULT, DISK_SIZE, FlavorError, get_flavor
+from templeos.settings import load_preferred
 from templeos.paths import disks_dir, ensure_layout, home, isos_dir, socket_paths
 from templeos.qemu import (
     build_argv,
@@ -65,7 +66,7 @@ class Runtime:
 _runtime: Runtime | None = None
 
 
-def start(*, flavor: str = "tinkeros", snapshot: str = GOLDEN, skip_prompts: bool = True) -> dict[str, Any]:
+def start(*, flavor: str | None = None, snapshot: str = GOLDEN, skip_prompts: bool = True) -> dict[str, Any]:
     """Boot the guest. Prefer loadvm of ``snapshot`` when it exists, else the ISO.
 
     When ``skip_prompts`` is true (default) and the guest boots from the ISO
@@ -153,7 +154,7 @@ def available_snapshots() -> dict[str, Any]:
         current = rt.snapshot if rt is not None else None
         if disk is None:
             state = _read_state(root)
-            flavor = str(state.get("flavor") or "tinkeros")
+            flavor = str(state.get("flavor") or load_preferred())
             try:
                 rec = get_flavor(flavor)
                 disk = disks_dir(root) / f"{rec['id']}.qcow2"
@@ -169,7 +170,8 @@ def available_snapshots() -> dict[str, Any]:
         return {"ok": True, "snapshots": names, "snapshot": current}
 
 
-def _start(*, flavor: str, snapshot: str, skip_prompts: bool = True) -> dict[str, Any]:
+def _start(*, flavor: str | None, snapshot: str, skip_prompts: bool = True) -> dict[str, Any]:
+    flavor = flavor or load_preferred()
     try:
         rec = get_flavor(flavor)
     except FlavorError as exc:
@@ -334,7 +336,7 @@ def _stop() -> dict[str, Any]:
             path.unlink(missing_ok=True)
     except OSError:
         pass
-    flavor = rt.flavor if rt is not None else "tinkeros"
+    flavor = rt.flavor if rt is not None else load_preferred()
     _runtime = None
     _unbind_screen()
     try:
@@ -445,7 +447,7 @@ def _attach_existing(root: Path) -> dict[str, Any]:
         )
 
     state = _read_state(root) or {}
-    flavor = str(state.get("flavor") or "tinkeros")
+    flavor = str(state.get("flavor") or load_preferred())
     try:
         rec = get_flavor(flavor)
         flavor_id = rec["id"]
@@ -518,7 +520,7 @@ def _status() -> dict[str, Any]:
         }
     # Fall back to the on-disk state when this process has no runtime
     # (for example after a crash) but still report running truthfully.
-    flavor = "tinkeros"
+    flavor = load_preferred()
     accel = None
     snapshot = None
     pid = _read_pidfile(root)

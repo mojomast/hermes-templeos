@@ -57,6 +57,7 @@ export function createApi(rest) {
     log: () => call("/log"),
     doctor: () => call("/doctor"),
     setup: (body) => call("/setup", { method: "POST", body: body || {} }),
+    settings: (body) => (body ? call("/settings", { method: "POST", body }) : call("/settings")),
     companion: () => call("/companion"),
     companionSet: (body) => call("/companion", { method: "POST", body: body || {} }),
     companionAtlas: (opts) =>

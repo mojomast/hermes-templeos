@@ -1,9 +1,9 @@
 name: templeos
-version: "0.1.0"
+version: "0.1.1"
 description: >-
   Skill id templeos:templeos-operator. TempleOS runs official-family guests
-  (default TinkerOS 5.20-rc10; optional stock TempleOS 5.03, ZealOS, or a
-  user-supplied Temple of Hermes ISO) in a local QEMU VM so the Hermes agent
+  (default Temple of Hermes 0.1.2; optional TinkerOS 5.20-rc10, stock
+  TempleOS 5.03, or ZealOS) in a local QEMU VM so the Hermes agent
   and the user can share the screen. The plugin spawns qemu-system-x86_64 as
   a child (KVM only when /dev/kvm can be opened, otherwise TCG) with a
   minimal child environment, keeps QMP, VNC and COM1 on unix sockets under
@@ -63,6 +63,15 @@ requires_env:
 # Pillow is required for screendumps and PNG frames. qemu-system-x86_64 and
 # qemu-img must be on PATH (system package). pyproject.toml wins if both lists exist.
 config_schema:
+  flavor:
+    type: str
+    default: templeoh
+    description: >-
+      Guest OS image. "templeoh" (Temple of Hermes 0.1.2, default; alias
+      temple-of-hermes), "tinkeros" (TinkerOS 5.20-rc10), "templeos"
+      (TempleOS 5.03), or "zealos". The pane picker persists this through
+      /settings. Missing ISOs are fetched from the official pinned URL and
+      SHA-256 verified; a running guest switches on the next boot.
   companion:
     type: str
     default: terry

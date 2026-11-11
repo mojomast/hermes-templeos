@@ -15,6 +15,10 @@ import {
   drivingChip,
   clampScreenWidth,
   fitGuestDisplay,
+  flavorShaSummary,
+  preferredFlavorId,
+  shaStateLabel,
+  FLAVOR_PICKER_IDS,
   guestSize,
   integerScale,
   isReleaseHatch,
@@ -46,6 +50,7 @@ test("integer scale never goes below 1x and stays integer", () => {
 
 test("guest size and mode labels", () => {
   assert.deepEqual(guestSize("tinkeros"), { width: DEFAULT_WIDTH, height: DEFAULT_HEIGHT });
+  assert.deepEqual(guestSize("templeoh"), { width: DEFAULT_WIDTH, height: DEFAULT_HEIGHT });
   assert.deepEqual(guestSize("zealos"), { width: 1024, height: 768 });
   assert.deepEqual(guestSize("tinkeros", { width: 1024, height: 768 }), { width: 1024, height: 768 });
   assert.deepEqual(CONTROL_MODES, ["watch", "shared", "user"]);
@@ -256,4 +261,30 @@ test("aborted fetches stay silent in the pane error banner", () => {
   assert.equal(isAbortError({ message: "QEMU missing" }), false);
   assert.equal(errorText({ name: "AbortError", message: "signal is aborted without reason" }), "");
   assert.match(errorText({ message: "TempleOS could not finish that.", fix: "Retry." }), /Retry/);
+});
+
+test("flavor picker helpers expose version and SHA state", () => {
+  assert.deepEqual(FLAVOR_PICKER_IDS, ["templeoh", "tinkeros", "templeos", "zealos"]);
+  assert.equal(shaStateLabel("verified"), "SHA verified");
+  assert.equal(shaStateLabel("missing"), "ISO not downloaded");
+  assert.equal(preferredFlavorId({}), "templeoh");
+  assert.equal(preferredFlavorId({ flavor: "tinkeros" }), "tinkeros");
+  const summary = flavorShaSummary({
+    preferred_flavor: "templeoh",
+    flavor_name: "Temple of Hermes 0.1.2",
+    sha_state: "verified",
+    flavor_sha256: "9afc98ed2bb15a3ff26ebaca12ea392079292df6667b3c1c527fdd30d80cdb13",
+    flavors: [
+      {
+        id: "templeoh",
+        name: "Temple of Hermes 0.1.2",
+        sha_state: "verified",
+        sha256: "9afc98ed2bb15a3ff26ebaca12ea392079292df6667b3c1c527fdd30d80cdb13",
+      },
+    ],
+  });
+  assert.equal(summary.id, "templeoh");
+  assert.match(summary.text, /Temple of Hermes 0\.1\.2/);
+  assert.match(summary.text, /SHA verified/);
+  assert.match(summary.text, /9afc98ed2bb1/);
 });

@@ -7,8 +7,8 @@ repo: https://github.com/mojomast/hermes-templeos
 sha: 0000000000000000000000000000000000000000
 subdir: ""
 description: >-
-  Run a local TempleOS-family guest (default TinkerOS 5.20-rc10; optional
-  stock TempleOS 5.03, ZealOS, or a user-supplied Temple of Hermes ISO) in
+  Run a local TempleOS-family guest (default Temple of Hermes 0.1.2; optional
+  TinkerOS 5.20-rc10, stock TempleOS 5.03, or ZealOS) in
   QEMU so the Hermes agent and the user can share one live screen. Disclosure
   — spawns qemu-system-x86_64 as a child (KVM only when /dev/kvm can be
   opened, otherwise TCG) with a minimal non-secret child environment; may
@@ -30,7 +30,7 @@ maintainer: mojomast
 tier: community
 category: desktop
 requires_hermes: ">=0.23.0"
-version: "0.1.0"
+version: "0.1.1"
 docs_url: https://github.com/mojomast/hermes-templeos#readme
 readme: true
 platforms: []
@@ -44,7 +44,7 @@ screenshots:
 known_issues:
   - "FAT floppy push is experimental; bake-off did not see hot-added FAT12 as A: on TinkerOS live CD."
   - "Primary host is Linux x86_64. Apple Silicon and Windows are untested."
-  - "Temple of Hermes 0.1.2 is supported as a user-supplied ISO; it is not bundled and is not the default flavor."
+  - "Temple of Hermes 0.1.2 is the default flavor, pinned to the official GitHub release ISO; TinkerOS, TempleOS 5.03, and ZealOS remain optional. No ISO is bundled."
 capabilities:
   provides_tools:
     - templeos_vm

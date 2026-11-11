@@ -158,3 +158,117 @@ def test_post_does_not_follow_redirects(monkeypatch):
     monkeypatch.setattr(public_http, "_connection", lambda *a, **k: FakeConn())
     with pytest.raises(UnsafeURL, match="redirect"):
         public_http.request("https://example.com/x", method="POST", max_redirects=0)
+
+
+def test_github_release_redirect_to_objects_githubusercontent_is_allowed(monkeypatch, tmp_path):
+    """GitHub release assets 302 to objects.githubusercontent.com; both hops stay public."""
+    src = (
+        "https://github.com/mojomast/temple-of-hermes/releases/download/"
+        "v0.1.2/TempleOfHermes-0.1.2.ISO"
+    )
+    dest = (
+        "https://objects.githubusercontent.com/github-production-release-asset/"
+        "TempleOfHermes-0.1.2.ISO"
+    )
+    hops: list[str] = []
+    payload = b"ISO-BYTES"
+
+    class FakeResp:
+        def __init__(self, status, location=None, body=b""):
+            self.status = status
+            self._location = location
+            self._body = body
+
+        def getheader(self, name):
+            return self._location if name.lower() == "location" else None
+
+        def read(self, _n=-1):
+            chunk = self._body
+            self._body = b""
+            return chunk
+
+    class FakeConn:
+        def __init__(self, url):
+            self.url = url
+
+        def request(self, *a, **k):
+            hops.append(self.url)
+
+        def getresponse(self):
+            host = urlsplit(self.url).hostname
+            if host == "github.com":
+                return FakeResp(302, dest)
+            if host == "objects.githubusercontent.com":
+                return FakeResp(200, body=payload)
+            return FakeResp(500)
+
+        def close(self):
+            return None
+
+    public_ips = {
+        "github.com": "140.82.112.3",
+        "objects.githubusercontent.com": "185.199.108.133",
+    }
+
+    def fake_resolve(url, **kwargs):
+        scheme, host, port, path, query = split_url(url)
+        ip = public_ips[host]
+        return scheme, host, port, path, query, [_info(ip, port)]
+
+    def fake_connection(scheme, host, port, infos, timeout):
+        netloc = host if port in (80, 443) else f"{host}:{port}"
+        return FakeConn(f"{scheme}://{netloc}")
+
+    monkeypatch.setattr(public_http, "resolve_url", fake_resolve)
+    monkeypatch.setattr(public_http, "_connection", fake_connection)
+    dest_path = tmp_path / "TempleOfHermes-0.1.2.ISO"
+    out = public_http.download_https(
+        src,
+        dest_path,
+        expected_sha256=__import__("hashlib").sha256(payload).hexdigest(),
+        expected_bytes=len(payload),
+        max_redirects=3,
+    )
+    assert out == dest_path
+    assert dest_path.read_bytes() == payload
+    assert hops == [
+        "https://github.com",
+        "https://objects.githubusercontent.com",
+    ]
+
+
+def test_github_release_redirect_to_private_is_refused(monkeypatch):
+    src = (
+        "https://github.com/mojomast/temple-of-hermes/releases/download/"
+        "v0.1.2/TempleOfHermes-0.1.2.ISO"
+    )
+
+    class FakeResp:
+        status = 302
+
+        def getheader(self, name):
+            return "https://127.0.0.1/TempleOfHermes-0.1.2.ISO" if name.lower() == "location" else None
+
+        def read(self, _n=-1):
+            return b""
+
+    class FakeConn:
+        def request(self, *a, **k):
+            return None
+
+        def getresponse(self):
+            return FakeResp()
+
+        def close(self):
+            return None
+
+    def fake_resolve(url, **kwargs):
+        scheme, host, port, path, query = split_url(url)
+        if host in {"127.0.0.1", "localhost"}:
+            raise UnsafeURL("refusing a non-allowed destination address")
+        return scheme, host, port, path, query, [_info("140.82.112.3", port)]
+
+    monkeypatch.setattr(public_http, "resolve_url", fake_resolve)
+    monkeypatch.setattr(public_http, "_connection", lambda *a, **k: FakeConn())
+    with pytest.raises(UnsafeURL):
+        public_http.request(src, method="GET", max_redirects=3)
