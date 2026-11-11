@@ -16,7 +16,7 @@ from typing import Any, Callable
 
 from templeos import PLUGIN_ID
 from templeos.arbiter import get_arbiter
-from templeos.flavors import FLAVOR_IDS, FlavorError, get_flavor
+from templeos.flavors import DEFAULT, FLAVOR_IDS, FlavorError, get_flavor
 from templeos.paths import PathError, confine, home
 
 TOOLSET = PLUGIN_ID
@@ -27,7 +27,7 @@ TOOL_NAMES = (
     "templeos_files",
 )
 
-VM_OPS = ("start", "stop", "reset", "snapshot", "restore", "status", "doctor", "modem")
+VM_OPS = ("start", "stop", "reset", "snapshot", "restore", "status", "doctor", "modem", "flavor")
 SCREEN_OPS = ("look", "read_text", "wait_idle", "hash", "lore")
 INPUT_OPS = ("type", "keys", "click", "move", "holyc")
 FILES_OPS = ("list", "pull", "push")
@@ -85,7 +85,7 @@ CODE_FIX = {
     Code.INVALID_ARGS: "Correct the arguments and call the tool again.",
     Code.AGENT_PAUSED: "Wait for the hold-off to end, or ask the user to click Hand back.",
     Code.PATH_ESCAPE: "Choose a path inside the plugin data dir (TEMPLEOS_HOME).",
-    Code.UNKNOWN_FLAVOR: "Use flavor tinkeros, templeos, or zealos.",
+    Code.UNKNOWN_FLAVOR: "Use flavor templeoh, tinkeros, templeos, or zealos.",
     Code.VM_NOT_RUNNING: "Call templeos_vm op=start, then retry.",
     Code.VM_ALREADY_RUNNING: "Call templeos_vm op=status, or stop first.",
     Code.QEMU_MISSING: "Install qemu-system-x86_64 (and qemu-img) with your package manager.",
@@ -110,7 +110,7 @@ SCHEMA_VM = {
         "snapshot restore status doctor modem). THE supported boot path — never dial "
         "VNC/QMP sockets yourself. Network always off; modem is serial, not a NIC. "
         "snapshot ejects non-qcow2 writables first; restore issues cont if loadvm "
-        "left the VM paused. doctor checks QEMU, ISO pins, and /dev/kvm openability. "
+        "left the VM paused. doctor checks QEMU, ISO pins, and /dev/kvm openability. op=flavor lists or selects the guest image (default templeoh / Temple of Hermes 0.1.2; tinkeros, templeos, and zealos stay selectable), fetches the pinned ISO if needed, and applies it on the next boot if the VM is running. "
         "Sockets are existence flags only. If deferred behind tool_search, search "
         "for templeos vm first."
     ),
@@ -125,7 +125,7 @@ SCHEMA_VM = {
             "flavor": {
                 "type": "string",
                 "enum": list(FLAVOR_IDS),
-                "description": "Guest OS. Default tinkeros (TinkerOS 5.20-rc10).",
+                "description": "Guest OS. Default templeoh (Temple of Hermes 0.1.2). Optional tinkeros, templeos, zealos.",
             },
             "name": {
                 "type": "string",
@@ -382,7 +382,32 @@ def handle_vm(params: Any) -> str:
     if not isinstance(got, str):
         return got[0]
     op = got
-    flavor = args.get("flavor") or "tinkeros"
+    raw_flavor = args.get("flavor")
+    if op == "flavor":
+        from templeos.settings import apply_flavor_choice, flavor_status
+
+        if raw_flavor:
+            try:
+                get_flavor(raw_flavor)
+            except FlavorError as exc:
+                return err(str(exc), exc.code)
+            result = apply_flavor_choice(str(raw_flavor), fetch=True)
+            if result.get("ok") is False:
+                return err(
+                    str(result.get("error") or "Could not select that guest image."),
+                    str(result.get("code") or "iso_missing"),
+                    result.get("fix"),
+                    **{k: v for k, v in result.items() if k not in {"error", "code", "fix", "ok"}},
+                )
+            return ok(**{k: v for k, v in result.items() if k != "ok"})
+        return ok(**{k: v for k, v in flavor_status().items() if k != "ok"})
+
+    if raw_flavor:
+        flavor = raw_flavor
+    else:
+        from templeos.settings import load_preferred
+
+        flavor = load_preferred()
     try:
         get_flavor(flavor)
     except FlavorError as exc:
@@ -436,7 +461,7 @@ def handle_vm(params: Any) -> str:
         return _call_impl(impl)
     if op == "doctor":
         from templeos.doctor import doctor as impl
-        return _call_impl(impl)
+        return _call_impl(impl, flavor=flavor)
     return err(f"Unknown op {op!r}.", Code.INVALID_OP)
 
 

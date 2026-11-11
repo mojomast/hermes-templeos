@@ -15,9 +15,13 @@ import {
   filterLogEvents,
   fitGuestDisplay,
   flavorLabel,
+  flavorShaSummary,
+  FLAVOR_LABELS,
+  FLAVOR_PICKER_IDS,
   formatLogTime,
   guestSize,
   guestVersionChip,
+  preferredFlavorId,
   keyEventToPayload,
   logToolKey,
   mapPointerToGuest,
@@ -226,6 +230,66 @@ function stateChip(testid, chip) {
   });
 }
 
+
+function flavorPicker({ status, disabled, fetching, onChange, onApplyNow }) {
+  const summary = flavorShaSummary(status);
+  const selected = preferredFlavorId(status);
+  const pending = !!status.apply_on_next_boot;
+  const options = status.flavors && status.flavors.length
+    ? status.flavors
+    : FLAVOR_PICKER_IDS.map((id) => ({ id, name: FLAVOR_LABELS[id] || id }));
+  return jsxs("div", {
+    className: "tos-flavor-picker",
+    "data-testid": "flavor-picker",
+    children: [
+      jsxs("label", {
+        className: "tos-flavor-picker-field",
+        children: [
+          jsx("span", { className: "tos-flavor-picker-label", children: "OS image" }),
+          jsxs("select", {
+            "data-testid": "flavor-select",
+            value: selected,
+            disabled: !!disabled,
+            "aria-label": "Guest OS image",
+            onChange: (event) => onChange(event && event.target ? event.target.value : selected),
+            children: options.map((item) =>
+              jsx(
+                "option",
+                { value: item.id, children: item.name || FLAVOR_LABELS[item.id] || item.id },
+                item.id
+              )
+            ),
+          }),
+        ],
+      }),
+      jsx("span", {
+        className: "tos-flavor-sha",
+        "data-testid": "flavor-sha",
+        "data-state": fetching ? "fetching" : summary.state || "unknown",
+        title: summary.sha ? summary.name + " SHA-256 " + summary.sha : summary.label,
+        children: fetching ? "Downloading and verifying SHA-256…" : summary.text,
+      }),
+      pending
+        ? jsxs("span", {
+            className: "tos-flavor-pending",
+            "data-testid": "flavor-pending",
+            children: [
+              jsx("span", { children: status.flavor_notice || "Will apply on the next boot." }),
+              jsx("button", {
+                type: "button",
+                className: "tos-btn",
+                "data-testid": "flavor-reboot",
+                disabled: !!disabled,
+                onClick: onApplyNow,
+                children: "Reboot now",
+              }),
+            ],
+          })
+        : null,
+    ],
+  });
+}
+
 function defaultStatus(initial) {
   return {
     running: false,
@@ -235,8 +299,13 @@ function defaultStatus(initial) {
     accel: null,
     snapshot: null,
     snapshots: [GOLDEN_SNAPSHOT],
-    flavor: "tinkeros",
-    flavor_name: "TinkerOS 5.20-rc10",
+    flavor: "templeoh",
+    flavor_name: "Temple of Hermes 0.1.2",
+    preferred_flavor: "templeoh",
+    sha_state: "",
+    flavors: [],
+    apply_on_next_boot: false,
+    flavor_notice: "",
     kvm: false,
     setup_needed: false,
     ready: false,
@@ -563,6 +632,8 @@ export function TempleOSPane({ transport, initial } = {}) {
         applyStatus(body, setStatus);
         if (body && typeof body === "object") setStatusLoaded(true);
         setBusy("");
+        const notice = body && (body.notice || body.flavor_notice);
+        if (notice) setInfo(notice);
         if (body && Array.isArray(body.events)) refreshLog(body);
         return body;
       })
@@ -577,11 +648,11 @@ export function TempleOSPane({ transport, initial } = {}) {
   }
 
   function onSetup() {
-    return run("setup", () => api.setup({ flavor: status.flavor || "tinkeros" }));
+    return run("setup", () => api.setup({ flavor: preferredFlavorId(status) }));
   }
 
   function onStart() {
-    return run("start", () => api.start({ flavor: status.flavor || "tinkeros", name: status.snapshot || GOLDEN_SNAPSHOT }));
+    return run("start", () => api.start({ flavor: preferredFlavorId(status), name: status.snapshot || GOLDEN_SNAPSHOT }));
   }
 
   function onStop() {
@@ -598,6 +669,22 @@ export function TempleOSPane({ transport, initial } = {}) {
 
   function onRestore() {
     return run("restore", () => api.restoreSnapshot(GOLDEN_SNAPSHOT));
+  }
+
+  function onSelectFlavor(id) {
+    if (!id || id === preferredFlavorId(status)) return;
+    return run("flavor", () => api.settings({ flavor: id, fetch: true }));
+  }
+
+  function onApplyFlavorNow() {
+    const id = preferredFlavorId(status);
+    return run("flavor-reboot", () => {
+      const boot = () => api.start({ flavor: id, name: status.snapshot || GOLDEN_SNAPSHOT });
+      if (status.running) {
+        return api.stop().then(boot);
+      }
+      return boot();
+    });
   }
 
   function onCanvasClick(event) {
@@ -722,6 +809,21 @@ export function TempleOSPane({ transport, initial } = {}) {
             "aria-label": "TempleOS controls",
             children: [
               jsxs("div", {
+                className: "tos-group tos-group-flavor",
+                role: "group",
+                "aria-label": "Guest OS image",
+                children: [
+                  jsx("span", { className: "tos-group-label", children: "Guest OS" }),
+                  flavorPicker({
+                    status,
+                    disabled,
+                    fetching: busy === "flavor",
+                    onChange: onSelectFlavor,
+                    onApplyNow: onApplyFlavorNow,
+                  }),
+                ],
+              }),
+              jsxs("div", {
                 className: "tos-group",
                 role: "group",
                 "aria-label": "VM power",
@@ -824,8 +926,15 @@ export function TempleOSPane({ transport, initial } = {}) {
                   checkRow("KVM", status.kvm === true ? true : firstCheck(status.checks, ["kvm"])),
                 ],
               }),
+              flavorPicker({
+                status,
+                disabled,
+                fetching: busy === "flavor",
+                onChange: onSelectFlavor,
+                onApplyNow: onApplyFlavorNow,
+              }),
               jsx("button", { type: "button", className: "tos-btn tos-primary", "data-testid": "setup", disabled: disabled, onClick: onSetup, children: busy === "setup" ? "Setting up…" : "Set up" }),
-              jsx("p", { className: "tos-hint", children: "Set up fetches the official pin, verifies SHA-256, and reports whether /dev/kvm can be opened. Then press Start." }),
+              jsx("p", { className: "tos-hint", children: "Pick the OS image first. Set up fetches the official pin, verifies SHA-256, and reports whether /dev/kvm can be opened. Then press Start. A running guest switches on the next boot." }),
             ],
           })
         : null,

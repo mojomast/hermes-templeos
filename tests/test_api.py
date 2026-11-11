@@ -81,7 +81,7 @@ def test_health_and_control_are_implemented(fresh):
     health = health_payload()
     assert health["ok"] is True
     assert health["plugin"] == "templeos"
-    assert health["version"] == "0.1.0"
+    assert health["version"] == "0.1.1"
     assert health["mode"] == "shared"
     taken = set_control({"op": "take"})
     assert taken["ok"] is True and taken["mode"] == "user" and taken["agent_paused"] is True
@@ -99,8 +99,12 @@ def test_status_is_shaped_when_vm_is_stopped(fresh):
     assert set(status["sockets"]) == {"qmp", "vnc", "com1"}
     assert all(value is False for value in status["sockets"].values())
     assert status["setup_needed"] is True
-    assert status["flavor"] == "tinkeros"
-    assert "TinkerOS" in status["flavor_name"]
+    assert status["flavor"] == "templeoh"
+    assert status["preferred_flavor"] == "templeoh"
+    assert "Temple of Hermes" in status["flavor_name"]
+    assert status["sha_state"] == "missing"
+    ids = [item["id"] for item in status["flavors"]]
+    assert ids == ["templeoh", "tinkeros", "templeos", "zealos"]
     frame = frame_payload()
     assert frame["ok"] is False and frame["code"] == "vm_not_running"
     assert frame.get("mime") == "image/png"

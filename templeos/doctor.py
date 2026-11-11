@@ -86,13 +86,17 @@ def qemu_version() -> dict[str, Any]:
     }
 
 
-def ensure_iso(flavor: str = "tinkeros", *, fetch: bool = True) -> dict[str, Any]:
+def ensure_iso(flavor: str | None = None, *, fetch: bool = True) -> dict[str, Any]:
     """Fetch the pinned ISO if missing, verify SHA-256, refuse a hash mismatch.
 
     ``fetch=False`` only inspects the cache (used by doctor checks so CI never
     downloads). When fetch is true, the ISO is downloaded only from the
     official HTTPS URL in flavors.py.
     """
+    if not flavor:
+        from templeos.settings import load_preferred
+
+        flavor = load_preferred()
     rec = get_flavor(flavor)
     ensure_layout()
     dest = isos_dir() / str(rec["iso_filename"])
@@ -182,12 +186,16 @@ def ensure_iso(flavor: str = "tinkeros", *, fetch: bool = True) -> dict[str, Any
         }
 
 
-def doctor(*, setup: bool = False, flavor: str = DEFAULT) -> dict[str, Any]:
+def doctor(*, setup: bool = False, flavor: str | None = None) -> dict[str, Any]:
     """Full doctor report: qemu, kvm, iso, disk, sockets (existence only), ok, checks.
 
     ``setup=True`` downloads the pinned ISO for ``flavor`` from the official
     URL and verifies it. The default path never fetches (safe for CI).
     """
+    if not flavor:
+        from templeos.settings import load_preferred
+
+        flavor = load_preferred()
     try:
         rec = get_flavor(flavor)
     except FlavorError as exc:
@@ -195,7 +203,7 @@ def doctor(*, setup: bool = False, flavor: str = DEFAULT) -> dict[str, Any]:
             "ok": False,
             "code": "unknown_flavor",
             "error": str(exc),
-            "fix": "Use flavor tinkeros, templeos, or zealos.",
+            "fix": "Use flavor templeoh, tinkeros, templeos, or zealos.",
             "checks": [],
         }
     root = ensure_layout()

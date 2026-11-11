@@ -3,9 +3,10 @@
 Slice 0 freeze. Later slices implement the stubs against this document.
 Integration branch: `feat/integration` (never push straight to `main`).
 
-Plugin id: `templeos`. Display name: TempleOS. Version: `0.1.0`.
+Plugin id: `templeos`. Display name: TempleOS. Version: `0.1.1`.
 `requires_hermes: ">=0.23.0"`. Skill id: `templeos:templeos-operator`.
-Default flavor: TinkerOS 5.20-rc10. Optional: `templeos` (stock 5.03) and
+Default flavor: Temple of Hermes 0.1.2 (`templeoh` / `temple-of-hermes`).
+Optional: `tinkeros` (TinkerOS 5.20-rc10), `templeos` (stock 5.03), and
 `zealos` (AHCI, 1024×768). Network always off (`-nic none`).
 
 ## LEASES
@@ -299,8 +300,8 @@ possible.
 ## Host and first run (Slice A / doctor)
 
 1. Find `qemu-system-x86_64`, print version, test-open `/dev/kvm`.
-2. Fetch the default TinkerOS ISO (or the selected flavor) from the official
-   URL, verify SHA-256, store under `home()/isos/`.
+2. Fetch the default Temple of Hermes 0.1.2 ISO (or the selected flavor) from
+   the official URL, verify SHA-256, store under `home()/isos/`.
 3. `qemu-img create -f qcow2` a 2G disk under `home()/disks/`.
 4. After a clean HolyC prompt, `savevm golden`. Later starts `loadvm golden`
    and `cont` if paused.

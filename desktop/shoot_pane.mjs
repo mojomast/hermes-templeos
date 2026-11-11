@@ -444,6 +444,35 @@ const shots = {
       },
     }),
   },
+  "pane-flavor-picker.png": {
+    size: "1680,1180",
+    html: render({
+      theme: "hermes",
+      viewport: { width: 1680, height: 1180 },
+      status: {
+        running: false,
+        mode: "shared",
+        agent_paused: false,
+        setup_needed: true,
+        ready: false,
+        flavor: "templeoh",
+        flavor_name: "Temple of Hermes 0.1.2",
+        preferred_flavor: "templeoh",
+        sha_state: "verified",
+        flavor_sha256: "9afc98ed2bb15a3ff26ebaca12ea392079292df6667b3c1c527fdd30d80cdb13",
+        flavors: [
+          { id: "templeoh", name: "Temple of Hermes 0.1.2", sha_state: "verified", sha256: "9afc98ed2bb15a3ff26ebaca12ea392079292df6667b3c1c527fdd30d80cdb13", bytes: 14030848, default: true },
+          { id: "tinkeros", name: "TinkerOS 5.20-rc10", sha_state: "missing", sha256: "feb5cb570a79fefbefeb7d7a7133e3eac0e3b4ffcd6adf8a0fd29049476a1cc4" },
+          { id: "templeos", name: "TempleOS 5.03", sha_state: "missing" },
+          { id: "zealos", name: "ZealOS", sha_state: "missing" },
+        ],
+        accel: null,
+        kvm: false,
+        snapshot: null,
+        checks: { qemu: true, iso: true, kvm: false },
+      },
+    }),
+  },
   "pane-running.png": {
     size: "1680,1180",
     html: render({

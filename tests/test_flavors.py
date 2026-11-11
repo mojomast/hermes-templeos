@@ -15,21 +15,42 @@ from templeos.flavors import (
 from pathlib import Path
 
 
-def test_default_is_tinkeros_and_pins_are_64_hex():
-    assert DEFAULT == "tinkeros"
-    assert FLAVOR_IDS == ("tinkeros", "templeos", "zealos")
+TOH_URL = "https://github.com/mojomast/temple-of-hermes/releases/download/v0.1.2/TempleOfHermes-0.1.2.ISO"
+TOH_SHA = "9afc98ed2bb15a3ff26ebaca12ea392079292df6667b3c1c527fdd30d80cdb13"
+TOH_BYTES = 14_030_848
+
+
+def test_default_is_templeoh_and_pins_are_64_hex():
+    assert DEFAULT == "templeoh"
+    assert FLAVOR_IDS == ("templeoh", "tinkeros", "templeos", "zealos")
     rec = get_flavor()
-    assert rec["id"] == "tinkeros"
+    assert rec["id"] == "templeoh"
+    assert rec["name"] == "Temple of Hermes 0.1.2"
+    assert rec["default"] is True
+    assert rec["url"] == TOH_URL
+    assert rec["sha256"] == TOH_SHA
+    assert rec["bytes"] == TOH_BYTES
+    assert rec["iso_filename"] == "TempleOfHermes-0.1.2.ISO"
     assert rec["width"] == 640 and rec["height"] == 480
     assert rec["mouse"] == "vmmouse" and rec["serial"] == "comm" and rec["bus"] == "ide"
+    assert get_flavor("temple-of-hermes")["id"] == "templeoh"
+    assert get_flavor("temple_of_hermes")["id"] == "templeoh"
+    # Other official flavors stay selectable and are no longer the default.
+    for fid in ("tinkeros", "templeos", "zealos"):
+        item = get_flavor(fid)
+        assert item["id"] == fid
+        assert item["default"] is False
     for fid in FLAVOR_IDS:
         item = get_flavor(fid)
         assert len(item["sha256"]) == 64
         assert set(item["sha256"]) <= set("0123456789abcdef")
         assert item["url"].startswith("https://")
         assert "raw/main" not in item["url"]
+        assert isinstance(item["bytes"], int) and item["bytes"] > 0
     zeal = get_flavor("zealos")
     assert zeal["bus"] == "ahci" and zeal["width"] == 1024
+    tink = get_flavor("tinkeros")
+    assert tink["sha256"] == "feb5cb570a79fefbefeb7d7a7133e3eac0e3b4ffcd6adf8a0fd29049476a1cc4"
     with pytest.raises(FlavorError):
         get_flavor("shrine")
 

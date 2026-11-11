@@ -9,8 +9,12 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, Mapping
 
-DEFAULT = "tinkeros"
-FLAVOR_IDS = ("tinkeros", "templeos", "zealos")
+DEFAULT = "templeoh"
+FLAVOR_IDS = ("templeoh", "tinkeros", "templeos", "zealos")
+ALIASES = {
+    "temple-of-hermes": "templeoh",
+    "temple_of_hermes": "templeoh",
+}
 
 # Shared machine shape proven under TCG (and intended for KVM when /dev/kvm opens).
 MACHINE = "pc,kernel-irqchip=off"
@@ -23,10 +27,28 @@ QEMU_IMG = "qemu-img"
 DISK_SIZE = "2G"
 
 FLAVORS: dict[str, dict[str, Any]] = {
+    "templeoh": {
+        "id": "templeoh",
+        "name": "Temple of Hermes 0.1.2",
+        "default": True,
+        "iso_filename": "TempleOfHermes-0.1.2.ISO",
+        "url": "https://github.com/mojomast/temple-of-hermes/releases/download/v0.1.2/TempleOfHermes-0.1.2.ISO",
+        "sha256": "9afc98ed2bb15a3ff26ebaca12ea392079292df6667b3c1c527fdd30d80cdb13",
+        "md5": "713d8111d5780f758538c038228023e9",
+        "bytes": 14_030_848,
+        "width": 640,
+        "height": 480,
+        "bus": "ide",
+        "mouse": "vmmouse",
+        "serial": "comm",
+        "modem": "com2",
+        "release": "v0.1.2",
+        "hash_crop": {"x": 0, "y": 24, "w": 640, "h": 456},
+    },
     "tinkeros": {
         "id": "tinkeros",
         "name": "TinkerOS 5.20-rc10",
-        "default": True,
+        "default": False,
         "iso_filename": "TinkerOS_5.20-rc10.ISO",
         "url": "https://github.com/tinkeros/TinkerOS/releases/download/5.20-rc10/TinkerOS_5.20-rc10.ISO",
         "sha256": "feb5cb570a79fefbefeb7d7a7133e3eac0e3b4ffcd6adf8a0fd29049476a1cc4",
@@ -86,8 +108,9 @@ class FlavorError(ValueError):
 
 
 def get_flavor(flavor_id: str | None = None) -> dict[str, Any]:
-    """Return a copy of the flavor record. Default is TinkerOS."""
+    """Return a copy of the flavor record. Default is Temple of Hermes 0.1.2."""
     key = (flavor_id or DEFAULT).strip().lower() or DEFAULT
+    key = ALIASES.get(key, key)
     if key not in FLAVORS:
         raise FlavorError(
             f"Unknown flavor {flavor_id!r}. Use one of: {', '.join(FLAVOR_IDS)}.",

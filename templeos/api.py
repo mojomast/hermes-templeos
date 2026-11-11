@@ -22,6 +22,7 @@ from typing import Any, Callable
 from templeos import PLUGIN_ID, __version__
 from templeos.arbiter import get_arbiter
 from templeos.flavors import DEFAULT, FLAVOR_IDS, FlavorError, get_flavor
+from templeos.settings import apply_flavor_choice, flavor_status, load_preferred, save_preferred
 from templeos.tools import CODE_FIX, Code, err
 
 try:
@@ -335,6 +336,25 @@ def _doctor_report() -> dict[str, Any]:
     return _from_impl(doctor.doctor, unit="doctor")
 
 
+
+def _attach_flavor_settings(body: dict[str, Any]) -> dict[str, Any]:
+    """Add picker fields (preferred flavor, SHA state, flavor list) to a status body."""
+    try:
+        info = flavor_status()
+    except Exception:
+        return body
+    preferred = str(info.get("preferred_flavor") or load_preferred())
+    body["preferred_flavor"] = preferred
+    body["flavors"] = info.get("flavors") or []
+    body["sha_state"] = info.get("sha_state")
+    body["flavor_sha256"] = info.get("sha256")
+    body["apply_on_next_boot"] = bool(info.get("apply_on_next_boot"))
+    body["flavor_notice"] = info.get("notice")
+    if not body.get("running"):
+        _apply_flavor_dims(body, preferred)
+    return body
+
+
 def status_payload() -> dict[str, Any]:
     """Arbiter + doctor readiness + VM status when Slice A is present."""
     snap = get_arbiter().snapshot()
@@ -346,8 +366,8 @@ def status_payload() -> dict[str, Any]:
         "plugin": PLUGIN_ID,
         "version": __version__,
         "running": False,
-        "flavor": DEFAULT,
-        "flavor_name": get_flavor(DEFAULT)["name"],
+        "flavor": load_preferred(),
+        "flavor_name": get_flavor(load_preferred())["name"],
         "accel": None,
         "snapshot": None,
         "snapshots": [GOLDEN],
@@ -406,7 +426,7 @@ def status_payload() -> dict[str, Any]:
             body["companion"] = companion_snapshot()
         except Exception:
             body["companion"] = {"enabled": False, "character": "terry", "animation": "idle"}
-        return body
+        return _attach_flavor_settings(body)
     except Exception as exc:
         body["ok"] = False
         body["error"] = str(exc) or "VM status failed."
@@ -419,7 +439,7 @@ def status_payload() -> dict[str, Any]:
             body["companion"] = companion_snapshot()
         except Exception:
             body["companion"] = {"enabled": False, "character": "terry", "animation": "idle"}
-        return body
+        return _attach_flavor_settings(body)
 
     body["vm_implemented"] = True
     if isinstance(result, dict):
@@ -474,7 +494,7 @@ def status_payload() -> dict[str, Any]:
         body["companion"] = companion_snapshot()
     except Exception:
         body["companion"] = {"enabled": False, "character": "terry", "animation": "idle"}
-    return body
+    return _attach_flavor_settings(body)
 
 
 def set_control(body: dict[str, Any] | None) -> dict[str, Any]:
@@ -748,7 +768,7 @@ def vm_action(body: dict[str, Any] | None) -> dict[str, Any]:
     from templeos import vm
 
     if op == "start":
-        flavor, flavor_err = _flavor_or_err(body.get("flavor") or DEFAULT)
+        flavor, flavor_err = _flavor_or_err(body.get("flavor") or load_preferred())
         if flavor_err:
             return flavor_err
         name, name_err = _snapshot_name(body.get("name") or body.get("snapshot"))
@@ -890,9 +910,11 @@ def snapshot_action(body: dict[str, Any] | None) -> dict[str, Any]:
 def setup_payload(body: dict[str, Any] | None = None) -> dict[str, Any]:
     """Fetch the pinned ISO and run doctor. The pane's Set up button calls this."""
     body = body or {}
-    flavor, flavor_err = _flavor_or_err(body.get("flavor") or DEFAULT)
+    flavor, flavor_err = _flavor_or_err(body.get("flavor") or load_preferred())
     if flavor_err:
         return flavor_err
+    if body.get("flavor"):
+        save_preferred(flavor)
     from templeos import doctor as doctor_mod
 
     iso = _from_impl(doctor_mod.ensure_iso, flavor, unit="doctor.ensure_iso")
@@ -958,6 +980,38 @@ def _frame_since(request: Any) -> str | None:
         return None
     return str(since).strip().strip('"')
 
+
+
+
+def settings_payload(body: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Get or set the persisted guest-image choice via ctx.rest /settings."""
+    body = body or {}
+    raw = body.get("flavor")
+    if raw:
+        fetch_raw = body.get("fetch")
+        fetch = fetch_raw not in {False, 0, "0", "false", "False", "no", "off"}
+        result = apply_flavor_choice(str(raw), fetch=fetch)
+        status = status_payload()
+        status["settings"] = {"flavor": result.get("preferred_flavor") or result.get("flavor")}
+        if result.get("iso_fetch") is not None:
+            status["iso_fetch"] = result["iso_fetch"]
+        if result.get("notice"):
+            status["flavor_notice"] = result["notice"]
+            status["notice"] = result["notice"]
+        if result.get("apply_on_next_boot") is not None:
+            status["apply_on_next_boot"] = result["apply_on_next_boot"]
+        if result.get("ok") is False:
+            status["ok"] = False
+            status["error"] = result.get("error")
+            status["code"] = result.get("code")
+            status["fix"] = result.get("fix")
+        return status
+    info = flavor_status()
+    status = status_payload()
+    status["settings"] = {"flavor": info.get("preferred_flavor")}
+    if info.get("notice"):
+        status["notice"] = info["notice"]
+    return status
 
 
 def companion_control(body: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -1095,6 +1149,18 @@ def create_router():
         except ValueError as exc:
             return _json_err(str(exc), Code.INVALID_ARGS)
         return setup_payload(body)
+
+    @router.get("/settings")
+    def route_settings_get():
+        return settings_payload()
+
+    @router.post("/settings")
+    async def route_settings_post(request: Request):
+        try:
+            body = _json_body(await request.body())
+        except ValueError as exc:
+            return _json_err(str(exc), Code.INVALID_ARGS)
+        return settings_payload(body)
 
     @router.get("/companion")
     def route_companion_get():

@@ -4,12 +4,12 @@
 
 **A local TempleOS-family guest in QEMU. The Hermes agent and you share one live screen.**
 
-Default flavor is [TinkerOS](https://github.com/tinkeros/TinkerOS) 5.20-rc10.
-Stock [TempleOS](https://templeos.org/) 5.03 and [ZealOS](https://github.com/Zeal-Operating-System/ZealOS) are optional.
+Default flavor is [Temple of Hermes](https://github.com/mojomast/temple-of-hermes) 0.1.2.
+[TinkerOS](https://github.com/tinkeros/TinkerOS) 5.20-rc10, stock [TempleOS](https://templeos.org/) 5.03, and [ZealOS](https://github.com/Zeal-Operating-System/ZealOS) are optional.
 Networking is always off. QEMU and ISOs are not bundled.
 
 [![License: MIT](https://img.shields.io/badge/license-MIT-22c55e)](LICENSE)
-[![Version 0.1.0](https://img.shields.io/badge/version-0.1.0-8b5cf6)](plugin.yaml)
+[![Version 0.1.1](https://img.shields.io/badge/version-0.1.1-8b5cf6)](plugin.yaml)
 [![Hermes >=0.23.0](https://img.shields.io/badge/Hermes-%3E%3D0.23.0-111827)](plugin.yaml)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-3776AB?logo=python&logoColor=white)](pyproject.toml)
 [![Tests](https://img.shields.io/badge/tests-pytest%20%2B%20node-0ea5e9)](#development)
@@ -39,13 +39,14 @@ TempleOS is public domain. This plugin is an unofficial Hermes integration; see
 > in the original design. Read the [official downloads](https://templeos.org/Downloads/),
 > [Credits](https://templeos.info/Wb/Doc/Credits.DD.HTML), and be decent when you demo it.
 > [TinkerOS](https://github.com/tinkeros/TinkerOS) and [ZealOS](https://github.com/Zeal-Operating-System/ZealOS)
-> are community forks; this plugin defaults to TinkerOS because the bake-off proved absolute
+> are community forks. This plugin defaults to [Temple of Hermes](https://github.com/mojomast/temple-of-hermes) 0.1.2,
+> a public-domain TinkerOS 5.20-rc10 fork. TinkerOS stays selectable; the bake-off proved absolute
 > mouse clicks and Adam `Comm*` serial there.
 
 ## What it is
 
 1. **Doctor.** Finds `qemu-system-x86_64`, reports whether `/dev/kvm` can be **opened** (not just whether the node exists), and can fetch the pinned ISO from its official URL with SHA-256 verification.
-2. **Start.** Boots TinkerOS (or another flavor) in a child QEMU with `-nic none`, QMP / VNC / COM1 on unix sockets under the plugin data dir, and a writable qcow2 so `savevm` works even on a live CD.
+2. **Start.** Boots Temple of Hermes 0.1.2 (or another flavor) in a child QEMU with `-nic none`, QMP / VNC / COM1 on unix sockets under the plugin data dir, and a writable qcow2 so `savevm` works even on a live CD.
 3. **See.** `read_text` prefers COM1 when it is already open; otherwise 8×8 glyphs. `look` returns a PNG (not JPEG) at 640×480 by default (~414 visual tokens).
 4. **Act.** Type, send QEMU keys, click / move (VMMouse absolute on TinkerOS), or inject HolyC. After each consequential act: `wait_idle`, then `read_text` or one `look`.
 5. **Share.** The Desktop pane shows the same screen. **Take control** / **Hand back** pause the agent with `agent_paused`. Shared mode holds off agent input for ~2 s after you type or click.
@@ -83,7 +84,7 @@ hermes plugins install mojomast/hermes-templeos --enable
 hermes plugins doctor templeos
 ```
 
-Doctor does not install packages. It tells you the apt/brew command, fetches the default TinkerOS ISO from GitHub Releases when missing, verifies the pinned SHA-256, and creates the data-dir layout. There is **no catalog pin yet** — do not treat [docs/catalog/templeos.yaml](docs/catalog/templeos.yaml) as a submitted entry (SHA is a zero placeholder on purpose).
+Doctor does not install packages. It tells you the apt/brew command, fetches the default Temple of Hermes 0.1.2 ISO from the official GitHub release when missing, verifies the pinned SHA-256, and creates the data-dir layout. There is **no catalog pin yet** — do not treat [docs/catalog/templeos.yaml](docs/catalog/templeos.yaml) as a submitted entry (SHA is a zero placeholder on purpose).
 
 After an update, if the Desktop pane is missing or stale: **Capabilities → Plugins → Rescan**.
 
@@ -149,23 +150,28 @@ Source screenshots also live under [`desktop/screenshots/`](desktop/screenshots/
 
 ## Flavors
 
-Bake-off on 9 Nov 2026 (TCG; `/dev/kvm` existed but was not openable on that host). Networking off.
+Default flavor id is `templeoh` (alias `temple-of-hermes`). TinkerOS, stock TempleOS, and ZealOS stay selectable. ISO pins (SHA-256 and size) live in `templeos/flavors.py`. Official HTTPS URLs only — not Internet Archive. The Desktop pane has a Guest OS picker that shows the selected image version and SHA state; the choice is saved through the `/settings` `ctx.rest` route (also `templeos_vm op=flavor`). If the ISO is not cached yet, doctor fetches the official pin and verifies SHA-256. A running guest applies the new image on the next boot.
 
-| | **TinkerOS 5.20-rc10** (default) | **TempleOS 5.03** | **ZealOS** (optional) |
-| --- | --- | --- | --- |
-| Boot to desktop | ~14 s | ~14 s | ~16 s (AHCI required) |
-| Resolution / tokens | 640×480 / ~414 | 640×480 / ~414 | 1024×768 / ~1036 |
-| Absolute QMP click | Pass (VMMouse) | Fail (no abs handler) | Fail |
-| Serial text out | `Comm*` → COM1 proven | Raw `OutU8` only | Raw `OutU8`; `Comm*` fragile |
-| Screendump avg | ~12 ms | ~12 ms | ~17 ms |
-| savevm / loadvm | 1.25 s / 0.20 s | ok (caveats) | ok (caveats) |
-| Pick | **Default** | Optional stock | Optional AHCI / dark theme |
+| | **Temple of Hermes 0.1.2** (default) | **TinkerOS 5.20-rc10** | **TempleOS 5.03** | **ZealOS** |
+| --- | --- | --- | --- | --- |
+| Id | `templeoh` | `tinkeros` | `templeos` | `zealos` |
+| Resolution / tokens | 640×480 / ~414 | 640×480 / ~414 | 640×480 / ~414 | 1024×768 / ~1036 |
+| Mouse | VMMouse (absolute) | VMMouse (absolute) | no abs handler | relative |
+| Serial | `Comm*` → COM1 | `Comm*` → COM1 proven | Raw `OutU8` only | Raw `OutU8`; `Comm*` fragile |
+| Disk bus | IDE | IDE | IDE | AHCI required |
+| Official ISO | GitHub release v0.1.2 | GitHub Releases 5.20-rc10 | templeos.org | ZealOS releases |
 
-ISO pins (SHA-256) live in `templeos/flavors.py`. Official URLs only — not Internet Archive.
+Bake-off timings on 9 Nov 2026 (TCG; `/dev/kvm` existed but was not openable on that host; networking off): TinkerOS and TempleOS 5.03 reached a desktop in ~14 s; ZealOS in ~16 s with AHCI. Screendump averages were ~12 ms / ~12 ms / ~17 ms. TinkerOS `savevm` / `loadvm` was 1.25 s / 0.20 s.
 
 ## Temple of Hermes guest
 
-This plugin can run the [Temple of Hermes](https://github.com/mojomast/temple-of-hermes) **0.1.2** guest in the same local, network-off QEMU shape; **TinkerOS 5.20-rc10 remains the default**. No guest ISO is bundled — supply your own. The optional Temple of Hermes BBS bridge is separate, host-configured, and off by default (see [Environment](#environment)).
+This plugin defaults to the official [Temple of Hermes](https://github.com/mojomast/temple-of-hermes) **0.1.2** ISO in the same local, network-off QEMU shape. No guest ISO is bundled. Doctor fetches and SHA-256-verifies:
+
+- URL: `https://github.com/mojomast/temple-of-hermes/releases/download/v0.1.2/TempleOfHermes-0.1.2.ISO`
+- SHA-256: `9afc98ed2bb15a3ff26ebaca12ea392079292df6667b3c1c527fdd30d80cdb13`
+- Size: 14,030,848 bytes
+
+The optional Temple of Hermes BBS bridge is separate, host-configured, and off by default (see [Environment](#environment)).
 
 ## Architecture
 

@@ -1,0 +1,133 @@
+from __future__ import annotations
+
+import hashlib
+import json
+from pathlib import Path
+
+import pytest
+
+from templeos.flavors import DEFAULT, get_flavor
+from templeos.settings import (
+    apply_config,
+    apply_flavor_choice,
+    flavor_status,
+    iso_state,
+    load_preferred,
+    save_preferred,
+)
+from templeos.tools import handle_vm
+from templeos.api import settings_payload, status_payload
+
+
+def _parse(raw: str) -> dict:
+    return json.loads(raw)
+
+
+def test_default_preferred_is_templeoh(tos_home):
+    assert DEFAULT == "templeoh"
+    assert load_preferred() == "templeoh"
+    rec = get_flavor("temple-of-hermes")
+    assert rec["id"] == "templeoh"
+    assert rec["sha256"] == "9afc98ed2bb15a3ff26ebaca12ea392079292df6667b3c1c527fdd30d80cdb13"
+    assert rec["bytes"] == 14_030_848
+
+
+def test_settings_persist_and_iso_state(tos_home, monkeypatch):
+    rec = get_flavor("tinkeros")
+    payload = b"tinker-iso"
+    digest = hashlib.sha256(payload).hexdigest()
+    from templeos import flavors
+
+    monkeypatch.setitem(flavors.FLAVORS["tinkeros"], "sha256", digest)
+    monkeypatch.setitem(flavors.FLAVORS["tinkeros"], "bytes", len(payload))
+    dest = tos_home / "isos" / rec["iso_filename"]
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    dest.write_bytes(payload)
+
+    saved = save_preferred("tinkeros")
+    assert saved["id"] == "tinkeros"
+    assert load_preferred() == "tinkeros"
+    data = json.loads((tos_home / "settings.json").read_text())
+    assert data["flavor"] == "tinkeros"
+    state = iso_state("tinkeros")
+    assert state["sha_state"] == "verified"
+    assert state["present"] is True
+    assert iso_state("templeoh")["sha_state"] == "missing"
+
+
+def test_apply_flavor_choice_fetches_and_notices_next_boot(tos_home, monkeypatch):
+    rec = get_flavor("templeos")
+    payload = b"stock-iso"
+    digest = hashlib.sha256(payload).hexdigest()
+    from templeos import flavors, doctor
+
+    monkeypatch.setitem(flavors.FLAVORS["templeos"], "sha256", digest)
+    monkeypatch.setitem(flavors.FLAVORS["templeos"], "bytes", len(payload))
+    seen: dict = {}
+
+    def fake_download(url, dest, *, expected_sha256, expected_bytes=None):
+        seen["url"] = url
+        Path(dest).write_bytes(payload)
+        return Path(dest)
+
+    monkeypatch.setattr(doctor, "download_official", fake_download)
+    monkeypatch.setattr("templeos.vm.status", lambda: {"ok": True, "running": True, "flavor": "templeoh"})
+
+    result = apply_flavor_choice("templeos", fetch=True)
+    assert result["ok"] is True
+    assert result["preferred_flavor"] == "templeos"
+    assert result["apply_on_next_boot"] is True
+    assert "next boot" in (result["notice"] or "").lower()
+    assert seen["url"] == rec["url"]
+    assert result["iso_fetch"]["fetched"] is True
+    assert iso_state("templeos")["sha_state"] == "verified"
+
+
+def test_settings_payload_and_vm_op_flavor(tos_home, monkeypatch):
+    rec = get_flavor("zealos")
+    payload = b"zeal-iso"
+    digest = hashlib.sha256(payload).hexdigest()
+    from templeos import flavors, doctor
+
+    monkeypatch.setitem(flavors.FLAVORS["zealos"], "sha256", digest)
+    monkeypatch.setitem(flavors.FLAVORS["zealos"], "bytes", len(payload))
+    monkeypatch.setattr(
+        doctor,
+        "download_official",
+        lambda url, dest, **k: dest.write_bytes(payload) or dest,
+    )
+
+    listed = _parse(handle_vm({"op": "flavor"}))
+    assert listed["ok"] is True
+    assert listed["preferred_flavor"] == "templeoh"
+    assert [row["id"] for row in listed["flavors"]] == ["templeoh", "tinkeros", "templeos", "zealos"]
+
+    selected = _parse(handle_vm({"op": "flavor", "flavor": "zealos"}))
+    assert selected["ok"] is True
+    assert selected["preferred_flavor"] == "zealos"
+    assert selected["iso_fetch"]["ok"] is True
+    assert load_preferred() == "zealos"
+
+    body = settings_payload()
+    assert body["settings"]["flavor"] == "zealos"
+    assert body["preferred_flavor"] == "zealos"
+    switched = settings_payload({"flavor": "templeoh", "fetch": False})
+    assert switched["preferred_flavor"] == "templeoh"
+    assert switched["sha_state"] == "missing"
+    assert load_preferred() == "templeoh"
+
+
+def test_apply_config_from_ctx_settings(tos_home):
+    class Ctx:
+        settings = {"flavor": "tinkeros"}
+
+    assert apply_config(Ctx()) == "tinkeros"
+    assert load_preferred() == "tinkeros"
+
+
+def test_status_payload_includes_picker_fields(tos_home):
+    status = status_payload()
+    assert status["preferred_flavor"] == "templeoh"
+    assert status["sha_state"] == "missing"
+    assert status["flavors"][0]["id"] == "templeoh"
+    assert "sha256" in status["flavors"][0]

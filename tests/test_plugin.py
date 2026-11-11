@@ -26,7 +26,7 @@ def test_manifest_matches_registered_tools_and_skill():
     ctx = FakeCtx()
     load_plugin().register(ctx)
     assert manifest["name"] == PLUGIN_ID == "templeos"
-    assert manifest["version"] == __version__ == "0.1.0"
+    assert manifest["version"] == __version__ == "0.1.1"
     assert manifest["requires_hermes"] == ">=0.23.0"
     env = manifest["requires_env"]
     assert [item["name"] if isinstance(item, dict) else item for item in env] == [
@@ -57,7 +57,7 @@ def test_manifest_matches_registered_tools_and_skill():
 def test_dashboard_manifest_points_at_plugin_api():
     data = json.loads((ROOT / "dashboard" / "manifest.json").read_text())
     assert data["name"] == "templeos"
-    assert data["version"] == "0.1.0"
+    assert data["version"] == "0.1.1"
     api = ROOT / "dashboard" / data["api"]
     assert api.is_file()
 

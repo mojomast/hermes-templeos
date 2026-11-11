@@ -9,7 +9,7 @@ from pathlib import Path
 import pytest
 
 from templeos import flavors, qemu, vm
-from templeos.flavors import get_flavor
+from templeos.flavors import DEFAULT, get_flavor
 from tests.fakes import FakeQMP, FakeSerial
 
 BAKEOFF_ISO = Path("/workspace/templeos-bakeoff/isos/TinkerOS_5.20-rc10.ISO")
@@ -45,7 +45,8 @@ def vm_clean(tos_home):
         vm._runtime = None
 
 
-def _pin_iso(tos_home: Path, monkeypatch: pytest.MonkeyPatch, flavor: str = "tinkeros", payload: bytes = b"iso") -> Path:
+def _pin_iso(tos_home: Path, monkeypatch: pytest.MonkeyPatch, flavor: str | None = None, payload: bytes = b"iso") -> Path:
+    flavor = flavor or DEFAULT
     rec = get_flavor(flavor)
     digest = hashlib.sha256(payload).hexdigest()
     monkeypatch.setitem(flavors.FLAVORS[flavor], "sha256", digest)
@@ -80,14 +81,14 @@ def test_status_when_stopped(vm_clean):
     assert body["ok"] is True
     assert body["running"] is False
     assert body["pid"] is None
-    assert body["flavor"] == "tinkeros"
+    assert body["flavor"] == "templeoh"
     assert body["sockets"] == {"qmp": False, "vnc": False, "com1": False}
     assert set(body["sockets"]) == {"qmp", "vnc", "com1"}
     assert all(isinstance(v, bool) for v in body["sockets"].values())
 
 
 def test_start_stop_reset_and_argv(vm_clean, monkeypatch):
-    _pin_iso(vm_clean, monkeypatch)
+    _pin_iso(vm_clean, monkeypatch, flavor="tinkeros")
     qmp, serial, proc, captured = _wire(monkeypatch)
     body = vm.start(flavor="tinkeros")
     assert body["ok"] is True
@@ -117,7 +118,7 @@ def test_start_stop_reset_and_argv(vm_clean, monkeypatch):
 
 def test_start_reattaches_after_runtime_drop(vm_clean, monkeypatch):
     """A gateway restart drops _runtime but leaves QEMU running; start must rebind."""
-    _pin_iso(vm_clean, monkeypatch)
+    _pin_iso(vm_clean, monkeypatch, flavor="tinkeros")
     qmp, serial, proc, _captured = _wire(monkeypatch)
     body = vm.start(flavor="tinkeros")
     assert body["ok"] is True and body["running"] is True
@@ -199,7 +200,7 @@ def test_restore_sends_cont_on_success_and_failure(vm_clean, monkeypatch):
 
 
 def test_start_loads_golden_when_present(vm_clean, monkeypatch):
-    _pin_iso(vm_clean, monkeypatch)
+    _pin_iso(vm_clean, monkeypatch, flavor="tinkeros")
     qmp, _serial, _proc, _cap = _wire(monkeypatch)
     monkeypatch.setattr(vm, "list_snapshots", lambda disk: ["golden"])
     body = vm.start(flavor="tinkeros", snapshot="golden")

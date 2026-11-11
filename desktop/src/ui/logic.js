@@ -8,6 +8,8 @@ export const CONTROL_MODES = ["watch", "shared", "user"];
 export const GOLDEN_SNAPSHOT = "golden";
 
 export const FLAVOR_LABELS = {
+  templeoh: "Temple of Hermes 0.1.2",
+  "temple-of-hermes": "Temple of Hermes 0.1.2",
   tinkeros: "TinkerOS 5.20-rc10",
   templeos: "TempleOS 5.03",
   zealos: "ZealOS",
@@ -31,7 +33,47 @@ export function guestSize(flavor, status) {
 
 export function flavorLabel(flavor, flavorName) {
   if (flavorName) return String(flavorName);
-  return FLAVOR_LABELS[flavor] || flavor || "TinkerOS";
+  return FLAVOR_LABELS[flavor] || flavor || "Temple of Hermes 0.1.2";
+}
+
+export const FLAVOR_PICKER_IDS = ["templeoh", "tinkeros", "templeos", "zealos"];
+
+export function shaStateLabel(state) {
+  if (state === "verified") return "SHA verified";
+  if (state === "missing") return "ISO not downloaded";
+  if (state === "mismatch") return "SHA mismatch";
+  if (state === "fetching") return "Downloading…";
+  return "SHA unknown";
+}
+
+export function preferredFlavorId(status) {
+  const body = status || {};
+  return body.preferred_flavor || body.flavor || "templeoh";
+}
+
+export function selectedFlavorRecord(status) {
+  const id = preferredFlavorId(status);
+  const list = (status && status.flavors) || [];
+  return list.find((item) => item && item.id === id) || null;
+}
+
+export function flavorShaSummary(status) {
+  const rec = selectedFlavorRecord(status);
+  const state = (rec && rec.sha_state) || (status && status.sha_state) || "";
+  const name =
+    (rec && rec.name) || flavorLabel(preferredFlavorId(status), status && status.flavor_name);
+  const sha = (rec && rec.sha256) || (status && status.flavor_sha256) || "";
+  const shortSha = sha ? String(sha).slice(0, 12) : "";
+  const label = shaStateLabel(state);
+  return {
+    id: preferredFlavorId(status),
+    name,
+    state,
+    label,
+    sha,
+    shortSha,
+    text: shortSha ? name + " · " + label + " (" + shortSha + "…)" : name + " · " + label,
+  };
 }
 
 export function integerScale(innerWidth, innerHeight, guestWidth, guestHeight) {
