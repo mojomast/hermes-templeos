@@ -1,0 +1,48 @@
+{
+  "format": "vp9-alpha-webm",
+  "width": 720,
+  "height": 1080,
+  "fps": 20,
+  "clips": {
+    "idle": {
+      "file": "exports/idle.webm",
+      "bytes": 290164,
+      "sha256": "1e90f4d04d522bdef152322986f2801ba0934cfe91f2349457f9b47060ed7c65"
+    },
+    "smoking": {
+      "file": "exports/smoking.webm",
+      "bytes": 582566,
+      "sha256": "4d0551b3de0efa48bb2402f32b71208a3fa783243de1b655d56b18f022a3a73e"
+    },
+    "speaking": {
+      "file": "exports/speaking.webm",
+      "bytes": 546121,
+      "sha256": "de9baeae007fe50dc922ea0e91678b8a7658fb59103450611c80e43c7cfb8912"
+    },
+    "typing": {
+      "file": "exports/typing.webm",
+      "bytes": 421671,
+      "sha256": "6ebdf8fb0688be20b4c7c3d6e540c5177833797bfa11c8e220f16f9c61c563c2"
+    },
+    "walk": {
+      "file": "exports/walk.webm",
+      "bytes": 589004,
+      "sha256": "68d07a01552daf539c50a229fca643d29ac2e97ab7a46bca80ff8f8ef80492f7"
+    },
+    "wave": {
+      "file": "exports/wave.webm",
+      "bytes": 571580,
+      "sha256": "587345c79fe7ff7116e2ad30cbbd97d5d50f139b31827e4c0500ffeb8404d805"
+    }
+  },
+  "state_map": {
+    "idle": "idle",
+    "idle_variant": "smoking",
+    "typing": "typing",
+    "speaking": "speaking",
+    "boot": "wave",
+    "greet": "wave",
+    "tool_success": "wave",
+    "first_appear": "walk"
+  }
+}
