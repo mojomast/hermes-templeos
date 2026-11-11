@@ -50,7 +50,7 @@ DEST_ALLOWLIST: frozenset[str] = frozenset({DEST_BBS})
 
 PROTOCOL = "HBBS/1"
 COMMANDS: frozenset[str] = frozenset(
-    {"AUTH", "WHOAMI", "LIST", "READ", "POST", "REPLY", "MAIL", "LOGOUT"}
+    {"AUTH", "WHOAMI", "LIST", "READ", "POST", "REPLY", "MAIL", "LOGOUT", "DIGEST", "DOWNLOAD"}
 )
 
 MAX_HEADER_BYTES = 128
@@ -879,6 +879,8 @@ _COMMAND_ARGS: dict[str, frozenset[str]] = {
         }
     ),
     "LOGOUT": frozenset({"revoke_refresh"}),
+    "DIGEST": frozenset({"limit"}),
+    "DOWNLOAD": frozenset({"board", "post_id"}),
 }
 
 _LIST_ACTIONS = frozenset({"boards", "threads", "posts"})
@@ -1010,6 +1012,13 @@ def _validate_args(command: str, args: Mapping[str, Any] | None) -> dict[str, An
             _validate_limit(body)
         else:
             _require_string(body, "message_id", max_chars=64)
+
+    if command == "DIGEST":
+        _validate_limit(body)
+
+    if command == "DOWNLOAD":
+        _validate_board(body)
+        _require_string(body, "post_id", max_chars=64)
 
     if command == "LOGOUT":
         if "revoke_refresh" in body and not isinstance(body.get("revoke_refresh"), bool):
@@ -1481,6 +1490,12 @@ class BbsClient:
         if cursor is not None:
             args["cursor"] = cursor
         return self.request("READ", args)
+
+    def digest(self, *, limit: int = 10) -> dict[str, Any]:
+        return self.request("DIGEST", {"limit": limit})
+
+    def download(self, post_id: str, *, board: str = "holyc") -> dict[str, Any]:
+        return self.request("DOWNLOAD", {"board": board, "post_id": post_id})
 
     def post(
         self,

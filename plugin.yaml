@@ -83,5 +83,17 @@ config_schema:
     type: str
     default: base
     description: Optional costume — base, cowboy, wizard, or chef.
+  nudge:
+    type: str
+    default: "on"
+    description: >-
+      Pending-only one-line pre-LLM nudge, at most 2 per local day. "off"
+      disables it; TEMPLEOS_NUDGE=off also disables it completely.
+  cadence:
+    type: str
+    default: "2/day"
+    description: >-
+      Recommended short sessions per day (default 2/day). Soft guidance for
+      the agent; the plugin does not enforce a lockout.
 python_dependencies:
   - "pillow>=10,<14"
