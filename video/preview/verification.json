@@ -1,0 +1,325 @@
+{
+  "sourceCommits": {
+    "plugin": "0f50faac279f7a669e66a13d0b1ce881a7a86917",
+    "os": "44d4c542d64b40513a635494ac791d281b748fc4"
+  },
+  "files": [
+    {
+      "file": "preview/submission-placeholder-1080p.mp4",
+      "sha256": "3f4114482c6257f6254aca24abd83f9afe1c13cecfb09c5677054d471b39c80d",
+      "bytes": 16017714,
+      "videoCodec": "h264",
+      "width": 1920,
+      "height": 1080,
+      "fps": "30/1",
+      "frames": 2700,
+      "videoDuration": 90.0,
+      "containerDuration": 90.0,
+      "expectedPictureDuration": 90.0,
+      "audioStreams": 1,
+      "loudness": {
+        "integratedLufs": -15.02,
+        "truePeakDbtp": -2.61,
+        "rangeLu": 6.1,
+        "scope": "first encoded audio stream"
+      },
+      "fullDecode": true,
+      "passed": true,
+      "errors": []
+    },
+    {
+      "file": "preview/submission-placeholder.mp4",
+      "sha256": "18d2caadab8fe824df5e218a301792f36e2fc12565e922fcc1cbccd49fb2804e",
+      "bytes": 6430981,
+      "videoCodec": "h264",
+      "width": 1280,
+      "height": 720,
+      "fps": "30/1",
+      "frames": 2700,
+      "videoDuration": 90.0,
+      "containerDuration": 90.005,
+      "expectedPictureDuration": 90.0,
+      "audioStreams": 1,
+      "loudness": {
+        "integratedLufs": -15.06,
+        "truePeakDbtp": -1.63,
+        "rangeLu": 6.1,
+        "scope": "first encoded audio stream"
+      },
+      "fullDecode": true,
+      "passed": true,
+      "errors": []
+    },
+    {
+      "file": "preview/submission-placeholder-vertical-1080p.mp4",
+      "sha256": "e0a12e76503cf1c12baa1b603e337d9ff1558618472f059e01cba654a540e447",
+      "bytes": 18179664,
+      "videoCodec": "h264",
+      "width": 1080,
+      "height": 1920,
+      "fps": "30/1",
+      "frames": 2700,
+      "videoDuration": 90.0,
+      "containerDuration": 90.0,
+      "expectedPictureDuration": 90.0,
+      "audioStreams": 1,
+      "loudness": {
+        "integratedLufs": -15.02,
+        "truePeakDbtp": -2.61,
+        "rangeLu": 6.1,
+        "scope": "first encoded audio stream"
+      },
+      "fullDecode": true,
+      "passed": true,
+      "errors": []
+    },
+    {
+      "file": "preview/submission-placeholder-vertical.mp4",
+      "sha256": "f114f58b3e5da96dc980941396503636f2c52eb7f04901d3e103dc796d5d0a06",
+      "bytes": 7276460,
+      "videoCodec": "h264",
+      "width": 720,
+      "height": 1280,
+      "fps": "30/1",
+      "frames": 2700,
+      "videoDuration": 90.0,
+      "containerDuration": 90.005,
+      "expectedPictureDuration": 90.0,
+      "audioStreams": 1,
+      "loudness": {
+        "integratedLufs": -15.06,
+        "truePeakDbtp": -1.63,
+        "rangeLu": 6.1,
+        "scope": "first encoded audio stream"
+      },
+      "fullDecode": true,
+      "passed": true,
+      "errors": []
+    }
+  ],
+  "builds": {
+    "landscape": {
+      "sha256": "049f89288efc179c30a1cdedca3cc00945bcb67c88a18eef81138549511f5640",
+      "width": 1920,
+      "height": 1080,
+      "frames": 2700,
+      "fps": 30,
+      "duration": 90
+    },
+    "-vertical": {
+      "sha256": "27db75d780f1af5079f2a48d7c0f817e4d7530b0b5c19bfa982aa3953b088ea8",
+      "width": 1080,
+      "height": 1920,
+      "frames": 2700,
+      "fps": 30,
+      "duration": 90
+    }
+  },
+  "cleanBuildExactMatches": true,
+  "subjectiveListening": false,
+  "landscapePlayback": {
+    "passed": true,
+    "duration": 90.005,
+    "ended": true,
+    "muted": false,
+    "error": null,
+    "frames": 2700,
+    "dropped": 0,
+    "waitingEvents": 0,
+    "seek70Passed": true,
+    "pageErrors": [],
+    "subjectiveListening": false
+  },
+  "landscapeEncodedReview": {
+    "stills": [
+      2,
+      6.5,
+      12,
+      23,
+      32,
+      40,
+      48,
+      55,
+      62,
+      70,
+      76,
+      82,
+      87
+    ],
+    "cutFrames": [
+      240,
+      600,
+      840,
+      1110,
+      1350,
+      1530,
+      1950,
+      2400,
+      2550
+    ],
+    "movement": [
+      {
+        "scene": "boot",
+        "changedChannelValues": 50439
+      },
+      {
+        "scene": "shared",
+        "changedChannelValues": 41414
+      },
+      {
+        "scene": "agent",
+        "changedChannelValues": 38818
+      },
+      {
+        "scene": "holyc",
+        "changedChannelValues": 37552
+      },
+      {
+        "scene": "control",
+        "changedChannelValues": 42188
+      },
+      {
+        "scene": "launcher",
+        "changedChannelValues": 34596
+      },
+      {
+        "scene": "apps",
+        "changedChannelValues": 38571
+      },
+      {
+        "scene": "bbs",
+        "changedChannelValues": 37385
+      },
+      {
+        "scene": "install",
+        "changedChannelValues": 34286
+      }
+    ],
+    "memorialHoldMeanDifference": 0.0002250514403292181,
+    "source": "actual encoded landscape master"
+  },
+  "seek": {
+    "landscape": {
+      "frames": [
+        0,
+        1,
+        120,
+        239,
+        240,
+        241,
+        420,
+        599,
+        600,
+        601,
+        720,
+        839,
+        840,
+        841,
+        975,
+        1109,
+        1110,
+        1111,
+        1230,
+        1349,
+        1350,
+        1351,
+        1440,
+        1529,
+        1530,
+        1531,
+        1740,
+        1949,
+        1950,
+        1951,
+        2175,
+        2399,
+        2400,
+        2401,
+        2475,
+        2549,
+        2550,
+        2551,
+        2625,
+        2699
+      ],
+      "reverseMatches": 40,
+      "shuffledMatches": 40,
+      "motion": true,
+      "effectSensitive": true,
+      "typography": {
+        "checks": 1045,
+        "errors": []
+      },
+      "pageErrors": [],
+      "build": {
+        "sha256": "049f89288efc179c30a1cdedca3cc00945bcb67c88a18eef81138549511f5640",
+        "width": 1920,
+        "height": 1080,
+        "frames": 2700,
+        "fps": 30,
+        "duration": 90
+      }
+    },
+    "-vertical": {
+      "frames": [
+        0,
+        1,
+        120,
+        239,
+        240,
+        241,
+        420,
+        599,
+        600,
+        601,
+        720,
+        839,
+        840,
+        841,
+        975,
+        1109,
+        1110,
+        1111,
+        1230,
+        1349,
+        1350,
+        1351,
+        1440,
+        1529,
+        1530,
+        1531,
+        1740,
+        1949,
+        1950,
+        1951,
+        2175,
+        2399,
+        2400,
+        2401,
+        2475,
+        2549,
+        2550,
+        2551,
+        2625,
+        2699
+      ],
+      "reverseMatches": 40,
+      "shuffledMatches": 40,
+      "motion": true,
+      "effectSensitive": true,
+      "typography": {
+        "checks": 1082,
+        "errors": []
+      },
+      "pageErrors": [],
+      "build": {
+        "sha256": "27db75d780f1af5079f2a48d7c0f817e4d7530b0b5c19bfa982aa3953b088ea8",
+        "width": 1080,
+        "height": 1920,
+        "frames": 2700,
+        "fps": 30,
+        "duration": 90
+      }
+    }
+  }
+}

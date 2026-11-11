@@ -1,0 +1,328 @@
+{
+  "pluginCommit": "0f50faac279f7a669e66a13d0b1ce881a7a86917",
+  "osCommit": "44d4c542d64b40513a635494ac791d281b748fc4",
+  "assets": [
+    {
+      "path": "assets/placeholders/boot-splash.png",
+      "url": "https://raw.githubusercontent.com/mojomast/temple-of-hermes/44d4c542d64b40513a635494ac791d281b748fc4/docs/images/boot-splash.png",
+      "sha256": "f49e933704b024cb98a68de216923330fb98da529a2ac26a7e2a61fdb9b3e2f3",
+      "license": "Unlicense / public domain",
+      "transform": "unchanged"
+    },
+    {
+      "path": "assets/placeholders/home-launcher.png",
+      "url": "https://raw.githubusercontent.com/mojomast/temple-of-hermes/44d4c542d64b40513a635494ac791d281b748fc4/docs/images/home-launcher.png",
+      "sha256": "5208c0f8d0b5949ece9316b51416a98e9caaa4e8b1a308fff40807f475be7def",
+      "license": "Unlicense / public domain",
+      "transform": "unchanged"
+    },
+    {
+      "path": "assets/placeholders/bbs.png",
+      "url": "https://raw.githubusercontent.com/mojomast/temple-of-hermes/44d4c542d64b40513a635494ac791d281b748fc4/docs/images/bbs.png",
+      "sha256": "f6ec8e08c9e267f7944ee1eee2a8bfb725c2e734f0396463280e0cee6a0a19db",
+      "license": "Unlicense / public domain",
+      "transform": "unchanged"
+    },
+    {
+      "path": "assets/placeholders/hermes-chat.png",
+      "url": "https://raw.githubusercontent.com/mojomast/temple-of-hermes/44d4c542d64b40513a635494ac791d281b748fc4/docs/images/hermes-chat.png",
+      "sha256": "073a1c64406500384774dbebab4c8d730c7eaa14c58b953a324047e49b8b83bb",
+      "license": "Unlicense / public domain",
+      "transform": "unchanged"
+    },
+    {
+      "path": "assets/placeholders/shell.png",
+      "url": "https://raw.githubusercontent.com/mojomast/temple-of-hermes/44d4c542d64b40513a635494ac791d281b748fc4/docs/images/shell.png",
+      "sha256": "6bb37379740a07460a39091d8fb8f0d33436b6bc62ba485c38065664519139cd",
+      "license": "Unlicense / public domain",
+      "transform": "unchanged"
+    },
+    {
+      "path": "assets/placeholders/pane-agent-log.png",
+      "url": "https://github.com/mojomast/hermes-templeos/blob/e16c9e7f605a70f771513cb0af960ec62d7ad5ee/docs/images/pane-agent-log.png",
+      "sha256": "3f2bd4431f2cd8e503835e07bef9202b9ff558ab5e069c5609ac287b9682cd29",
+      "license": "Repository MIT; original guest public domain",
+      "transform": "unchanged"
+    },
+    {
+      "path": "assets/placeholders/pane-shared.png",
+      "url": "https://github.com/mojomast/hermes-templeos/blob/e16c9e7f605a70f771513cb0af960ec62d7ad5ee/docs/images/pane-shared.png",
+      "sha256": "0df990c560218e5b3f0537cee5ac850fe36d0f22d0918175b70abb84ec12cd48",
+      "license": "Repository MIT; original guest public domain",
+      "transform": "unchanged"
+    },
+    {
+      "path": "assets/placeholders/pane-user-driving.png",
+      "url": "https://github.com/mojomast/hermes-templeos/blob/e16c9e7f605a70f771513cb0af960ec62d7ad5ee/docs/images/pane-user-driving.png",
+      "sha256": "3f7225ed938921521b5099523800ae26c7d4f03581ff9b8026e5a39e18105a86",
+      "license": "Repository MIT; original guest public domain",
+      "transform": "unchanged"
+    },
+    {
+      "path": "assets/fonts/Display.ttf",
+      "url": "https://raw.githubusercontent.com/google/fonts/main/ofl/spacegrotesk/SpaceGrotesk%5Bwght%5D.ttf",
+      "sha256": "acad6de1fc93436f5c0f1f4137751ef04f1aea3063e7036535970ffcfbd79f72",
+      "license": "SIL Open Font License 1.1",
+      "transform": "unchanged"
+    },
+    {
+      "path": "assets/fonts/spacegrotesk-OFL.txt",
+      "url": "https://raw.githubusercontent.com/google/fonts/main/ofl/spacegrotesk/OFL.txt",
+      "sha256": "564ce565c371c5e5bbf286006565a7c9aa55a9f56e7ca58d56e05d649dd61a72",
+      "license": "SIL Open Font License 1.1",
+      "transform": "unchanged"
+    },
+    {
+      "path": "assets/fonts/Sans.ttf",
+      "url": "https://raw.githubusercontent.com/google/fonts/main/ofl/ibmplexsans/IBMPlexSans%5Bwdth%2Cwght%5D.ttf",
+      "sha256": "3b031aa4216174205bd8471f88a49b91f093169e9e87bd5262242bc5967fe2e3",
+      "license": "SIL Open Font License 1.1",
+      "transform": "unchanged"
+    },
+    {
+      "path": "assets/fonts/ibmplexsans-OFL.txt",
+      "url": "https://raw.githubusercontent.com/google/fonts/main/ofl/ibmplexsans/OFL.txt",
+      "sha256": "7e6b2818edbd8f6a01ae80641cc8f16a51080d08fb4e532be3a0b6f74adb07da",
+      "license": "SIL Open Font License 1.1",
+      "transform": "unchanged"
+    },
+    {
+      "path": "assets/fonts/Mono.ttf",
+      "url": "https://raw.githubusercontent.com/google/fonts/main/ofl/ibmplexmono/IBMPlexMono-Medium.ttf",
+      "sha256": "a9b4c49bb299e05b5f6c481e7fb5e78943d2793249a0c8874ab574a2d1ea6755",
+      "license": "SIL Open Font License 1.1",
+      "transform": "unchanged"
+    },
+    {
+      "path": "assets/fonts/ibmplexmono-OFL.txt",
+      "url": "https://raw.githubusercontent.com/google/fonts/main/ofl/ibmplexmono/OFL.txt",
+      "sha256": "7e6b2818edbd8f6a01ae80641cc8f16a51080d08fb4e532be3a0b6f74adb07da",
+      "license": "SIL Open Font License 1.1",
+      "transform": "unchanged"
+    },
+    {
+      "path": "assets/licenses/temple-of-hermes-Unlicense.txt",
+      "url": "https://raw.githubusercontent.com/mojomast/temple-of-hermes/44d4c542d64b40513a635494ac791d281b748fc4/LICENSE",
+      "sha256": "6b0382b16279f26ff69014300541967a356a666eb0b91b422f6862f6b7dad17e",
+      "license": "Unlicense",
+      "transform": "unchanged"
+    },
+    {
+      "path": "assets/terry/source/parts/shadow/default.png",
+      "url": "https://github.com/mojomast/hermes-templeos/blob/e16c9e7f605a70f771513cb0af960ec62d7ad5ee/desktop/assets/companion/terry/v4/parts/shadow/default.png",
+      "sha256": "f02a827e7802f56eb2701a1184599212a5af467ff12d904068ccaa112cfe11c5",
+      "license": "Fan-made generated illustration; repository MIT",
+      "transform": "unchanged"
+    },
+    {
+      "path": "assets/terry/source/parts/arm_upper/default.png",
+      "url": "https://github.com/mojomast/hermes-templeos/blob/e16c9e7f605a70f771513cb0af960ec62d7ad5ee/desktop/assets/companion/terry/v4/parts/arm_upper/default.png",
+      "sha256": "497d2d51234021a63d59920d98344342f4a885e0771c393a0d4f220649ad3181",
+      "license": "Fan-made generated illustration; repository MIT",
+      "transform": "unchanged"
+    },
+    {
+      "path": "assets/terry/source/parts/forearm/default.png",
+      "url": "https://github.com/mojomast/hermes-templeos/blob/e16c9e7f605a70f771513cb0af960ec62d7ad5ee/desktop/assets/companion/terry/v4/parts/forearm/default.png",
+      "sha256": "2604f4b75e562e126a2d8571320144052c949961bd1ac2db0f9508cc3824e90d",
+      "license": "Fan-made generated illustration; repository MIT",
+      "transform": "unchanged"
+    },
+    {
+      "path": "assets/terry/source/parts/hand/grip.png",
+      "url": "https://github.com/mojomast/hermes-templeos/blob/e16c9e7f605a70f771513cb0af960ec62d7ad5ee/desktop/assets/companion/terry/v4/parts/hand/grip.png",
+      "sha256": "c312a555e1b759eef866e2ae3fff88ac192853c3aa6bfd40c508fb9969814084",
+      "license": "Fan-made generated illustration; repository MIT",
+      "transform": "unchanged"
+    },
+    {
+      "path": "assets/terry/source/parts/thigh/default.png",
+      "url": "https://github.com/mojomast/hermes-templeos/blob/e16c9e7f605a70f771513cb0af960ec62d7ad5ee/desktop/assets/companion/terry/v4/parts/thigh/default.png",
+      "sha256": "446dc8a651bbfbfbc75dac7ab82239b905eed0eb3c9b2c38e7cb90704bfe9654",
+      "license": "Fan-made generated illustration; repository MIT",
+      "transform": "unchanged"
+    },
+    {
+      "path": "assets/terry/source/parts/shin/default.png",
+      "url": "https://github.com/mojomast/hermes-templeos/blob/e16c9e7f605a70f771513cb0af960ec62d7ad5ee/desktop/assets/companion/terry/v4/parts/shin/default.png",
+      "sha256": "9dc89b4172e4a30c6737efcd66c918944f51f199d2d2a954436236d37c85b428",
+      "license": "Fan-made generated illustration; repository MIT",
+      "transform": "unchanged"
+    },
+    {
+      "path": "assets/terry/source/parts/foot/default.png",
+      "url": "https://github.com/mojomast/hermes-templeos/blob/e16c9e7f605a70f771513cb0af960ec62d7ad5ee/desktop/assets/companion/terry/v4/parts/foot/default.png",
+      "sha256": "6a95fdae8032e8b93b88625caa68c16fe940cd07fdcd9993e65b123fa6b36705",
+      "license": "Fan-made generated illustration; repository MIT",
+      "transform": "unchanged"
+    },
+    {
+      "path": "assets/terry/source/parts/torso/default.png",
+      "url": "https://github.com/mojomast/hermes-templeos/blob/e16c9e7f605a70f771513cb0af960ec62d7ad5ee/desktop/assets/companion/terry/v4/parts/torso/default.png",
+      "sha256": "64b81e4d3631ddab77503c5d4eacac1b5d12d42c9b491947489c42c526cc2b18",
+      "license": "Fan-made generated illustration; repository MIT",
+      "transform": "unchanged"
+    },
+    {
+      "path": "assets/terry/source/parts/thigh/default.png",
+      "url": "https://github.com/mojomast/hermes-templeos/blob/e16c9e7f605a70f771513cb0af960ec62d7ad5ee/desktop/assets/companion/terry/v4/parts/thigh/default.png",
+      "sha256": "446dc8a651bbfbfbc75dac7ab82239b905eed0eb3c9b2c38e7cb90704bfe9654",
+      "license": "Fan-made generated illustration; repository MIT",
+      "transform": "unchanged"
+    },
+    {
+      "path": "assets/terry/source/parts/shin/default.png",
+      "url": "https://github.com/mojomast/hermes-templeos/blob/e16c9e7f605a70f771513cb0af960ec62d7ad5ee/desktop/assets/companion/terry/v4/parts/shin/default.png",
+      "sha256": "9dc89b4172e4a30c6737efcd66c918944f51f199d2d2a954436236d37c85b428",
+      "license": "Fan-made generated illustration; repository MIT",
+      "transform": "unchanged"
+    },
+    {
+      "path": "assets/terry/source/parts/foot/default.png",
+      "url": "https://github.com/mojomast/hermes-templeos/blob/e16c9e7f605a70f771513cb0af960ec62d7ad5ee/desktop/assets/companion/terry/v4/parts/foot/default.png",
+      "sha256": "6a95fdae8032e8b93b88625caa68c16fe940cd07fdcd9993e65b123fa6b36705",
+      "license": "Fan-made generated illustration; repository MIT",
+      "transform": "unchanged"
+    },
+    {
+      "path": "assets/terry/source/parts/arm_upper/default.png",
+      "url": "https://github.com/mojomast/hermes-templeos/blob/e16c9e7f605a70f771513cb0af960ec62d7ad5ee/desktop/assets/companion/terry/v4/parts/arm_upper/default.png",
+      "sha256": "497d2d51234021a63d59920d98344342f4a885e0771c393a0d4f220649ad3181",
+      "license": "Fan-made generated illustration; repository MIT",
+      "transform": "unchanged"
+    },
+    {
+      "path": "assets/terry/source/parts/forearm/default.png",
+      "url": "https://github.com/mojomast/hermes-templeos/blob/e16c9e7f605a70f771513cb0af960ec62d7ad5ee/desktop/assets/companion/terry/v4/parts/forearm/default.png",
+      "sha256": "2604f4b75e562e126a2d8571320144052c949961bd1ac2db0f9508cc3824e90d",
+      "license": "Fan-made generated illustration; repository MIT",
+      "transform": "unchanged"
+    },
+    {
+      "path": "assets/terry/source/parts/keyboard/default.png",
+      "url": "https://github.com/mojomast/hermes-templeos/blob/e16c9e7f605a70f771513cb0af960ec62d7ad5ee/desktop/assets/companion/terry/v4/parts/keyboard/default.png",
+      "sha256": "965e7fbbc34d1cc1b5ec1fde9e9565d944d6a10ffdaad5bd9ea640bc5a929bb2",
+      "license": "Fan-made generated illustration; repository MIT",
+      "transform": "unchanged"
+    },
+    {
+      "path": "assets/terry/source/parts/neck/default.png",
+      "url": "https://github.com/mojomast/hermes-templeos/blob/e16c9e7f605a70f771513cb0af960ec62d7ad5ee/desktop/assets/companion/terry/v4/parts/neck/default.png",
+      "sha256": "5ca5c918633305dc483f30d54a7b6b0a267f180c02fb0524845974a30c2a0174",
+      "license": "Fan-made generated illustration; repository MIT",
+      "transform": "unchanged"
+    },
+    {
+      "path": "assets/terry/source/parts/head_base/neutral.png",
+      "url": "https://github.com/mojomast/hermes-templeos/blob/e16c9e7f605a70f771513cb0af960ec62d7ad5ee/desktop/assets/companion/terry/v4/parts/head_base/neutral.png",
+      "sha256": "22f0f38c506c34fcd9c925f5b46822dc1050731d1c199039c94f46ee8fb104c3",
+      "license": "Fan-made generated illustration; repository MIT",
+      "transform": "unchanged"
+    },
+    {
+      "path": "assets/terry/source/parts/stubble/default.png",
+      "url": "https://github.com/mojomast/hermes-templeos/blob/e16c9e7f605a70f771513cb0af960ec62d7ad5ee/desktop/assets/companion/terry/v4/parts/stubble/default.png",
+      "sha256": "74121e665685277f05d4bce24a46aa3503a7affdd0fcc530d7bf90af6a146c22",
+      "license": "Fan-made generated illustration; repository MIT",
+      "transform": "unchanged"
+    },
+    {
+      "path": "assets/terry/source/parts/cap/default.png",
+      "url": "https://github.com/mojomast/hermes-templeos/blob/e16c9e7f605a70f771513cb0af960ec62d7ad5ee/desktop/assets/companion/terry/v4/parts/cap/default.png",
+      "sha256": "37f07763de900c9d1de397bcb44b2b28530c257e1d85a9050492320b773dcda4",
+      "license": "Fan-made generated illustration; repository MIT",
+      "transform": "unchanged"
+    },
+    {
+      "path": "assets/terry/source/parts/hand/pinch.png",
+      "url": "https://github.com/mojomast/hermes-templeos/blob/e16c9e7f605a70f771513cb0af960ec62d7ad5ee/desktop/assets/companion/terry/v4/parts/hand/pinch.png",
+      "sha256": "1c24e4e987460595af5098130fb05fa5f066a5af0e548ec93314321aba1a9900",
+      "license": "Fan-made generated illustration; repository MIT",
+      "transform": "unchanged"
+    },
+    {
+      "path": "assets/terry/placeholder.png",
+      "url": "https://github.com/mojomast/hermes-templeos/tree/e16c9e7f605a70f771513cb0af960ec62d7ad5ee/desktop/assets/companion/terry/v4",
+      "sha256": "d1c1f5a3e73dd5e27efc9b5ae36ba213fbd03aaf5b6ef49fef45b635394b440a",
+      "license": "Fan-made generated illustration; repository MIT",
+      "transform": "Static first idle pose; 3.5x original slot coordinates; no animation"
+    },
+    {
+      "path": "assets/terry/idle.webm",
+      "url": "https://github.com/mojomast/hermes-templeos/blob/0f50faac279f7a669e66a13d0b1ce881a7a86917/desktop/assets/companion/terry/v5/exports/idle.webm",
+      "sha256": "1e90f4d04d522bdef152322986f2801ba0934cfe91f2349457f9b47060ed7c65",
+      "license": "Original fan tribute; repository MIT",
+      "transform": "unchanged"
+    },
+    {
+      "path": "assets/terry/smoking.webm",
+      "url": "https://github.com/mojomast/hermes-templeos/blob/0f50faac279f7a669e66a13d0b1ce881a7a86917/desktop/assets/companion/terry/v5/exports/smoking.webm",
+      "sha256": "4d0551b3de0efa48bb2402f32b71208a3fa783243de1b655d56b18f022a3a73e",
+      "license": "Original fan tribute; repository MIT",
+      "transform": "unchanged"
+    },
+    {
+      "path": "assets/terry/speaking.webm",
+      "url": "https://github.com/mojomast/hermes-templeos/blob/0f50faac279f7a669e66a13d0b1ce881a7a86917/desktop/assets/companion/terry/v5/exports/speaking.webm",
+      "sha256": "de9baeae007fe50dc922ea0e91678b8a7658fb59103450611c80e43c7cfb8912",
+      "license": "Original fan tribute; repository MIT",
+      "transform": "unchanged"
+    },
+    {
+      "path": "assets/terry/typing.webm",
+      "url": "https://github.com/mojomast/hermes-templeos/blob/0f50faac279f7a669e66a13d0b1ce881a7a86917/desktop/assets/companion/terry/v5/exports/typing.webm",
+      "sha256": "6ebdf8fb0688be20b4c7c3d6e540c5177833797bfa11c8e220f16f9c61c563c2",
+      "license": "Original fan tribute; repository MIT",
+      "transform": "unchanged"
+    },
+    {
+      "path": "assets/terry/walk.webm",
+      "url": "https://github.com/mojomast/hermes-templeos/blob/0f50faac279f7a669e66a13d0b1ce881a7a86917/desktop/assets/companion/terry/v5/exports/walk.webm",
+      "sha256": "68d07a01552daf539c50a229fca643d29ac2e97ab7a46bca80ff8f8ef80492f7",
+      "license": "Original fan tribute; repository MIT",
+      "transform": "unchanged"
+    },
+    {
+      "path": "assets/terry/wave.webm",
+      "url": "https://github.com/mojomast/hermes-templeos/blob/0f50faac279f7a669e66a13d0b1ce881a7a86917/desktop/assets/companion/terry/v5/exports/wave.webm",
+      "sha256": "587345c79fe7ff7116e2ad30cbbd97d5d50f139b31827e4c0500ffeb8404d805",
+      "license": "Original fan tribute; repository MIT",
+      "transform": "unchanged"
+    },
+    {
+      "path": "assets/terry/approved-quotes.json",
+      "url": "https://github.com/mojomast/hermes-templeos/blob/0f50faac279f7a669e66a13d0b1ce881a7a86917/desktop/terry-quotes.json",
+      "sha256": "a1df9cfd5fd45c7ea7cb372e4b1f8c6bdfb3cbd3c4b5f7b111085b4c006714c9",
+      "license": "Verbatim sourced quotations; catalogue from repository MIT",
+      "transform": "unchanged"
+    },
+    {
+      "path": "assets/terry/v5-README.md",
+      "url": "https://github.com/mojomast/hermes-templeos/blob/0f50faac279f7a669e66a13d0b1ce881a7a86917/desktop/assets/companion/terry/v5/README.md",
+      "sha256": "c520138ae106edd664e11a1a588099578b7f870b383015c346256af85c9cf42c",
+      "license": "Repository MIT",
+      "transform": "unchanged"
+    },
+    {
+      "path": "assets/terry/v5-clips.json",
+      "url": "https://github.com/mojomast/hermes-templeos/blob/0f50faac279f7a669e66a13d0b1ce881a7a86917/desktop/assets/companion/terry/v5/clips.json",
+      "sha256": "136cc0ca24e32cd22146aec677af51f137f6efef27ff55cb20cd46ae876b13e9",
+      "license": "Repository MIT",
+      "transform": "unchanged"
+    },
+    {
+      "path": "assets/placeholders/pane-1920x1240.png",
+      "url": "https://github.com/mojomast/hermes-templeos/blob/0f50faac279f7a669e66a13d0b1ce881a7a86917/docs/images/pane-1920x1240.png",
+      "sha256": "cb459538eaaaa76f2e4a2591a5cf4f588fd9ffd3a33a19e2a1193f5b54f6666e",
+      "license": "Repository MIT; original guest public domain",
+      "transform": "unchanged"
+    },
+    {
+      "path": "assets/placeholders/pane-typing.png",
+      "url": "https://github.com/mojomast/hermes-templeos/blob/0f50faac279f7a669e66a13d0b1ce881a7a86917/docs/images/pane-typing.png",
+      "sha256": "1856b856a72bc11cce5b1866f3c2790b2bf79dd7cddc0979c0871843bf92449c",
+      "license": "Repository MIT; original guest public domain",
+      "transform": "unchanged"
+    }
+  ]
+}

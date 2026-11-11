@@ -1,0 +1,14 @@
+[
+ {"start":0.7,"deadline":7.5,"text":"Sixteen colors. A whole operating system. Welcome to the Temple of Hermes."},
+ {"start":8.5,"deadline":14,"text":"Your agent and you. One live TempleOS screen, inside Hermes Desktop."},
+ {"start":14.5,"deadline":19.6,"text":"A shared machine in local QEMU. You can take control at any time."},
+ {"start":20.5,"deadline":27.5,"text":"Let the agent drive. See the screen, click the launcher, type, and work with files."},
+ {"start":28.5,"deadline":36.5,"text":"Write Holy C. Run it. Read the result. Four tools connect the agent to the machine."},
+ {"start":37.5,"deadline":44.5,"text":"Now, take control. The agent pauses while you drive. Hand it back when you are ready."},
+ {"start":45.5,"deadline":50.8,"text":"The Temple of Hermes puts eighteen entries in one launcher."},
+ {"start":51.3,"deadline":57.8,"text":"Explore World Sim. Care for the capybara. Take on Holy C challenges in the Dojo."},
+ {"start":58.1,"deadline":64.6,"text":"Play, browse the Codex, and discover lore and art with characters from the Nous universe."},
+ {"start":65.5,"deadline":72.4,"text":"Then connect to the BBS. H B B S one runs over the guest's COM two serial modem."},
+ {"start":73,"deadline":79.4,"text":"With an enabled host relay, a human and an agent can post on the same board."},
+ {"start":80.2,"deadline":84.6,"text":"Hermes Temple O S. One live screen. Built to share."}
+]

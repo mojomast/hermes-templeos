@@ -1,0 +1,12 @@
+ONE LIVE SCREEN — original synthesized score and effects
+
+Original composition, synthesis and arrangement created for this submission.
+No sampled commercial music or third-party recordings are used in the score
+or effects. The score/effects and their synthesis code are dedicated under
+CC0 1.0 Universal: https://creativecommons.org/publicdomain/zero/1.0/
+
+Narration is generated using the stock Kokoro af_heart voice, not a clone or
+imitation of Terry A. Davis. The script is original. Kokoro-82M model weights
+are Apache 2.0; kokoro-onnx wrapper is MIT. Weights are not redistributed.
+https://huggingface.co/hexgrad/Kokoro-82M
+https://github.com/thewh1teagle/kokoro-onnx

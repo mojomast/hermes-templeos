@@ -1,0 +1,13 @@
+import P from '../palette.json';export {P};export const clamp=(v,a=0,b=1)=>Math.max(a,Math.min(b,v));export const ease=v=>1-(1-clamp(v))**3;export const smooth=v=>{v=clamp(v);return v*v*(3-2*v)};
+export function box(g,x,y,w,h,c,r=0){g.fillStyle=c;g.beginPath();g.roundRect(x,y,w,h,r);g.fill()}
+export function line(g,x,y,xx,yy,c,w=2){g.strokeStyle=c;g.lineWidth=w;g.beginPath();g.moveTo(x,y);g.lineTo(xx,yy);g.stroke()}
+export function text(g,s,x,y,size=32,c=P.white,font='Sans',weight=500,align='left'){g.font=`${weight} ${size}px ${font}`;g.textAlign=align;g.textBaseline='alphabetic';g.fillStyle=c;g.fillText(s,x,y)}
+export function type(g,s,x,y,size=96,c=P.white,max=1776){g.font=`700 ${size}px Display`;const w=g.measureText(s).width,delay=(s.length%3)*.035,entry=(1-ease(((g.__filmT??1)-delay)/.36))*(g.__filmI??1);g.save();g.translate(0,entry*34);text(g,s,x,y,Math.min(size,size*max/Math.max(w,1)),c,'Display',700);g.restore()}
+export function mono(g,s,x,y,size=24,c=P.cyan,align='left'){text(g,s,x,y,size,c,'Mono',500,align)}
+export function clip(g,x,y,w,h,r=0){g.beginPath();g.roundRect(x,y,w,h,r);g.clip()}
+export function fit(g,im,x,y,w,h,pixel=false){g.imageSmoothingEnabled=!pixel;const k=Math.min(w/im.width,h/im.height);g.drawImage(im,x+(w-im.width*k)/2,y+(h-im.height*k)/2,im.width*k,im.height*k);g.imageSmoothingEnabled=true}
+export function wrap(g,s,x,y,width,size=35,c=P.white,{font='Sans',weight=500,lineHeight=1.26,maxLines=8,align='left'}={}){g.font=`${weight} ${size}px ${font}`;const words=s.split(' '),lines=[];let a='';for(const w of words){const b=a?a+' '+w:w;if(g.measureText(b).width>width&&a){lines.push(a);a=w}else a=b}if(a)lines.push(a);if(lines.length>maxLines)throw Error(`Text overflow: ${s}`);lines.forEach((l,i)=>text(g,l,x,y+i*size*lineHeight,size,c,font,weight,align));return lines.length*size*lineHeight}
+export function tag(g,s,x,y,width=400,c=P.yellow){box(g,x,y,width,43,c,2);mono(g,s,x+14,y+29,22,P.black)}
+export function background(g,t,W,H,intensity=1){box(g,0,0,W,H,P.ink);const horizon=H*.65;g.save();g.globalAlpha=.2;for(let i=-8;i<16;i++){const x=W/2+i*W/8;line(g,W/2+(x-W/2)*.13,horizon,x,H,P.blue,1)}for(let i=0;i<12;i++){const q=((i/12+t*.025*intensity)%1)**2;line(g,0,horizon+q*(H-horizon),W,horizon+q*(H-horizon),P.cyan,1)}g.restore();g.save();g.globalAlpha=.1;box(g,W*.78,-H*.1,W*.3,H*.8,P.navy);g.restore()}
+export function mast(g,W,index,label){mono(g,'TEMPLE // HERMES',60,55,23,P.cyan);mono(g,label,W-60,55,21,P.silver,'right');line(g,60,77,W-60,77,P.gray,1)}
+export function beat(g,t,x,y,w=400){const p=Math.exp(-(t%.5)*12);box(g,x,y,w,5,P.panel);box(g,x,y,w*(.2+p*.8),5,P.cyan)}

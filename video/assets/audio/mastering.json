@@ -1,0 +1,19 @@
+{
+  "seed": 64048016,
+  "bpm": 120,
+  "downbeat": 0,
+  "drop": 20,
+  "license": "CC0-1.0",
+  "pcm": {
+    "input_i": "-15.00",
+    "input_tp": "-2.79",
+    "input_lra": "6.10",
+    "input_thresh": "-26.16",
+    "output_i": "-15.53",
+    "output_tp": "-3.00",
+    "output_lra": "5.90",
+    "output_thresh": "-26.43",
+    "normalization_type": "dynamic",
+    "target_offset": "0.53"
+  }
+}

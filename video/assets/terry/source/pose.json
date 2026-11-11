@@ -1,0 +1,857 @@
+{
+  "frame": {
+    "parts": {
+      "torso": {
+        "x": 96.0,
+        "y": 149.0,
+        "rot": 0.0,
+        "sx": 0.9,
+        "sy": 0.9
+      },
+      "neck": {
+        "x": 96.0,
+        "y": 86.0,
+        "rot": 0.0,
+        "sx": 0.9,
+        "sy": 0.9
+      },
+      "head_base": {
+        "x": 96.0,
+        "y": 93.19999999999999,
+        "rot": 0.0,
+        "sx": 0.9,
+        "sy": 0.9
+      },
+      "keyboard": {
+        "x": 70.8,
+        "y": 131.0,
+        "rot": -7.0,
+        "sx": 0.9,
+        "sy": 0.9
+      },
+      "cigarette": {
+        "x": 114.009108,
+        "y": 152.127986,
+        "rot": 0,
+        "variant": "grip_back",
+        "sx": 0.9,
+        "sy": 0.9
+      },
+      "eye_l": {
+        "x": 85.2,
+        "y": 57.2,
+        "sx": 0.9,
+        "sy": 0.9
+      },
+      "eye_r": {
+        "x": 106.8,
+        "y": 57.2,
+        "sx": 0.9,
+        "sy": 0.9
+      },
+      "nose": {
+        "x": 96.0,
+        "y": 69.8,
+        "sx": 0.9,
+        "sy": 0.9
+      },
+      "mouth": {
+        "x": 96.0,
+        "y": 82.39999999999999,
+        "sx": 0.9,
+        "sy": 0.9
+      },
+      "brow_l": {
+        "x": 85.2,
+        "y": 50.0,
+        "sx": 0.9,
+        "sy": 0.9
+      },
+      "brow_r": {
+        "x": 106.8,
+        "y": 50.0,
+        "sx": 0.9,
+        "sy": 0.9
+      },
+      "ear_l": {
+        "x": 72.6,
+        "y": 62.599999999999994,
+        "sx": 0.9,
+        "sy": 0.9
+      },
+      "ear_r": {
+        "x": 119.4,
+        "y": 62.599999999999994,
+        "sx": 0.9,
+        "sy": 0.9
+      },
+      "hair": {
+        "x": 96.0,
+        "y": 41.0,
+        "sx": 0.9,
+        "sy": 0.9
+      },
+      "stubble": {
+        "x": 96.0,
+        "y": 77.0,
+        "sx": 0.9,
+        "sy": 0.9
+      },
+      "cap": {
+        "x": 96.0,
+        "y": 46.39999999999999,
+        "rot": 0.0,
+        "sx": 0.9,
+        "sy": 0.9
+      },
+      "back_upper_arm": {
+        "x": 76.2,
+        "y": 105.8,
+        "rot": -48.0,
+        "sx": 0.9,
+        "sy": 0.9
+      },
+      "back_forearm": {
+        "x": 92.25193200000001,
+        "y": 120.25321699999999,
+        "rot": 35.0,
+        "sx": 0.9,
+        "sy": 0.9
+      },
+      "back_hand": {
+        "x": 80.895111,
+        "y": 136.472432,
+        "rot": 35.0,
+        "variant": "grip",
+        "layer_boost": 0,
+        "sx": 0.9,
+        "sy": 0.9
+      },
+      "front_upper_arm": {
+        "x": 115.8,
+        "y": 105.8,
+        "rot": 12.0,
+        "sx": 0.9,
+        "sy": 0.9
+      },
+      "front_forearm": {
+        "x": 111.309108,
+        "y": 126.92798599999999,
+        "rot": 0.0,
+        "sx": 0.9,
+        "sy": 0.9
+      },
+      "front_hand": {
+        "x": 111.309108,
+        "y": 146.727986,
+        "rot": 0.0,
+        "variant": "pinch",
+        "layer_boost": 40,
+        "sx": 0.9,
+        "sy": 0.9
+      },
+      "back_thigh": {
+        "x": 87.0,
+        "y": 147.2,
+        "rot": 0.0,
+        "sx": 0.9,
+        "sy": 0.9
+      },
+      "back_shin": {
+        "x": 87.0,
+        "y": 168.8,
+        "rot": 0.0,
+        "sx": 0.9,
+        "sy": 0.9
+      },
+      "back_foot": {
+        "x": 87.0,
+        "y": 187.7,
+        "rot": 0,
+        "flip": true,
+        "sx": 0.9,
+        "sy": 0.9
+      },
+      "front_thigh": {
+        "x": 105.0,
+        "y": 147.2,
+        "rot": 0.0,
+        "sx": 0.9,
+        "sy": 0.9
+      },
+      "front_shin": {
+        "x": 105.0,
+        "y": 168.8,
+        "rot": 0.0,
+        "sx": 0.9,
+        "sy": 0.9
+      },
+      "front_foot": {
+        "x": 105.0,
+        "y": 187.7,
+        "rot": 0,
+        "flip": false,
+        "sx": 0.9,
+        "sy": 0.9
+      },
+      "cigarette_front": {
+        "x": 114.009108,
+        "y": 152.127986,
+        "rot": 0,
+        "variant": "grip_front",
+        "sx": 0.9,
+        "sy": 0.9
+      },
+      "shadow": {
+        "x": 96.0,
+        "y": 200,
+        "rot": 0
+      }
+    },
+    "variants": {
+      "head_base": "neutral",
+      "eye_l": "open",
+      "eye_r": "open",
+      "brow_l": "neutral",
+      "brow_r": "neutral",
+      "mouth": "neutral"
+    },
+    "joints": {
+      "back_shoulder": [
+        76.2,
+        105.8
+      ],
+      "back_elbow": [
+        92.2519282303117,
+        120.25322109735133
+      ],
+      "back_wrist": [
+        80.895114790561,
+        136.47243157427337
+      ],
+      "back_palm": [
+        77.2815832415494,
+        141.63308945329402
+      ],
+      "front_shoulder": [
+        115.8,
+        105.8
+      ],
+      "front_elbow": [
+        111.30910747833639,
+        126.9279881758502
+      ],
+      "front_wrist": [
+        111.30910747833639,
+        146.72798817585021
+      ],
+      "front_palm": [
+        111.30910747833639,
+        153.0279881758502
+      ],
+      "back_hip": [
+        87.0,
+        147.2
+      ],
+      "back_knee": [
+        87.0,
+        168.8
+      ],
+      "back_ankle": [
+        87.0,
+        187.7
+      ],
+      "front_hip": [
+        105.0,
+        147.2
+      ],
+      "front_knee": [
+        105.0,
+        168.8
+      ],
+      "front_ankle": [
+        105.0,
+        187.7
+      ],
+      "cigarette_grip": [
+        118.50910747833639,
+        152.1279881758502
+      ],
+      "cigarette_filter": [
+        114.009108,
+        152.127986
+      ],
+      "cigarette_tip": [
+        128.409108,
+        152.127986
+      ],
+      "mouth": [
+        96.0,
+        82.39999999999999
+      ]
+    },
+    "global_scale_applied": true,
+    "lock_feet": false,
+    "normalization_dy": 1,
+    "sourceRig": {
+      "back_arm": {
+        "shoulder": [
+          74.0,
+          100.0
+        ],
+        "shoulder_deg": -48.0,
+        "elbow_deg": 83.0,
+        "hand": "grip"
+      },
+      "front_arm": {
+        "shoulder": [
+          118.0,
+          100.0
+        ],
+        "shoulder_deg": 12.0,
+        "elbow_deg": -12.0,
+        "hand": "pinch"
+      }
+    }
+  },
+  "registry": {
+    "torso": {
+      "layer": 30,
+      "size": [
+        56,
+        70
+      ],
+      "pivot": [
+        28,
+        62
+      ],
+      "attach_points": {
+        "neck": [
+          28,
+          6
+        ],
+        "shoulder_l": [
+          8,
+          14
+        ],
+        "shoulder_r": [
+          48,
+          14
+        ],
+        "hip_l": [
+          16,
+          62
+        ],
+        "hip_r": [
+          40,
+          62
+        ]
+      },
+      "variants": {
+        "default": "parts/torso/default.png"
+      }
+    },
+    "neck": {
+      "layer": 60,
+      "size": [
+        20,
+        22
+      ],
+      "pivot": [
+        10,
+        20
+      ],
+      "variants": {
+        "default": "parts/neck/default.png"
+      }
+    },
+    "head_base": {
+      "layer": 70,
+      "size": [
+        64,
+        84
+      ],
+      "pivot": [
+        32,
+        76
+      ],
+      "attach_points": {
+        "eye_l": [
+          20,
+          36
+        ],
+        "eye_r": [
+          44,
+          36
+        ],
+        "nose": [
+          32,
+          50
+        ],
+        "mouth": [
+          32,
+          64
+        ],
+        "brow_l": [
+          20,
+          28
+        ],
+        "brow_r": [
+          44,
+          28
+        ],
+        "ear_l": [
+          6,
+          42
+        ],
+        "ear_r": [
+          58,
+          42
+        ],
+        "cap": [
+          32,
+          24
+        ],
+        "hair": [
+          32,
+          18
+        ],
+        "stubble": [
+          32,
+          58
+        ]
+      },
+      "note": "Tall lean rectangular skull. Late-2017 Terry: long face, stubble only (no mustache).",
+      "variants": {
+        "default": "parts/head_base/default.png",
+        "neutral": "parts/head_base/neutral.png",
+        "blink": "parts/head_base/blink.png",
+        "half": "parts/head_base/half.png",
+        "talk_a": "parts/head_base/talk_a.png",
+        "talk_o": "parts/head_base/talk_o.png",
+        "concern": "parts/head_base/concern.png",
+        "smirk": "parts/head_base/smirk.png",
+        "fail": "parts/head_base/fail.png",
+        "think": "parts/head_base/think.png",
+        "talk_m": "parts/head_base/talk_m.png",
+        "talk_e": "parts/head_base/talk_e.png",
+        "talk_ee": "parts/head_base/talk_ee.png",
+        "talk_f": "parts/head_base/talk_f.png",
+        "talk_l": "parts/head_base/talk_l.png",
+        "talk_u": "parts/head_base/talk_u.png",
+        "talk_s": "parts/head_base/talk_s.png",
+        "talk_ch": "parts/head_base/talk_ch.png",
+        "talk_blink": "parts/head_base/talk_blink.png"
+      }
+    },
+    "keyboard": {
+      "layer": 55,
+      "size": [
+        52,
+        30
+      ],
+      "pivot": [
+        8,
+        15
+      ],
+      "variants": {
+        "default": "parts/keyboard/default.png"
+      }
+    },
+    "cigarette": {
+      "layer": 95,
+      "size": [
+        18,
+        8
+      ],
+      "pivot": [
+        2,
+        4
+      ],
+      "variants": {
+        "default": "parts/cigarette/default.png",
+        "grip_back": "parts/cigarette/grip_back.png"
+      }
+    },
+    "eye_l": {
+      "layer": 80,
+      "size": [
+        12,
+        10
+      ],
+      "pivot": [
+        6,
+        5
+      ],
+      "note": "Small deep-set hooded eyes. NOT big chibi eyes.",
+      "variants": {
+        "open": "parts/eye_l/open.png",
+        "half": "parts/eye_l/half.png",
+        "closed": "parts/eye_l/closed.png",
+        "side": "parts/eye_l/side.png"
+      }
+    },
+    "eye_r": {
+      "layer": 80,
+      "size": [
+        12,
+        10
+      ],
+      "pivot": [
+        6,
+        5
+      ],
+      "variants": {
+        "open": "parts/eye_r/open.png",
+        "half": "parts/eye_r/half.png",
+        "closed": "parts/eye_r/closed.png",
+        "side": "parts/eye_r/side.png"
+      }
+    },
+    "nose": {
+      "layer": 82,
+      "size": [
+        12,
+        20
+      ],
+      "pivot": [
+        6,
+        18
+      ],
+      "variants": {
+        "default": "parts/nose/default.png"
+      }
+    },
+    "mouth": {
+      "layer": 84,
+      "size": [
+        20,
+        10
+      ],
+      "pivot": [
+        10,
+        3
+      ],
+      "variants": {
+        "neutral": "parts/mouth/neutral.png",
+        "talk_a": "parts/mouth/talk_a.png",
+        "talk_o": "parts/mouth/talk_o.png",
+        "frown": "parts/mouth/frown.png",
+        "smirk": "parts/mouth/smirk.png"
+      }
+    },
+    "brow_l": {
+      "layer": 78,
+      "size": [
+        20,
+        8
+      ],
+      "pivot": [
+        10,
+        6
+      ],
+      "variants": {
+        "neutral": "parts/brow_l/neutral.png",
+        "raised": "parts/brow_l/raised.png",
+        "furrowed": "parts/brow_l/furrowed.png"
+      }
+    },
+    "brow_r": {
+      "layer": 78,
+      "size": [
+        20,
+        8
+      ],
+      "pivot": [
+        10,
+        6
+      ],
+      "variants": {
+        "neutral": "parts/brow_r/neutral.png",
+        "raised": "parts/brow_r/raised.png",
+        "furrowed": "parts/brow_r/furrowed.png"
+      }
+    },
+    "ear_l": {
+      "layer": 72,
+      "size": [
+        16,
+        20
+      ],
+      "pivot": [
+        8,
+        10
+      ],
+      "variants": {
+        "default": "parts/ear_l/default.png"
+      }
+    },
+    "ear_r": {
+      "layer": 72,
+      "size": [
+        16,
+        20
+      ],
+      "pivot": [
+        8,
+        10
+      ],
+      "variants": {
+        "default": "parts/ear_r/default.png"
+      }
+    },
+    "hair": {
+      "layer": 74,
+      "size": [
+        72,
+        40
+      ],
+      "pivot": [
+        36,
+        32
+      ],
+      "variants": {
+        "default": "parts/hair/default.png"
+      }
+    },
+    "stubble": {
+      "layer": 76,
+      "size": [
+        44,
+        32
+      ],
+      "pivot": [
+        22,
+        6
+      ],
+      "note": "Generated shared chin/jaw overlay; approved facial plates unchanged. Upper lip left clear.",
+      "variants": {
+        "default": "parts/stubble/default.png"
+      }
+    },
+    "cap": {
+      "layer": 90,
+      "size": [
+        78,
+        44
+      ],
+      "pivot": [
+        39,
+        32
+      ],
+      "note": "Backwards white baseball cap; strap across forehead.",
+      "variants": {
+        "default": "parts/cap/default.png",
+        "cowboy": "parts/cap/cowboy.png",
+        "wizard": "parts/cap/wizard.png",
+        "chef": "parts/cap/chef.png"
+      }
+    },
+    "back_upper_arm": {
+      "size": [
+        32,
+        36
+      ],
+      "pivot": [
+        16,
+        6
+      ],
+      "layer": 10,
+      "variants": {
+        "default": "parts/arm_upper/default.png"
+      }
+    },
+    "back_forearm": {
+      "size": [
+        28,
+        32
+      ],
+      "pivot": [
+        14,
+        5
+      ],
+      "layer": 11,
+      "variants": {
+        "default": "parts/forearm/default.png"
+      }
+    },
+    "back_hand": {
+      "size": [
+        24,
+        24
+      ],
+      "pivot": [
+        12,
+        5
+      ],
+      "layer": 12,
+      "variants": {
+        "relaxed": "parts/hand/relaxed.png",
+        "grip": "parts/hand/grip.png",
+        "pinch": "parts/hand/pinch.png",
+        "typing": "parts/hand/typing.png",
+        "open": "parts/hand/open.png"
+      }
+    },
+    "front_upper_arm": {
+      "size": [
+        32,
+        36
+      ],
+      "pivot": [
+        16,
+        6
+      ],
+      "layer": 50,
+      "variants": {
+        "default": "parts/arm_upper/default.png"
+      }
+    },
+    "front_forearm": {
+      "size": [
+        28,
+        32
+      ],
+      "pivot": [
+        14,
+        5
+      ],
+      "layer": 51,
+      "variants": {
+        "default": "parts/forearm/default.png"
+      }
+    },
+    "front_hand": {
+      "size": [
+        24,
+        24
+      ],
+      "pivot": [
+        12,
+        5
+      ],
+      "layer": 58,
+      "variants": {
+        "relaxed": "parts/hand/relaxed.png",
+        "grip": "parts/hand/grip.png",
+        "pinch": "parts/hand/pinch.png",
+        "typing": "parts/hand/typing.png",
+        "open": "parts/hand/open.png"
+      }
+    },
+    "back_thigh": {
+      "size": [
+        32,
+        34
+      ],
+      "pivot": [
+        16,
+        4
+      ],
+      "layer": 20,
+      "variants": {
+        "default": "parts/thigh/default.png"
+      }
+    },
+    "back_shin": {
+      "size": [
+        28,
+        30
+      ],
+      "pivot": [
+        14,
+        4
+      ],
+      "layer": 21,
+      "variants": {
+        "default": "parts/shin/default.png"
+      }
+    },
+    "back_foot": {
+      "size": [
+        32,
+        20
+      ],
+      "pivot": [
+        12,
+        5
+      ],
+      "layer": 22,
+      "variants": {
+        "default": "parts/foot/default.png"
+      }
+    },
+    "front_thigh": {
+      "size": [
+        32,
+        34
+      ],
+      "pivot": [
+        16,
+        4
+      ],
+      "layer": 40,
+      "variants": {
+        "default": "parts/thigh/default.png"
+      }
+    },
+    "front_shin": {
+      "size": [
+        28,
+        30
+      ],
+      "pivot": [
+        14,
+        4
+      ],
+      "layer": 41,
+      "variants": {
+        "default": "parts/shin/default.png"
+      }
+    },
+    "front_foot": {
+      "size": [
+        32,
+        20
+      ],
+      "pivot": [
+        12,
+        5
+      ],
+      "layer": 42,
+      "variants": {
+        "default": "parts/foot/default.png"
+      }
+    },
+    "cigarette_front": {
+      "layer": 99,
+      "size": [
+        18,
+        8
+      ],
+      "pivot": [
+        2,
+        4
+      ],
+      "variants": {
+        "default": "parts/cigarette/grip_front.png",
+        "grip_front": "parts/cigarette/grip_front.png"
+      },
+      "note": "Distal cigarette segment in front of pinching fingers; same pivot as cigarette."
+    },
+    "shadow": {
+      "layer": 0,
+      "size": [
+        90,
+        22
+      ],
+      "pivot": [
+        45,
+        8
+      ],
+      "variants": {
+        "default": "parts/shadow/default.png"
+      }
+    }
+  }
+}

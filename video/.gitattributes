@@ -1,0 +1,3 @@
+# Preserve byte-identical upstream licenses and asset notes, including CRLF.
+assets/fonts/*-OFL.txt -text -whitespace
+assets/terry/source/README.txt -text -whitespace
