@@ -44,6 +44,7 @@ function frame(initial) {
     transport: { rest: () => Promise.resolve({ ok: true }) },
     initial: {
       skipLoad: true,
+      terryFallback: !!initial.terryFallback,
       viewport: { width: initial.width, height: initial.height },
       status: {
         running: true,
@@ -134,14 +135,19 @@ test("below 600px Terry becomes a slim right-side strip, still to the right", ()
   assert.equal(companionColumnWidth(600), COMPACT_MIN_DOCK_PX);
 });
 
-test("Terry control group keeps hide, costume, and the quote mute toggle", () => {
+test("Terry control group keeps hide and quote mute; costume is v4-fallback only", () => {
   const node = frame({ width: 1920, height: 1240 });
   assert.equal(byTestId(node, "companion-hide").length, 1);
-  assert.equal(byTestId(node, "companion-costume").length, 1);
+  assert.equal(byTestId(node, "companion-costume").length, 0);
   const mute = byTestId(node, "companion-mute");
   assert.equal(mute.length, 1);
   assert.equal(mute[0].props["aria-pressed"], "false");
   assert.match(String(mute[0].props.title), /quote bubbles/i);
+
+  const fallback = frame({ width: 1920, height: 1240, terryFallback: true });
+  assert.equal(byTestId(fallback, "companion-costume").length, 1);
+  assert.equal(byTestId(fallback, "companion-hide").length, 1);
+  assert.equal(byTestId(fallback, "companion-mute").length, 1);
 });
 
 test("CSS keeps Terry in a right column at every width and never docks him below", () => {

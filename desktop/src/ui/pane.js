@@ -271,6 +271,7 @@ export function TempleOSPane({ transport, initial } = {}) {
       (initial && initial.status && initial.status.companion && initial.status.companion.costume) ||
       "base"
   );
+  const [terryFallback, setTerryFallback] = useState(!!(initial && initial.terryFallback));
   const [theme, setTheme] = useState((initial && initial.theme) || "hermes");
   const [unchanged, setUnchanged] = useState(!!(initial && initial.unchanged));
   const [logFilter, setLogFilter] = useState("all");
@@ -782,6 +783,7 @@ export function TempleOSPane({ transport, initial } = {}) {
                     costume: companionCostume,
                     costumes: (status.companion && status.companion.costumes) || ["base", "cowboy", "wizard", "chef"],
                     muted: quotesMuted,
+                    fallback: terryFallback,
                     onToggleMuted: toggleQuotesMuted,
                     onToggleHidden: () => {
                       setCompanionHidden((prev) => {
@@ -978,6 +980,9 @@ export function TempleOSPane({ transport, initial } = {}) {
                 hidden: companionHidden,
                 enabled: !(status.companion && status.companion.enabled === false),
                 speech: (status.companion && status.companion.speech) || null,
+                agentBusy: !!status.agent_busy,
+                clipUrls: (initial && initial.companionClipUrls) || null,
+                onRendererChange: (renderer) => setTerryFallback(renderer === "v4"),
                 sprite: (initial && initial.companionSprite) || "",
                 spriteRow: (initial && initial.companionSpriteRow) || 0,
               }),

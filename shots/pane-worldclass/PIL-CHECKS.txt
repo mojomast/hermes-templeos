@@ -6,7 +6,7 @@ pane-1920x1240.png:
   log rect (12.0,888.4)-(972.0,1098.4) size=960.0x210.0
   log content bbox (26.0,894.0)-(962.0,1050.0)
   terry rect (1388.0,140.5)-(1908.0,1229.0) size=520.0x1088.5
-  terry content bbox (1388.0,142.0)-(1907.0,1214.0)
+  terry content bbox (1388.0,142.0)-(1907.0,1213.0)
   bubble rect (1396.0,148.5)-(1736.0,289.3) size=340.0x140.8
   bubble content bbox (1408.0,161.0)-(1716.0,278.0)
   overlap screen/log: none
@@ -66,6 +66,26 @@ pane-narrow.png:
   Terry column spans to the log bottom: yes
   bubble inside Terry column: yes
   bubble text scrollHeight=239 clientHeight=239 overflowY=auto: visible
+  loading label present=False visible=False: hidden
+  RESULT: PASS
+
+pane-typing.png:
+  screen rect (12.0,140.5)-(972.0,860.5) size=960.0x720.0
+  screen content bbox (13.0,142.0)-(970.0,859.0)
+  log rect (12.0,888.4)-(972.0,1098.4) size=960.0x210.0
+  log content bbox (26.0,894.0)-(962.0,1050.0)
+  terry rect (1388.0,140.5)-(1908.0,1229.0) size=520.0x1088.5
+  terry content bbox (1388.0,142.0)-(1907.0,1213.0)
+  bubble: MISSING
+  overlap screen/log: none
+  overlap screen/terry: none
+  overlap log/terry: none
+  screen/log width delta: 0.0px
+  log below screen: yes
+  Terry right of screen: yes
+  Terry right of log: yes
+  Terry alongside screen (not below): yes
+  Terry column spans to the log bottom: yes
   loading label present=False visible=False: hidden
   RESULT: PASS
 

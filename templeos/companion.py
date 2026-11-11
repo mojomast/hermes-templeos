@@ -23,6 +23,7 @@ from typing import Any, Callable
 PLUGIN_ROOT = Path(__file__).resolve().parents[1]
 ASSETS_ROOT = PLUGIN_ROOT / "desktop" / "assets" / "companion" / "terry"
 V4_ROOT = ASSETS_ROOT / "v4"
+V5_ROOT = ASSETS_ROOT / "v5"
 
 ENV_COMPANION = "TEMPLEOS_COMPANION"
 COSTUMES = ("base", "cowboy", "wizard", "chef")
@@ -562,6 +563,10 @@ def clip_payload(name: str) -> dict[str, Any]:
         return v4_bundle_payload()
     if token.startswith("v4:"):
         return v4_preset_payload(token[3:])
+    if token in {"v5", "v5:manifest", "v5-manifest"}:
+        return v5_manifest_payload()
+    if token.startswith("v5:"):
+        return v5_clip_payload(token[3:])
     if token not in RICH_CLIPS:
         return {
             "ok": False,
@@ -742,6 +747,128 @@ def v4_preset_payload(name: str) -> dict[str, Any]:
         "fix": None,
         "name": token,
         "clip": clip,
+    }
+
+
+def _v5_manifest_data() -> dict[str, Any]:
+    path = V5_ROOT / "clips.json"
+    try:
+        path.resolve().relative_to(ASSETS_ROOT.resolve())
+    except ValueError as exc:
+        raise ValueError("v5 manifest escaped the asset root") from exc
+    if not path.is_file():
+        raise FileNotFoundError("v5 clips.json")
+    data = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(data, dict) or not isinstance(data.get("clips"), dict):
+        raise ValueError("v5 clips.json is malformed")
+    return data
+
+
+def v5_manifest_payload() -> dict[str, Any]:
+    """Describe the six HD VP9 loops without sending their bytes."""
+    if not companion_enabled():
+        return {
+            "ok": False,
+            "error": "Companion is off.",
+            "code": "companion_off",
+            "fix": "Set TEMPLEOS_COMPANION=terry or companion: terry to enable.",
+        }
+    try:
+        data = _v5_manifest_data()
+    except FileNotFoundError:
+        return {
+            "ok": False,
+            "error": "Missing Terry v5 clip pack.",
+            "code": "companion_asset_missing",
+            "fix": "Reinstall the plugin so desktop/assets/companion/terry/v5 is present.",
+        }
+    except Exception as exc:
+        return {
+            "ok": False,
+            "error": str(exc) or "Terry v5 manifest is unreadable.",
+            "code": "companion_asset_missing",
+            "fix": "Reinstall the plugin so desktop/assets/companion/terry/v5 is complete.",
+        }
+    return {
+        "ok": True,
+        "error": None,
+        "code": None,
+        "fix": None,
+        "format": data.get("format"),
+        "width": data.get("width"),
+        "height": data.get("height"),
+        "fps": data.get("fps"),
+        "clips": data.get("clips"),
+        "state_map": data.get("state_map"),
+    }
+
+
+def _v5_path(rel: str) -> Path | None:
+    token = str(rel or "").replace("\\", "/").strip()
+    if not token or token.startswith("/") or ".." in token.split("/"):
+        return None
+    try:
+        path = (V5_ROOT / token).resolve()
+        path.relative_to(ASSETS_ROOT.resolve())
+    except (OSError, ValueError):
+        return None
+    return path
+
+
+def v5_clip_payload(name: str) -> dict[str, Any]:
+    """One HD VP9 WebM loop as a ctx.rest-safe base64 envelope."""
+    if not companion_enabled():
+        return {
+            "ok": False,
+            "error": "Companion is off.",
+            "code": "companion_off",
+            "fix": "Set TEMPLEOS_COMPANION=terry or companion: terry to enable.",
+        }
+    token = str(name or "").strip().lower()
+    try:
+        manifest = _v5_manifest_data()
+    except Exception:
+        return {
+            "ok": False,
+            "error": "Missing Terry v5 clip pack.",
+            "code": "companion_asset_missing",
+            "fix": "Reinstall the plugin so desktop/assets/companion/terry/v5 is present.",
+        }
+    clips = manifest.get("clips") if isinstance(manifest.get("clips"), dict) else {}
+    if token not in clips:
+        return {
+            "ok": False,
+            "error": f"Unknown companion v5 clip {name!r}.",
+            "code": "invalid_args",
+            "fix": "Use one of: " + ", ".join(sorted(clips)) + ".",
+        }
+    entry = clips[token] if isinstance(clips[token], dict) else {}
+    path = _v5_path(str(entry.get("file") or ""))
+    if path is None:
+        return {
+            "ok": False,
+            "error": "Companion v5 asset path escaped the asset root.",
+            "code": "path_escape",
+            "fix": "Report a bug; do not load companion assets from elsewhere.",
+        }
+    if not path.is_file():
+        return {
+            "ok": False,
+            "error": f"Missing Terry v5 clip {token!r}.",
+            "code": "companion_asset_missing",
+            "fix": "Reinstall the plugin so desktop/assets/companion/terry/v5 is complete.",
+        }
+    data = base64.b64encode(path.read_bytes()).decode("ascii")
+    return {
+        "ok": True,
+        "error": None,
+        "code": None,
+        "fix": None,
+        "name": token,
+        "mime": "video/webm",
+        "data": data,
+        "clip": entry,
+        "bytes": path.stat().st_size,
     }
 
 

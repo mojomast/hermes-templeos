@@ -5,7 +5,7 @@
 import { spawnSync } from "node:child_process";
 import { mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 import { TempleOSPane } from "./src/ui/pane.js";
 import { resetFiber, rerender } from "../tests/js/shims/jsx-runtime.mjs";
@@ -22,6 +22,7 @@ const ONLY = (process.env.TEMPLEOS_SHOT_ONLY || "")
   .filter(Boolean);
 
 const V4_ROOT = path.join(ROOT, "desktop", "assets", "companion", "terry", "v4");
+const V5_EXPORTS = path.join(ROOT, "desktop", "assets", "companion", "terry", "v5", "exports");
 const V4_SOURCE = readFileSync(path.join(ROOT, "desktop", "src", "ui", "terry_v4.js"), "utf8")
   .replace(/^export\s+/gm, "");
 
@@ -95,6 +96,45 @@ if (frame) {
   if (loading) loading.remove();
   document.documentElement.dataset.terryV4 = 'drawn';
 }
+</script>`;
+}
+
+function v5Script(clip) {
+  const urls = {};
+  for (const name of ["idle", "smoking", "speaking", "typing", "walk", "wave"]) {
+    urls[name] = pathToFileURL(path.join(V5_EXPORTS, name + ".webm")).href;
+  }
+  const name = clip || "idle";
+  return `<script>window.__TERRY_V5__ = ${JSON.stringify(urls)};</script>
+<script>
+(function () {
+  var urls = window.__TERRY_V5__;
+  var clip = ${JSON.stringify(name)};
+  function start() {
+    var videos = document.querySelectorAll('video[data-companion-video]');
+    if (!videos.length) { setTimeout(start, 50); return; }
+    var video = videos[0];
+    var done = function () {
+      var loading = document.querySelector('[data-testid="companion-loading"]');
+      if (loading) loading.remove();
+      var dock = document.querySelector('[data-testid="companion-dock"]');
+      if (dock) dock.dataset.ready = '1';
+      document.documentElement.dataset.terryV5 = 'drawn';
+    };
+    video.classList.add('is-front');
+    video.src = urls[clip] || urls.idle;
+    video.addEventListener('canplay', function () {
+      try { video.currentTime = 0.6; } catch (err) {}
+      done();
+    }, { once: true });
+    video.addEventListener('loadeddata', done, { once: true });
+    var played = video.play();
+    if (played && played.catch) played.catch(function () {});
+    setTimeout(done, 2500);
+  }
+  if (document.readyState === 'complete') start();
+  else window.addEventListener('load', start);
+})();
 </script>`;
 }
 
@@ -188,7 +228,7 @@ window.addEventListener("load", function () {
     return Date.now() - started >= 1200;
   }
   function measure() {
-    if (!readyToMeasure() && Date.now() - started < 3000) {
+    if (!readyToMeasure() && Date.now() - started < 5000) {
       setTimeout(measure, 50);
       return;
     }
@@ -233,7 +273,7 @@ window.addEventListener("load", function () {
 </html>`;
 }
 
-function render(initial, v4) {
+function render(initial, options) {
   resetFiber();
   const body = toHtml(
     rerender(TempleOSPane, {
@@ -241,7 +281,8 @@ function render(initial, v4) {
       initial: { skipLoad: true, ...initial },
     })
   );
-  return page(body, v4 ? v4Script(v4) : "");
+  if (options && options.v5) return page(body, v5Script(options.clip));
+  return page(body, options ? v4Script(options) : "");
 }
 
 const tinkeros = frameDataUrl("tinkeros-mouse-click.png");
@@ -329,7 +370,7 @@ const shots = {
         log,
         status: worldReady,
       },
-      { animation: "idle", costume: "base", time: 420, clips: ["idle", "greet"] }
+      { v5: true, clip: "speaking" }
     ),
   },
   "pane-1280x800.png": {
@@ -343,7 +384,7 @@ const shots = {
         log,
         status: worldReady,
       },
-      { animation: "idle", costume: "base", time: 420, clips: ["idle", "greet"] }
+      { v5: true, clip: "speaking" }
     ),
   },
   "pane-narrow.png": {
@@ -357,7 +398,32 @@ const shots = {
         log,
         status: worldReady,
       },
-      { animation: "idle", costume: "base", time: 420, clips: ["idle", "greet"] }
+      { v5: true, clip: "speaking" }
+    ),
+  },
+  "pane-typing.png": {
+    size: "1920,1240",
+    html: render(
+      {
+        theme: "hermes",
+        scale: 1.5,
+        viewport: { width: 1920, height: 1240 },
+        frameUrl: tinkeros,
+        log,
+        status: {
+          ...worldReady,
+          agent_busy: true,
+          companion: {
+            enabled: true,
+            hidden: false,
+            character: "terry",
+            animation: "typing",
+            costume: "base",
+            speech: { active: false, text: "" },
+          },
+        },
+      },
+      { v5: true, clip: "typing" }
     ),
   },
   "pane-onboarding.png": {
@@ -750,8 +816,8 @@ for (const [name, shot] of Object.entries(shots)) {
       "--disable-dev-shm-usage",
       "--hide-scrollbars",
       "--force-device-scale-factor=1",
-      "--virtual-time-budget=2500",
-      "--timeout=4000",
+      "--virtual-time-budget=5000",
+      "--timeout=9000",
       `--window-size=${shot.size}`,
       `--screenshot=${dest}`,
       `file://${file}`,
@@ -765,7 +831,7 @@ for (const [name, shot] of Object.entries(shots)) {
   console.log("wrote", path.relative(ROOT, dest));
 }
 
-const MEASURE_NAMES = new Set(["pane-1920x1240.png", "pane-1280x800.png", "pane-narrow.png"]);
+const MEASURE_NAMES = new Set(["pane-1920x1240.png", "pane-1280x800.png", "pane-narrow.png", "pane-typing.png"]);
 const rects = {};
 for (const [name, shot] of Object.entries(shots)) {
   if (!MEASURE_NAMES.has(name)) continue;
@@ -785,8 +851,8 @@ for (const [name, shot] of Object.entries(shots)) {
       "--disable-dev-shm-usage",
       "--hide-scrollbars",
       "--force-device-scale-factor=1",
-      "--virtual-time-budget=3200",
-      "--timeout=5000",
+      "--virtual-time-budget=5200",
+      "--timeout=9000",
       `--window-size=${measureSize}`,
       "--dump-dom",
       `file://${file}`,

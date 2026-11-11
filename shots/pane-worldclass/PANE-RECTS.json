@@ -103,5 +103,29 @@
       "clientHeight": 239,
       "overflowY": "auto"
     }
+  },
+  "pane-typing.png": {
+    "screen": {
+      "x": 12,
+      "y": 140.5,
+      "width": 960,
+      "height": 720
+    },
+    "log": {
+      "x": 12,
+      "y": 888.4375,
+      "width": 960,
+      "height": 210
+    },
+    "terry": {
+      "x": 1388,
+      "y": 140.5,
+      "width": 520,
+      "height": 1088.5
+    },
+    "loading": {
+      "present": false,
+      "visible": false
+    }
   }
 }

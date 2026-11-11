@@ -4,7 +4,9 @@ Reads the layout rectangles measured by desktop/shoot_pane.mjs, then verifies
 with PIL that each region actually contains pixels, that content stays inside
 its measured box, that Terry sits to the right of the screen and log at every
 width, that the speech bubble (including scrollable text) stays inside Terry's
-column, and that the loading label is gone. Never displays an image.
+column when one is showing (the typing shot has no bubble), and that the
+loading label is gone once the first video clip can play. Never displays an
+image.
 """
 
 from __future__ import annotations
@@ -21,6 +23,7 @@ EXPECTED = {
     "pane-1920x1240.png": (1920, 1240),
     "pane-1280x800.png": (1280, 800),
     "pane-narrow.png": (780, 900),
+    "pane-typing.png": (1920, 1240),
 }
 
 

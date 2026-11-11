@@ -119,6 +119,10 @@ test("re-renders and new hosts load the Terry bundle once", async () => {
     node = rerender(TempleOSPane, paneProps(rest()));
     flushEffects();
   }
+  await tick();
+  node = rerender(TempleOSPane, paneProps(rest()));
+  flushEffects();
+  await tick();
   assert.equal(bundleCalls.length, 1, "bundle GET must survive new host objects");
 
   release({
@@ -131,6 +135,8 @@ test("re-renders and new hosts load the Terry bundle once", async () => {
   await bundlePromise;
   await tick();
   node = rerender(TempleOSPane, paneProps(rest()));
+  flushEffects();
+  node = rerender(TempleOSPane, paneProps(rest()));
   assert.equal(bundleCalls.length, 1);
   assert.equal(byTestId(node, "companion-dock")[0].props["data-ready"], "1");
   assert.equal(byTestId(node, "companion-loading").length, 0);
@@ -141,6 +147,8 @@ test("re-renders and new hosts load the Terry bundle once", async () => {
   node = rerender(TempleOSPane, paneProps(rest()));
   flushEffects();
   await tick();
+  node = rerender(TempleOSPane, paneProps(rest()));
+  flushEffects();
   node = rerender(TempleOSPane, paneProps(rest()));
   assert.equal(bundleCalls.length, 1, "a remount reuses the pane-session bundle");
   assert.equal(byTestId(node, "companion-dock")[0].props["data-ready"], "1");
@@ -161,6 +169,9 @@ test("a failed bundle load shows the server error", async () => {
     return Promise.resolve({ ok: true });
   };
   let node = rerender(TempleOSPane, paneProps(rest));
+  flushEffects();
+  await tick();
+  node = rerender(TempleOSPane, paneProps(rest));
   flushEffects();
   await tick();
   node = rerender(TempleOSPane, paneProps(rest));
@@ -277,38 +288,24 @@ test("a stored manual width is restored for the pane session", () => {
   }
 });
 
-test("the summon label disappears as soon as the v4 canvas paints a frame", () => {
+test("the summon label disappears as soon as the first video clip can play", () => {
   resetFiber();
   resetTerrySession();
-  const previous = globalThis.window;
-  const listeners = {};
-  globalThis.window = {
-    addEventListener(type, fn) {
-      listeners[type] = listeners[type] || [];
-      listeners[type].push(fn);
-    },
-    removeEventListener(type, fn) {
-      listeners[type] = (listeners[type] || []).filter((item) => item !== fn);
-    },
+  const props = {
+    api: { companionClip: () => new Promise(() => {}) },
+    animation: "idle",
+    costume: "base",
+    hidden: false,
+    enabled: true,
+    speech: null,
   };
-  try {
-    const props = {
-      api: { companionClip: () => new Promise(() => {}) },
-      animation: "idle",
-      costume: "base",
-      hidden: false,
-      enabled: true,
-      speech: null,
-    };
-    let node = rerender(TerryCompanionOverlay, props);
-    assert.equal(byTestId(node, "companion-loading").length, 1);
-    flushEffects();
-    assert.equal((listeners["terry-v4-drawn"] || []).length, 1);
-    listeners["terry-v4-drawn"].forEach((fn) => fn());
-    node = rerender(TerryCompanionOverlay, props);
-    assert.equal(byTestId(node, "companion-loading").length, 0);
-  } finally {
-    if (previous === undefined) delete globalThis.window;
-    else globalThis.window = previous;
-  }
+  let node = rerender(TerryCompanionOverlay, props);
+  assert.equal(byTestId(node, "companion-loading").length, 1);
+  assert.equal(byTestId(node, "companion-dock")[0].props["data-ready"], "0");
+  const video = findAll(node, (item) => item.type === "video")[0];
+  assert.ok(video);
+  video.props.onCanPlay();
+  node = rerender(TerryCompanionOverlay, props);
+  assert.equal(byTestId(node, "companion-loading").length, 0);
+  assert.equal(byTestId(node, "companion-dock")[0].props["data-ready"], "1");
 });

@@ -653,6 +653,28 @@
   image-rendering: auto;
 }
 
+/* HD video companion: two stacked transparent VP9 loops crossfade in ~200ms.
+   object-fit keeps the native 720x1080 aspect while the column changes size,
+   and default smoothing avoids nearest-neighbor pixelation. */
+.tos-companion-video {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+  object-fit: contain;
+  object-position: center bottom;
+  background: transparent;
+  opacity: 0;
+  transition: opacity 200ms ease;
+  image-rendering: auto;
+  pointer-events: none;
+}
+
+.tos-companion-video.is-front {
+  opacity: 1;
+}
+
 .tos-companion-loading {
   position: absolute;
   inset: 0;
