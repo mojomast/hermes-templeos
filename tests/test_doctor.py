@@ -114,6 +114,8 @@ def test_download_official_rejects_non_public_urls(tmp_path):
     with pytest.raises(OSError):
         doctor.download_official("https://127.0.0.1/x.iso", dest, expected_sha256="ab")
     with pytest.raises(OSError):
+        doctor.download_official("https://169.254.169.254/x.iso", dest, expected_sha256="ab")
+    with pytest.raises(OSError):
         doctor.download_official("file:///etc/passwd", dest, expected_sha256="ab")
     assert not dest.exists()
 

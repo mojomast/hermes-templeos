@@ -4,7 +4,7 @@ Live verification that a Hermes **web app** chat (gateway `127.0.0.1:9120`, not 
 
 This is a **cua / bee** job. Do not run the live QEMU demo on the shared Hermes box unless the owner explicitly lifts the "no QEMU on the box" order. Prefer the owner's machine, or a host they name.
 
-Repo: `mojomast/hermes-templeos`, branch `feat/improvements` (PR #2, stacked on `feat/integration` / PR #1). Check out the tip of that branch (the commit that adds the Tool Search system prompt section, holyc typing default, Shift-chord `input-send-event`, and QEMU reattach). Do not merge, tag, force-push, or deploy to moltussy/Orbit.
+Repo: `mojomast/hermes-templeos`, branch `feat/improvements` (PR #2, stacked on `feat/integration` / PR #1). Check out the tip of that branch (the commit that adds the Tool Search system prompt section, holyc typing default, Shift-chord `input-send-event`, and QEMU reattach). Do not merge, tag, force-push, or deploy to a test host.
 
 ## What you are proving
 

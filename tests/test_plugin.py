@@ -28,7 +28,10 @@ def test_manifest_matches_registered_tools_and_skill():
     assert manifest["name"] == PLUGIN_ID == "templeos"
     assert manifest["version"] == __version__ == "0.1.0"
     assert manifest["requires_hermes"] == ">=0.23.0"
-    assert manifest["requires_env"] == []
+    env = manifest["requires_env"]
+    assert [item["name"] if isinstance(item, dict) else item for item in env] == [
+        "TEMPLEOS_CHAT_BRIDGE_TOKEN"
+    ]
     from templeos.companion import HOOK_NAMES
 
     assert sorted(manifest["provides_hooks"]) == sorted(HOOK_NAMES)
