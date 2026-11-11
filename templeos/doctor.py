@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Any
 from templeos.public_http import UnsafeURL, download_https
 
+from templeos import diskimage
 from templeos.envsafe import child_env
 from templeos.flavors import DEFAULT, FlavorError, get_flavor, iso_filename
 from templeos.paths import disks_dir, ensure_layout, home, isos_dir, socket_paths
@@ -222,6 +223,7 @@ def doctor(*, setup: bool = False, flavor: str | None = None) -> dict[str, Any]:
         kvm_note = f"{KVM_NODE} is absent; falling back to TCG."
 
     iso = ensure_iso(rec["id"], fetch=bool(setup))
+    disk_image = diskimage.status()
     disk = disks_dir(root) / f"{rec['id']}.qcow2"
     socks = {key: path.exists() for key, path in socket_paths(root).items()}
     img = find_binary(QEMU_IMG)
@@ -240,6 +242,11 @@ def doctor(*, setup: bool = False, flavor: str | None = None) -> dict[str, Any]:
             f"{disk} present" if disk.exists() else f"{disk} missing (will be created on start)",
         ),
         _check(
+            "disk-image",
+            disk_image["state"] in {"ok", "disabled", "unpublished"},
+            str(disk_image.get("text") or disk_image.get("message") or "disk image status unknown"),
+        ),
+        _check(
             "qemu-img",
             img is not None,
             str(img) if img is not None else "qemu-img was not found on PATH; needed to create the qcow2.",
@@ -247,7 +254,8 @@ def doctor(*, setup: bool = False, flavor: str | None = None) -> dict[str, Any]:
         _check("sockets", True, "existence only: " + ", ".join(f"{k}={'yes' if v else 'no'}" for k, v in socks.items())),
     ]
     qemu_ok = bool(qemu.get("ok"))
-    iso_ok = bool(iso.get("ok"))
+    disk_ready = bool(disk_image.get("enabled") and disk_image.get("verified"))
+    iso_ok = bool(iso.get("ok")) or disk_ready
     img_ok = img is not None
     ok = qemu_ok and iso_ok and img_ok
     code = None
@@ -280,6 +288,7 @@ def doctor(*, setup: bool = False, flavor: str | None = None) -> dict[str, Any]:
         "kvm": {"usable": kvm, "exists": kvm_exists, "note": kvm_note},
         "iso": {k: iso[k] for k in iso if k not in {"fix"}},
         "disk": {"present": disk.exists(), "path": str(disk)},
+        "disk_image": disk_image,
         "sockets": socks,
         "accel_recommended": "kvm" if kvm else "tcg",
         "checks": checks,

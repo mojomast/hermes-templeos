@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from templeos import doctor, flavors
+from templeos import diskimage, doctor, flavors
 from templeos.envsafe import child_env
 from templeos.flavors import get_flavor
 from templeos.qemu import find_binary
@@ -52,6 +52,37 @@ def test_doctor_reports_missing_iso_without_fetching(tos_home, monkeypatch):
     ids = {c["id"] for c in report["checks"]}
     assert {"qemu", "kvm", "iso", "disk"}.issubset(ids)
     assert report["accel_recommended"] in {"tcg", "kvm"}
+
+
+def test_doctor_reports_disk_image_states_without_fetching(tos_home, monkeypatch):
+    calls = []
+    monkeypatch.setattr(doctor, "download_official", lambda *a, **k: calls.append((a, k)))
+    report = doctor.doctor()
+    assert calls == []
+    assert report["disk_image"]["state"] == "unpublished"
+    assert report["disk_image"]["url"] is None
+    assert report["disk_image"]["enabled"] is False
+    assert any(c["id"] == "disk-image" for c in report["checks"])
+
+    payload = b"tiny-verified-disk"
+    digest = hashlib.sha256(payload).hexdigest()
+    monkeypatch.setattr(diskimage, "DISK_SHA256", digest)
+    monkeypatch.setattr(diskimage, "DISK_BYTES", len(payload))
+    image = tos_home / diskimage.DISK_FILENAME
+    image.write_bytes(payload)
+    diskimage.save_config(disk_image="on", disk_image_path=str(image))
+    ready = doctor.doctor()
+    assert ready["disk_image"]["state"] == "ok"
+    assert ready["disk_image"]["verified"] is True
+    assert ready["ok"] is True  # Disk boot does not require the live ISO.
+    assert calls == []
+
+    bad = tos_home / "bad.qcow2"
+    bad.write_bytes(b"wrong")
+    diskimage.save_config(disk_image="on", disk_image_path=str(bad))
+    report = doctor.doctor()
+    assert report["disk_image"]["state"] == "unverified"
+    assert report["disk_image"]["verified"] is False
 
 
 def test_ensure_iso_deletes_hash_mismatch(tos_home, monkeypatch):

@@ -206,12 +206,35 @@ def socket_args(*, qmp: Path, vnc: Path, com1: Path) -> list[str]:
     return args
 
 
-def disk_args(flavor_id: str | None, iso: Path, disk: Path) -> list[str]:
-    """Attach the ISO and a writable qcow2 (required for savevm even on a live CD)."""
+def disk_args(
+    flavor_id: str | None,
+    iso: Path,
+    disk: Path,
+    *,
+    boot_from_disk: bool = False,
+) -> list[str]:
+    """Attach the ISO and a writable qcow2 (required for savevm even on a live CD).
+
+    ``boot_from_disk`` is only set for the optional Temple of Hermes
+    preinstalled disk overlay. It boots the writable qcow2 as the hard disk and
+    attaches no CD; every other flavor and the off/unpublished option keep the
+    exact live-ISO flags below.
+    """
     rec = get_flavor(flavor_id)
     bus = rec["bus"]
     iso_s = str(iso)
     disk_s = str(disk)
+    if boot_from_disk:
+        if bus == "ahci":
+            return [
+                "-device", "ahci,id=ahci",
+                "-drive", f"file={disk_s},if=none,id=hd,format=qcow2",
+                "-device", "ide-hd,drive=hd,bus=ahci.0,bootindex=1",
+            ]
+        return [
+            "-boot", "order=c,menu=on",
+            "-drive", f"file={disk_s},format=qcow2,if=ide,index=0,media=disk",
+        ]
     if bus == "ide":
         return [
             "-cdrom", iso_s,

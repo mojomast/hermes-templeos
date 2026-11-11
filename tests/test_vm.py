@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from templeos import flavors, qemu, vm
+from templeos import diskimage, flavors, qemu, vm
 from templeos.flavors import DEFAULT, get_flavor
 from tests.fakes import FakeQMP, FakeSerial
 
@@ -149,6 +149,49 @@ def test_start_reattaches_after_runtime_drop(vm_clean, monkeypatch):
     assert serial2.connected is True
     assert get_runtime() is not None
     assert vm.get_runtime() is not None
+
+
+def test_start_boots_verified_disk_overlay_without_iso(vm_clean, monkeypatch):
+    payload = b"verified-preinstalled-disk"
+    digest = hashlib.sha256(payload).hexdigest()
+    monkeypatch.setattr(diskimage, "DISK_SHA256", digest)
+    monkeypatch.setattr(diskimage, "DISK_BYTES", len(payload))
+    image = vm_clean / diskimage.DISK_FILENAME
+    image.write_bytes(payload)
+    diskimage.save_config(disk_image="on", disk_image_path=str(image))
+    overlay = vm_clean / "disks" / "templeoh-disk-overlay.qcow2"
+
+    def fake_overlay(base, dest=None, **kwargs):
+        target = Path(dest) if dest is not None else overlay
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(b"qcow2-overlay")
+        return target
+
+    monkeypatch.setattr(diskimage, "ensure_overlay", fake_overlay)
+    qmp, serial, proc, captured = _wire(monkeypatch)
+    body = vm.start(flavor="templeoh")
+    assert body["ok"] is True and body["running"] is True
+    argv = captured["argv"]
+    assert "-cdrom" not in argv
+    assert argv[argv.index("-boot") + 1].startswith("order=c")
+    assert any(str(overlay) in part for part in argv)
+    assert vm.current().boot_from_disk is True
+    assert vm.current().disk == overlay
+    assert serial.connected is True and qmp.connected is True
+    # The pinned base is never modified; only the overlay exists.
+    assert image.read_bytes() == payload
+    assert overlay.is_file()
+
+
+def test_start_falls_back_to_live_iso_when_disk_unpublished(vm_clean, monkeypatch):
+    diskimage.save_config(disk_image="on")
+    _pin_iso(vm_clean, monkeypatch, flavor="templeoh")
+    _qmp, _serial, _proc, captured = _wire(monkeypatch)
+    body = vm.start(flavor="templeoh")
+    assert body["ok"] is True and body["running"] is True
+    argv = captured["argv"]
+    assert "-cdrom" in argv
+    assert vm.current().boot_from_disk is False
 
 
 def test_start_without_iso_is_iso_missing(vm_clean, monkeypatch):
