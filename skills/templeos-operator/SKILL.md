@@ -72,7 +72,7 @@ When the user wants the guest to print a string and compute an expression:
 
 1. Discover tools (see Tool Search above) if needed.
 2. `templeos_vm op=doctor` if QEMU or the ISO may be missing.
-3. `templeos_vm op=start` (default flavor `templeoh`, Temple of Hermes 0.1.2). Use `op=flavor` to list or select TinkerOS, TempleOS, or ZealOS; a missing ISO is fetched and verified, and a running guest switches on the next boot.
+3. `templeos_vm op=start` (default flavor `templeoh`, Temple of Hermes 0.1.3). Use `op=flavor` to list or select TinkerOS, TempleOS, or ZealOS; a missing ISO is fetched and verified, and a running guest switches on the next boot.
 4. `templeos_screen op=wait_idle`, then **`read_text` before `look`**.
 5. Act with `templeos_input` (prefer **`holyc`** for HolyC). After any
    consequential `type`, `keys`, `click`, or `holyc`, call **`wait_idle`**,

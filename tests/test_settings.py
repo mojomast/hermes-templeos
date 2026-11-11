@@ -28,8 +28,8 @@ def test_default_preferred_is_templeoh(tos_home):
     assert load_preferred() == "templeoh"
     rec = get_flavor("temple-of-hermes")
     assert rec["id"] == "templeoh"
-    assert rec["sha256"] == "9afc98ed2bb15a3ff26ebaca12ea392079292df6667b3c1c527fdd30d80cdb13"
-    assert rec["bytes"] == 14_030_848
+    assert rec["sha256"] == "fbaa3d6f0a8f9190f295e933c32cb833a61b3cb43a708309acb6c98ff51ac4fd"
+    assert rec["bytes"] == 14_053_376
 
 
 def test_settings_persist_and_iso_state(tos_home, monkeypatch):

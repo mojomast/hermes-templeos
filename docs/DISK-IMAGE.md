@@ -10,13 +10,13 @@ off, boot behavior is exactly the existing live-ISO path.
 
 | Field | Value |
 | --- | --- |
-| File | `TempleOfHermes-0.1.2-disk.qcow2` |
-| URL | <https://github.com/mojomast/temple-of-hermes/releases/download/disk-image-0.1.3-preview/TempleOfHermes-0.1.2-disk.qcow2> |
-| Release | [disk-image-0.1.3-preview](https://github.com/mojomast/temple-of-hermes/releases/tag/disk-image-0.1.3-preview) (prerelease) |
-| SHA-256 | `d41672fb148051f3b4d85d06895bfc0f67da0e3af539bf89bbf4933056241087` |
-| Size | 11,082,240 bytes |
+| File | `TempleOfHermes-0.1.3-disk.qcow2` |
+| URL | <https://github.com/mojomast/temple-of-hermes/releases/download/v0.1.3/TempleOfHermes-0.1.3-disk.qcow2> |
+| Release | [v0.1.3](https://github.com/mojomast/temple-of-hermes/releases/tag/v0.1.3) |
+| SHA-256 | `d81a3c189093bd0edddad50b7a55d6582d0490204d63720e14fc5fb9d901f1aa` |
+| Size | 11,107,840 bytes |
 | Format | Compressed qcow2, 4 GiB virtual size |
-| Contents | MBR + FAT32 TinkerOS install of the official v0.1.2 ISO |
+| Contents | MBR + FAT32 TinkerOS install of the official v0.1.3 ISO |
 | Boot | Reaches the Hermes launcher with no CD; `C:/Home` and `C:/Hermes/Apps/HermesBBS` precreated |
 
 The record lives in `templeos/diskimage.py` (`DISK_IMAGE_URL`, `DISK_SHA256`,
@@ -53,9 +53,9 @@ schema changes and no new tool are involved.
 Before every use the plugin checks:
 
 - the file exists;
-- its size equals exactly 11,082,240 bytes;
+- its size equals exactly 11,107,840 bytes;
 - its SHA-256 equals
-  `d41672fb148051f3b4d85d06895bfc0f67da0e3af539bf89bbf4933056241087`.
+  `d81a3c189093bd0edddad50b7a55d6582d0490204d63720e14fc5fb9d901f1aa`.
 
 A mismatch is refused with a structured error and the guest falls back to the
 normal live ISO plus scratch disk. Doctor reports the image as `not_downloaded`, `download_failed`, `missing`,

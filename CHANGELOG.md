@@ -1,19 +1,27 @@
 # Changelog
 
-## 0.1.1
+## 0.2.0
 
-- Default flavor is Temple of Hermes 0.1.2 (`templeoh` / `temple-of-hermes`),
-  pinned to the official GitHub release ISO (`TempleOfHermes-0.1.2.ISO`,
-  SHA-256 `9afc98ed2bb15a3ff26ebaca12ea392079292df6667b3c1c527fdd30d80cdb13`,
-  14,030,848 bytes). TinkerOS 5.20-rc10, TempleOS 5.03, and ZealOS stay
-  selectable.
-- The Desktop pane has a visible Guest OS picker (version + SHA state). The
-  choice persists through `GET`/`POST /settings` (`ctx.rest`) and
-  `templeos_vm op=flavor`. A missing ISO is fetched on the pinned-SHA path;
-  a running guest switches on the next boot, with a Reboot now control.
-
-## Unreleased
-- Temple of Hermes boots a preinstalled disk image by default (local `C:` storage). The pinned asset `TempleOfHermes-0.1.2-disk.qcow2` (SHA-256 `d41672fb148051f3b4d85d06895bfc0f67da0e3af539bf89bbf4933056241087`, 11,082,240 bytes) is downloaded once from the `disk-image-0.1.3-preview` release on doctor setup or first start, verified, and booted through a copy-on-write overlay. A failed download or verification falls back to the live ISO. Set `disk_image: "off"` or uncheck the option in the pane to disable it; `disk_image_path` can point to a local copy instead.
+- Default guest is Temple of Hermes 0.1.3, pinned to the official GitHub
+  release ISO (`TempleOfHermes-0.1.3.ISO`, SHA-256
+  `fbaa3d6f0a8f9190f295e933c32cb833a61b3cb43a708309acb6c98ff51ac4fd`,
+  14,053,376 bytes): HermesDaemon structured file errors and the guest home
+  journal (`C:/Home/<handle>/`).
+- Temple of Hermes boots a preinstalled disk image by default (local `C:`
+  storage). `TempleOfHermes-0.1.3-disk.qcow2` (SHA-256
+  `d81a3c189093bd0edddad50b7a55d6582d0490204d63720e14fc5fb9d901f1aa`,
+  11,107,840 bytes) is downloaded once from the v0.1.3 release on doctor
+  setup or first start, verified, and booted through a copy-on-write overlay.
+  A failed download or verification falls back to the live ISO. Turn it off
+  with `disk_image: "off"` or in the pane; `disk_image_path` can point to a
+  local copy.
+- Community ops on the existing four tools (no new tool): `session_start`,
+  a compact BBS digest, HolyC codeshare fetch (VM-only, 32 KiB / 15 s caps,
+  written under `C:/Home/<handle>/Src/`), and a pending-only nudge hook (max
+  2/day; `nudge` setting or `TEMPLEOS_NUDGE` turns it off). Tool schema
+  o200k 1045 -> 1201.
+- Bundled `temple-session` skill (default cadence 2 sessions/day) and a
+  token-budget eval.
 - Steer agents to the four `templeos_*` tools when Hermes Tool Search defers them: a system prompt section, skill v0.1.2, and tool descriptions require `tool_search`/`skill_view` and forbid VNC/socket workarounds. Prefer `templeos_input op=holyc` for HolyC one-liners. `register()` also installs pane agent-log hooks.
 - `templeos_vm op=start` (and other running-VM ops) reattach QMP/COM1 if QEMU is still alive after a gateway restart, instead of returning `vm_already_running` with no in-process binding.
 - holyc `via=auto` types at the prompt unless `Runtime.guest_serial_ready` (host COM1 open no longer selects serial; silent drop fixed).
@@ -26,6 +34,18 @@
 - First-boot Install/Tour prompts auto-dismissed after ISO `start` (Esc then n).
 - Pillow pin widened to `>=10,<14` (Hermes PM may ship Pillow 13).
 - ZealOS glyph table expanded from the holyc-prompt fixture (~0.63 confidence).
+
+## 0.1.1
+
+- Default flavor is Temple of Hermes 0.1.2 (`templeoh` / `temple-of-hermes`),
+  pinned to the official GitHub release ISO (`TempleOfHermes-0.1.2.ISO`,
+  SHA-256 `9afc98ed2bb15a3ff26ebaca12ea392079292df6667b3c1c527fdd30d80cdb13`,
+  14,030,848 bytes). TinkerOS 5.20-rc10, TempleOS 5.03, and ZealOS stay
+  selectable.
+- The Desktop pane has a visible Guest OS picker (version + SHA state). The
+  choice persists through `GET`/`POST /settings` (`ctx.rest`) and
+  `templeos_vm op=flavor`. A missing ISO is fetched on the pinned-SHA path;
+  a running guest switches on the next boot, with a Reboot now control.
 
 ## 0.1.0
 

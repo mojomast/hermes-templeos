@@ -1793,8 +1793,8 @@ const CONTROL_MODES = ["watch", "shared", "user"];
 const GOLDEN_SNAPSHOT = "golden";
 
 const FLAVOR_LABELS = {
-  templeoh: "Temple of Hermes 0.1.2",
-  "temple-of-hermes": "Temple of Hermes 0.1.2",
+  templeoh: "Temple of Hermes 0.1.3",
+  "temple-of-hermes": "Temple of Hermes 0.1.3",
   tinkeros: "TinkerOS 5.20-rc10",
   templeos: "TempleOS 5.03",
   zealos: "ZealOS",
@@ -1818,7 +1818,7 @@ function guestSize(flavor, status) {
 
 function flavorLabel(flavor, flavorName) {
   if (flavorName) return String(flavorName);
-  return FLAVOR_LABELS[flavor] || flavor || "Temple of Hermes 0.1.2";
+  return FLAVOR_LABELS[flavor] || flavor || "Temple of Hermes 0.1.3";
 }
 
 const FLAVOR_PICKER_IDS = ["templeoh", "tinkeros", "templeos", "zealos"];
@@ -2805,7 +2805,7 @@ function defaultStatus(initial) {
     snapshot: null,
     snapshots: [GOLDEN_SNAPSHOT],
     flavor: "templeoh",
-    flavor_name: "Temple of Hermes 0.1.2",
+    flavor_name: "Temple of Hermes 0.1.3",
     preferred_flavor: "templeoh",
     sha_state: "",
     flavors: [],
@@ -2815,7 +2815,7 @@ function defaultStatus(initial) {
       enabled: true,
       state: "not_downloaded",
       verified: false,
-      filename: "TempleOfHermes-0.1.2-disk.qcow2",
+      filename: "TempleOfHermes-0.1.3-disk.qcow2",
       text: "Preinstalled disk: downloads on next start",
     },
     kvm: false,

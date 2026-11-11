@@ -314,12 +314,12 @@ test("flavor picker shows the selected image SHA and posts /settings", async () 
         ok: true,
         flavor,
         preferred_flavor: flavor,
-        flavor_name: flavor === "tinkeros" ? "TinkerOS 5.20-rc10" : "Temple of Hermes 0.1.2",
+        flavor_name: flavor === "tinkeros" ? "TinkerOS 5.20-rc10" : "Temple of Hermes 0.1.3",
         sha_state: "missing",
         notice: "TinkerOS 5.20-rc10 is selected and will apply on the next boot.",
         apply_on_next_boot: true,
         flavors: [
-          { id: "templeoh", name: "Temple of Hermes 0.1.2", sha_state: "verified", sha256: "9afc98ed2bb15a3ff26ebaca12ea392079292df6667b3c1c527fdd30d80cdb13" },
+          { id: "templeoh", name: "Temple of Hermes 0.1.3", sha_state: "verified", sha256: "fbaa3d6f0a8f9190f295e933c32cb833a61b3cb43a708309acb6c98ff51ac4fd" },
           { id: "tinkeros", name: "TinkerOS 5.20-rc10", sha_state: "missing" },
         ],
       });
@@ -335,12 +335,12 @@ test("flavor picker shows the selected image SHA and posts /settings", async () 
         mode: "shared",
         setup_needed: false,
         flavor: "templeoh",
-        flavor_name: "Temple of Hermes 0.1.2",
+        flavor_name: "Temple of Hermes 0.1.3",
         preferred_flavor: "templeoh",
         sha_state: "verified",
-        flavor_sha256: "9afc98ed2bb15a3ff26ebaca12ea392079292df6667b3c1c527fdd30d80cdb13",
+        flavor_sha256: "fbaa3d6f0a8f9190f295e933c32cb833a61b3cb43a708309acb6c98ff51ac4fd",
         flavors: [
-          { id: "templeoh", name: "Temple of Hermes 0.1.2", sha_state: "verified", sha256: "9afc98ed2bb15a3ff26ebaca12ea392079292df6667b3c1c527fdd30d80cdb13" },
+          { id: "templeoh", name: "Temple of Hermes 0.1.3", sha_state: "verified", sha256: "fbaa3d6f0a8f9190f295e933c32cb833a61b3cb43a708309acb6c98ff51ac4fd" },
           { id: "tinkeros", name: "TinkerOS 5.20-rc10", sha_state: "missing" },
           { id: "templeos", name: "TempleOS 5.03", sha_state: "missing" },
           { id: "zealos", name: "ZealOS", sha_state: "missing" },
@@ -351,9 +351,9 @@ test("flavor picker shows the selected image SHA and posts /settings", async () 
   assert.ok(byTestId(node, "flavor-picker").length >= 1);
   const select = byTestId(node, "flavor-select")[0];
   assert.equal(select.props.value, "templeoh");
-  assert.match(texts(byTestId(node, "flavor-sha")[0]), /Temple of Hermes 0\.1\.2/);
+  assert.match(texts(byTestId(node, "flavor-sha")[0]), /Temple of Hermes 0\.1\.3/);
   assert.match(texts(byTestId(node, "flavor-sha")[0]), /SHA verified/);
-  assert.match(texts(byTestId(node, "flavor-badge")[0]), /Temple of Hermes 0\.1\.2/);
+  assert.match(texts(byTestId(node, "flavor-badge")[0]), /Temple of Hermes 0\.1\.3/);
   select.props.onChange({ target: { value: "tinkeros" } });
   flushEffects();
   await Promise.resolve();
