@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+import json
 from pathlib import Path
 
 import yaml
@@ -17,6 +18,21 @@ ROOT = Path(__file__).resolve().parents[1]
 
 def setup_function(_fn=None):
     companion.reset_state()
+
+
+def test_production_quotes_are_complete_and_sourced():
+    path = ROOT / "desktop" / "terry-quotes.json"
+    data = json.loads(path.read_text(encoding="utf-8"))
+    assert isinstance(data, list)
+    assert len(data) == 69
+    for entry in data:
+        assert isinstance(entry, dict)
+        assert isinstance(entry.get("text"), str) and entry["text"].strip()
+        assert isinstance(entry.get("source_title"), str) and entry["source_title"].strip()
+        assert isinstance(entry.get("source_url"), str)
+        assert entry["source_url"].startswith(("http://", "https://"))
+        if "date" in entry:
+            assert isinstance(entry["date"], str)
 
 
 def test_hooks_declared_match_registration():
@@ -246,3 +262,37 @@ def test_prefs_reload_after_restart_and_config_wins(monkeypatch, tmp_path):
     ctx_off.config = {"companion": "off"}
     companion.register_hooks(ctx_off)
     assert companion.companion_enabled() is False
+
+
+def test_v5_manifest_lists_the_six_hd_loops():
+    body = companion.v5_manifest_payload()
+    assert body["ok"] is True
+    assert body["format"] == "vp9-alpha-webm"
+    assert body["width"] == 720
+    assert body["height"] == 1080
+    assert body["fps"] == 20
+    assert sorted(body["clips"]) == ["idle", "smoking", "speaking", "typing", "walk", "wave"]
+    assert body["state_map"]["first_appear"] == "walk"
+    assert body["state_map"]["idle_variant"] == "smoking"
+    assert companion.clip_payload("v5")["clips"]["idle"]["file"] == "exports/idle.webm"
+
+
+def test_v5_clip_payload_is_contained_webm_bytes():
+    body = companion.clip_payload("v5:idle")
+    assert body["ok"] is True
+    assert body["mime"] == "video/webm"
+    assert body["name"] == "idle"
+    assert body["bytes"] < 700 * 1024
+    raw = base64.b64decode(body["data"])
+    assert raw[:4] == b"\x1a\x45\xdf\xa3"
+    for name in companion.v5_manifest_payload()["clips"]:
+        assert companion.clip_payload("v5:" + name)["ok"] is True
+
+
+def test_v5_payloads_reject_traversal_and_respect_off_switch(monkeypatch):
+    assert companion.clip_payload("v5:../atlas")["code"] == "invalid_args"
+    assert companion.clip_payload("v5:../../desktop/terry-quotes.json")["code"] == "invalid_args"
+    monkeypatch.setenv("TEMPLEOS_COMPANION", "off")
+    assert companion.v5_manifest_payload()["code"] == "companion_off"
+    assert companion.v5_clip_payload("idle")["code"] == "companion_off"
+    assert companion.clip_payload("v5:idle")["code"] == "companion_off"

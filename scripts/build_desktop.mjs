@@ -158,7 +158,7 @@ function splitModuleSource(source, moduleInfo) {
 
       if (!/^import\s*["'][^"']+["']\s*;?$/.test(trimmed)) {
         while (
-          !/from\s*["'][^"']+["']\s*;?\s*$/.test(statement.trim()) &&
+          !/from\s*["'][^"']+["'](?:\s+with\s*\{[^}]*\})?\s*;?\s*$/.test(statement.trim()) &&
           end + 1 < lines.length
         ) {
           end += 1;
@@ -177,7 +177,7 @@ function splitModuleSource(source, moduleInfo) {
       } else {
         const match = statement
           .trim()
-          .match(/^import\s+([\s\S]+?)\s+from\s*["']([^"']+)["']\s*;?$/);
+          .match(/^import\s+([\s\S]+?)\s+from\s*["']([^"']+)["'](?:\s+with\s*\{[^}]*\})?\s*;?$/);
         if (!match) fail(`Unsupported import statement in ${moduleInfo.display}`);
         const clause = parseImportClause(match[1]);
         moduleInfo.imports.push({

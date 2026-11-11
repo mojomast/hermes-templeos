@@ -1,0 +1,388 @@
+[
+  {
+    "text": "TempleOS is God's official temple. Just like Solomon's temple, this is a community focal point where offerings are made and God's oracle is consulted.",
+    "source_title": "TempleOS Charter (Doc/Charter.DD)",
+    "source_url": "https://github.com/cia-foundation/TempleOS/blob/archive/Doc/Charter.DD"
+  },
+  {
+    "text": "God said 640x480 16 color graphics is a covenant like circumcision.",
+    "source_title": "TempleOS Charter (Doc/Charter.DD)",
+    "source_url": "https://github.com/cia-foundation/TempleOS/blob/archive/Doc/Charter.DD"
+  },
+  {
+    "text": "God said His temple must be perfect.",
+    "source_title": "TempleOS Charter (Doc/Charter.DD)",
+    "source_url": "https://github.com/cia-foundation/TempleOS/blob/archive/Doc/Charter.DD"
+  },
+  {
+    "text": "The vision is the same usage model and niche as the Commodore 64 -- a non-networked, simple machine where programming was the goal, not just a means to an end.",
+    "source_title": "TempleOS Charter (Doc/Charter.DD)",
+    "source_url": "https://github.com/cia-foundation/TempleOS/blob/archive/Doc/Charter.DD"
+  },
+  {
+    "text": "It's a kayak, not a Titanic -- it will crash if you do something wrong. You quickly reboot, however.",
+    "source_title": "TempleOS Welcome (Doc/Welcome.DD)",
+    "source_url": "https://github.com/cia-foundation/TempleOS/blob/archive/Doc/Welcome.DD"
+  },
+  {
+    "text": "Low line count is the highest good, so it is easy to learn the whole thing.",
+    "source_title": "TempleOS Charter (Doc/Charter.DD)",
+    "source_url": "https://github.com/cia-foundation/TempleOS/blob/archive/Doc/Charter.DD"
+  },
+  {
+    "text": "Users should see the light at the end of the tunnel.",
+    "source_title": "TempleOS Charter (Doc/Charter.DD)",
+    "source_url": "https://github.com/cia-foundation/TempleOS/blob/archive/Doc/Charter.DD"
+  },
+  {
+    "text": "Any genius can make it complicated. Like in physics, it takes a supra-genius to make it simple.",
+    "source_title": "TempleOS Charter (Doc/Charter.DD)",
+    "source_url": "https://github.com/cia-foundation/TempleOS/blob/archive/Doc/Charter.DD"
+  },
+  {
+    "text": "We do not put any hooks for future changes. \"Perfect\" means we always act as though it is final, for all time.",
+    "source_title": "TempleOS Charter (Doc/Charter.DD)",
+    "source_url": "https://github.com/cia-foundation/TempleOS/blob/archive/Doc/Charter.DD"
+  },
+  {
+    "text": "Ring-0-only. Everything runs in kernel mode, including user applications.",
+    "source_title": "TempleOS Charter (Doc/Charter.DD)",
+    "source_url": "https://github.com/cia-foundation/TempleOS/blob/archive/Doc/Charter.DD"
+  },
+  {
+    "text": "Simplicity is a goal to keep the line count down, so it's easy to tinker with.",
+    "source_title": "TempleOS Welcome (Doc/Welcome.DD)",
+    "source_url": "https://github.com/cia-foundation/TempleOS/blob/archive/Doc/Welcome.DD"
+  },
+  {
+    "text": "I cherry-pick what it will and won't do, to make it maximally beautiful.",
+    "source_title": "TempleOS Welcome (Doc/Welcome.DD)",
+    "source_url": "https://github.com/cia-foundation/TempleOS/blob/archive/Doc/Welcome.DD"
+  },
+  {
+    "text": "Once I was no longer using standard C/C++ syntax, I decided to change everything I didn't like and call it HolyC.",
+    "source_title": "TempleOS Welcome (Doc/Welcome.DD)",
+    "source_url": "https://github.com/cia-foundation/TempleOS/blob/archive/Doc/Welcome.DD"
+  },
+  {
+    "text": "The resulting simplicity of no protections is why TempleOS has value. In facts, that's the point of TempleOS.",
+    "source_title": "TempleOS Welcome (Doc/Welcome.DD)",
+    "source_url": "https://github.com/cia-foundation/TempleOS/blob/archive/Doc/Welcome.DD"
+  },
+  {
+    "text": "I hated learning one language for command line scripts and another for programming.",
+    "source_title": "TempleOS Welcome (Doc/Welcome.DD)",
+    "source_url": "https://github.com/cia-foundation/TempleOS/blob/archive/Doc/Welcome.DD"
+  },
+  {
+    "text": "I limited it to 100,000 lines of code, forever!",
+    "source_title": "TempleOS Strategy (Doc/Strategy.DD)",
+    "source_url": "https://github.com/cia-foundation/TempleOS/blob/archive/Doc/Strategy.DD"
+  },
+  {
+    "text": "I say, \"2Gig for code should be enough.\"",
+    "source_title": "TempleOS Strategy (Doc/Strategy.DD)",
+    "source_url": "https://github.com/cia-foundation/TempleOS/blob/archive/Doc/Strategy.DD"
+  },
+  {
+    "text": "TempleOS is a motorcycle -- if you lean-over too far, a motorcycle will crash. Don't do that!",
+    "source_title": "TempleOS Strategy (Doc/Strategy.DD)",
+    "source_url": "https://github.com/cia-foundation/TempleOS/blob/archive/Doc/Strategy.DD"
+  },
+  {
+    "text": "Sometimes, I cut corners in the interest of keeping the code beautiful.",
+    "source_title": "TempleOS Strategy (Doc/Strategy.DD)",
+    "source_url": "https://github.com/cia-foundation/TempleOS/blob/archive/Doc/Strategy.DD"
+  },
+  {
+    "text": "Yes, I wrote the compiler from scratch.",
+    "source_title": "TempleOS FAQ (Doc/FAQ.DD)",
+    "source_url": "https://github.com/cia-foundation/TempleOS/blob/archive/Doc/FAQ.DD"
+  },
+  {
+    "text": "TempleOS compiles, doesn't interpret, and uses no byte code anywhere.",
+    "source_title": "TempleOS FAQ (Doc/FAQ.DD)",
+    "source_url": "https://github.com/cia-foundation/TempleOS/blob/archive/Doc/FAQ.DD"
+  },
+  {
+    "text": "God told me to stick with 640x480 16 color and single-voice 8-bit signed MIDI-like sample for sound.",
+    "source_title": "TempleOS Credits (Doc/Credits.DD)",
+    "source_url": "https://github.com/cia-foundation/TempleOS/blob/archive/Doc/Credits.DD"
+  },
+  {
+    "text": "I was chosen by God to make His temple, an operating system.",
+    "source_title": "Uses This interview: Terry Davis",
+    "source_url": "https://usesthis.com/interviews/terry.davis/",
+    "date": "2014-05-20"
+  },
+  {
+    "text": "I made a complete operating system including making the tools.",
+    "source_title": "Uses This interview: Terry Davis",
+    "source_url": "https://usesthis.com/interviews/terry.davis/",
+    "date": "2014-05-20"
+  },
+  {
+    "text": "For ten years, I worked on programming TempleOS, full time. I finished, basically, and the last year has been tiny touch-ups here and there.",
+    "source_title": "God's Lonely Programmer (VICE / Motherboard)",
+    "source_url": "https://www.vice.com/en/article/gods-lonely-programmer/",
+    "date": "2014-11-25"
+  },
+  {
+    "text": "It's really obvious what to do next, and it can keep you busy for the first ten years.",
+    "source_title": "God's Lonely Programmer (VICE / Motherboard)",
+    "source_url": "https://www.vice.com/en/article/gods-lonely-programmer/",
+    "date": "2014-11-25"
+  },
+  {
+    "text": "Is it going to be as big as Solomon's Temple? I don't know. But we'll see. What else is there?",
+    "source_title": "God's Lonely Programmer (VICE / Motherboard)",
+    "source_url": "https://www.vice.com/en/article/gods-lonely-programmer/",
+    "date": "2014-11-25"
+  },
+  {
+    "text": "I've attempted to lower the bar, so amateurs can contribute.",
+    "source_title": "The J Operating System (OSNews)",
+    "source_url": "https://www.osnews.com/story/13117/the-j-operating-system/",
+    "date": "2005-12-29"
+  },
+  {
+    "text": "I hope to recreate the dynamic environment that used to exist when the Commodore 64 was around and everyone was creating odd-ball software.",
+    "source_title": "The J Operating System (OSNews)",
+    "source_url": "https://www.osnews.com/story/13117/the-j-operating-system/",
+    "date": "2005-12-29"
+  },
+  {
+    "text": "An idiot admires complexity, a genius admires simplicity.",
+    "source_title": "Terry Davis on Simplicity (YouTube clip); also Wikiquote",
+    "source_url": "https://www.youtube.com/watch?v=k0qmkQGqpM8"
+  },
+  {
+    "text": "Write games, don't play them.",
+    "source_title": "TempleOS Demo/Games/ZoneOut.HC (Battlezone homage popup)",
+    "source_url": "https://github.com/cia-foundation/TempleOS/blob/archive/Demo/Games/ZoneOut.HC"
+  },
+  {
+    "text": "LoseThos is not a general purpose operating system, which is a fairly radical concept.",
+    "source_title": "Recreational Programming With LoseThos (OSNews), Terry writing to OSNews",
+    "source_url": "https://www.osnews.com/story/23796/recreational-programming-with-losethos/",
+    "date": "2010-09-12"
+  },
+  {
+    "text": "I enjoyed finding-out about all the internals of my Commodore 64 when I was a kid and I imagine many people today at first think \"open source\" means they will be able to get involved under the hood, only to discover it is intimidatingly complex.",
+    "source_title": "Recreational Programming With LoseThos (OSNews), Terry writing to OSNews",
+    "source_url": "https://www.osnews.com/story/23796/recreational-programming-with-losethos/",
+    "date": "2010-09-12"
+  },
+  {
+    "text": "There's no reason for another Linux, so LoseThos is fundamentally different.",
+    "source_title": "Recreational Programming With LoseThos (OSNews), Terry writing to OSNews",
+    "source_url": "https://www.osnews.com/story/23796/recreational-programming-with-losethos/",
+    "date": "2010-09-12"
+  },
+  {
+    "text": "The only reason memory protection and security exists is to protect against bugs and malware.",
+    "source_title": "Recreational Programming With LoseThos (OSNews), Terry writing to OSNews",
+    "source_url": "https://www.osnews.com/story/23796/recreational-programming-with-losethos/",
+    "date": "2010-09-12"
+  },
+  {
+    "text": "The wisdom is that opening the door to using any standards squelches innovation.",
+    "source_title": "Recreational Programming With LoseThos (OSNews), Terry writing to OSNews",
+    "source_url": "https://www.osnews.com/story/23796/recreational-programming-with-losethos/",
+    "date": "2010-09-12"
+  },
+  {
+    "text": "The multicore technique is master/slave instead of SMP. You write your programs to directly control the other cores. This is lots of fun.",
+    "source_title": "Recreational Programming With LoseThos (OSNews), Terry writing to OSNews",
+    "source_url": "https://www.osnews.com/story/23796/recreational-programming-with-losethos/",
+    "date": "2010-09-12"
+  },
+  {
+    "text": "The vision is a C64 ROM.",
+    "source_title": "Hacker News comment by TerryADavis",
+    "source_url": "https://news.ycombinator.com/item?id=9781736",
+    "date": "2015-06-26"
+  },
+  {
+    "text": "DOS and C64 had no protection and no problems.",
+    "source_title": "Hacker News comment by TerryADavis",
+    "source_url": "https://news.ycombinator.com/item?id=9781736",
+    "date": "2015-06-26"
+  },
+  {
+    "text": "I hate arbitrary buffer size limits.",
+    "source_title": "Hacker News comment by TerryADavis",
+    "source_url": "https://news.ycombinator.com/item?id=9781736",
+    "date": "2015-06-26"
+  },
+  {
+    "text": "The code is beautiful. I always break compatibility to keep it perfect.",
+    "source_title": "Hacker News comment by TerryADavis",
+    "source_url": "https://news.ycombinator.com/item?id=9781736",
+    "date": "2015-06-26"
+  },
+  {
+    "text": "You must stop assuming everything grows in size. It is done and it is a fixed size.",
+    "source_title": "Hacker News comment by TerryADavis",
+    "source_url": "https://news.ycombinator.com/item?id=9781736",
+    "date": "2015-06-26"
+  },
+  {
+    "text": "My compiler compiles 100,000 lines of code a second.",
+    "source_title": "Hacker News comment by TerryADavis",
+    "source_url": "https://news.ycombinator.com/item?id=9781622",
+    "date": "2015-06-25"
+  },
+  {
+    "text": "TempleOS is ring-0-only. No system call overhead.",
+    "source_title": "Hacker News comment by TerryADavis",
+    "source_url": "https://news.ycombinator.com/item?id=11369017",
+    "date": "2016-03-27"
+  },
+  {
+    "text": "I am a professional operating system developer. In 1990, I was hired to work on Ticketmaster's VAX operating system.",
+    "source_title": "Hacker News comment by TerryADavis",
+    "source_url": "https://news.ycombinator.com/item?id=11341441",
+    "date": "2016-03-23"
+  },
+  {
+    "text": "At Ticketmaster, I learned the first thing you write when you start on bare metal is a debugger.",
+    "source_title": "Hacker News comment by TerryADavis",
+    "source_url": "https://news.ycombinator.com/item?id=11167532",
+    "date": "2016-02-24"
+  },
+  {
+    "text": "The difference between an amateur operating system project and a professional one is writing a compiler.",
+    "source_title": "Hacker News comment by TerryADavis",
+    "source_url": "https://news.ycombinator.com/item?id=11167532",
+    "date": "2016-02-24"
+  },
+  {
+    "text": "Linux is designed like a 1970's mainframe. TempleOS is designed like a C64.",
+    "source_title": "Hacker News comment by TerryADavis",
+    "source_url": "https://news.ycombinator.com/item?id=10402757",
+    "date": "2015-10-16"
+  },
+  {
+    "text": "Every genius makes it more complicated. It takes a super-genius to make is simpler.",
+    "source_title": "Hacker News comment by TerryADavis",
+    "source_url": "https://news.ycombinator.com/item?id=10339814",
+    "date": "2015-10-06"
+  },
+  {
+    "text": "I wrote all the code from scratch, including a 20,000 line of code compiler that makes x86_64 machine code from HolyC or Asm and operates AOT and JIT.",
+    "source_title": "Hacker News comment by TerryADavis",
+    "source_url": "https://news.ycombinator.com/item?id=10061171",
+    "date": "2015-08-14"
+  },
+  {
+    "text": "My JIT mode is not interpreted. It optimizes and compiles to x86_64 machine code.",
+    "source_title": "Hacker News comment by TerryADavis",
+    "source_url": "https://news.ycombinator.com/item?id=10061171",
+    "date": "2015-08-14"
+  },
+  {
+    "text": "You might wonder why TempleOS is barely doing 640x480 at 30fps. The GPU is 2000 times faster than the CPU.",
+    "source_title": "Hacker News comment by TerryADavis",
+    "source_url": "https://news.ycombinator.com/item?id=11046692",
+    "date": "2016-02-06"
+  },
+  {
+    "text": "I am in charge of the 100,000 lines of code, myself. It is managable by one person.",
+    "source_title": "Hacker News comment by TerryADavis",
+    "source_url": "https://news.ycombinator.com/item?id=10835474",
+    "date": "2016-01-04"
+  },
+  {
+    "text": "I have an ace up my sleeve because God talks. Not just to me!",
+    "source_title": "Hacker News comment by TerryADavis",
+    "source_url": "https://news.ycombinator.com/item?id=9246953",
+    "date": "2015-03-22"
+  },
+  {
+    "text": "It's a supplemental operating system -- a new concept. You use Windows or Linux as your primary operating system and LoseThos for screwing around programming. Believe it or not, people used home computers before the Internet.",
+    "source_title": "Hacker News comment by losethos",
+    "source_url": "https://news.ycombinator.com/item?id=491568",
+    "date": "2009-02-23"
+  },
+  {
+    "text": "I don't want a literal C64 -- just the complete open simple access... but 64-bit and 3Ghz and multicored.",
+    "source_title": "Hacker News comment by TempleOS",
+    "source_url": "https://news.ycombinator.com/item?id=7817137",
+    "date": "2014-05-29"
+  },
+  {
+    "text": "I have no use for github.",
+    "source_title": "Hacker News comment by MusicOS (Terry on LoseThos)",
+    "source_url": "https://news.ycombinator.com/item?id=4466935",
+    "date": "2012-09-02"
+  },
+  {
+    "text": "I wrote 135,000 lines of code over the past 9 years, including a kernel, 64-bit compiler, graphics library, boot loaders, device drivers, editor, tools like grep, etc., and 150 demo programs. 9 years is a very long time.",
+    "source_title": "Hacker News comment by MusicOS (Terry on LoseThos)",
+    "source_url": "https://news.ycombinator.com/item?id=4466935",
+    "date": "2012-09-02"
+  },
+  {
+    "text": "My compiler for LoseThos is not very optimal, but it doesn't matter! I made many improvements, only to discover no benefit.",
+    "source_title": "Hacker News comment by MusicOS (Terry on LoseThos)",
+    "source_url": "https://news.ycombinator.com/item?id=4466755",
+    "date": "2012-09-02"
+  },
+  {
+    "text": "I do almost all of my development in TempleOS with my own compiler, editor and tools.",
+    "source_title": "Uses This interview: Terry Davis",
+    "source_url": "https://usesthis.com/interviews/terry.davis/",
+    "date": "2014-05-20"
+  },
+  {
+    "text": "It kind of developed on its own, I didn't plan it.",
+    "source_title": "God's Lonely Programmer (VICE / Motherboard)",
+    "source_url": "https://www.vice.com/en/article/gods-lonely-programmer/",
+    "date": "2014-11-25"
+  },
+  {
+    "text": "The way God works is he caused the course of my life. I can see how it's been a charmed life in some ways, so I think He planned it.",
+    "source_title": "God's Lonely Programmer (VICE / Motherboard)",
+    "source_url": "https://www.vice.com/en/article/gods-lonely-programmer/",
+    "date": "2014-11-25"
+  },
+  {
+    "text": "Today I find the people most similar to me are atheist-scientist people. The difference is God has talked to me, so I'm basically like an atheist who God has talked to.",
+    "source_title": "God's Lonely Programmer (VICE / Motherboard)",
+    "source_url": "https://www.vice.com/en/article/gods-lonely-programmer/",
+    "date": "2014-11-25"
+  },
+  {
+    "text": "The vision for LoseThos is a 64-bit Commodore 64 that's a thousand times faster than the original and has a shell that is C/C++ instead of BASIC. It's for recreational programming.",
+    "source_title": "LoseThos 64-Bit Operating System (Terry's site, archived)",
+    "source_url": "https://web.archive.org/web/20111008223814/http://www.losethos.com/",
+    "date": "2011-10-08"
+  },
+  {
+    "text": "I'm a rocket scientist, though not a very good one.",
+    "source_title": "LoseThos 64-Bit Operating System (Terry's site, archived)",
+    "source_url": "https://web.archive.org/web/20111008223814/http://www.losethos.com/",
+    "date": "2011-10-08"
+  },
+  {
+    "text": "Let's be clear, I'm literally the smartest programmer that has ever lived.",
+    "source_title": "Terry Davis: literally the smartest programmer thats ever lived (YouTube)",
+    "source_url": "https://www.youtube.com/watch?v=PMJFOtjiYbM&t=0s"
+  },
+  {
+    "text": "A lot of the improvements to a language are kind of junk, but I came up with some genuine improvements.",
+    "source_title": "Terry Davis on switch statements / language improvements (YouTube)",
+    "source_url": "https://www.youtube.com/watch?v=v-2xtENq1bk&t=23s"
+  },
+  {
+    "text": "You get out of God what you put in.",
+    "source_title": "The 64 Bit Temple Operating System (YouTube)",
+    "source_url": "https://www.youtube.com/watch?v=Bz3Z5wsZrn4&t=38s"
+  },
+  {
+    "text": "If you don't have arguments you don't need parentheses for functions.",
+    "source_title": "The 64 Bit Temple Operating System (YouTube)",
+    "source_url": "https://www.youtube.com/watch?v=Bz3Z5wsZrn4&t=406s"
+  }
+]

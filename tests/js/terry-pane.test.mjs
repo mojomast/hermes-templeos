@@ -5,8 +5,8 @@ import { fileURLToPath } from "node:url";
 import test from "node:test";
 
 import { TempleOSPane } from "../../desktop/src/ui/pane.js";
-import { TerryCompanionOverlay } from "../../desktop/src/ui/companion.js";
-import { resetFiber, rerender } from "./shims/jsx-runtime.mjs";
+import { CompanionControls, resetTerrySession, TerryCompanionOverlay } from "../../desktop/src/ui/companion.js";
+import { flushEffects, resetFiber, rerender } from "./shims/jsx-runtime.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const CSS = readFileSync(path.join(ROOT, "desktop", "src", "ui", "styles.css"), "utf8");
@@ -96,10 +96,17 @@ test("Terry dock is the second child of .tos-stage-row, to the right of the disp
 
   const terry = byTestId(node, "companion")[0];
   assert.match(String(terry.props.className), /tos-companion/);
-  assert.equal(terry.props["data-costume"], "base");
-  const canvas = findAll(terry, (item) => item.type === "canvas");
-  assert.equal(canvas.length, 1);
-  assert.equal(canvas[0].props["data-companion-v4"], "1");
+  assert.equal(terry.props["data-renderer"], "video");
+  assert.equal(terry.props["data-costume"], undefined);
+  const videos = findAll(terry, (item) => item.type === "video");
+  assert.equal(videos.length, 2);
+  for (const video of videos) {
+    assert.equal(video.props.muted, true);
+    assert.equal(video.props.playsInline, true);
+    assert.equal(video.props.loop, true);
+    assert.equal(video.props.preload, "auto");
+  }
+  assert.equal(findAll(terry, (item) => item.type === "canvas").length, 0);
 });
 
 test("Agent log sits under the screen and Terry keeps the right column", () => {
@@ -219,8 +226,9 @@ test("built plugin carries the dock, bubble lane, and Hermes dark theme", () => 
   assert.match(PLUGIN, /tos-hermes-ink/);
 });
 
-test("overlay renders the live v4 canvas path", () => {
+test("overlay defaults to the stacked v5 video path", () => {
   resetFiber();
+  resetTerrySession();
   const node = rerender(TerryCompanionOverlay, {
     api: { companionClip: () => Promise.resolve({ ok: true }) },
     animation: "idle",
@@ -230,9 +238,64 @@ test("overlay renders the live v4 canvas path", () => {
     speech: null,
   });
   assert.equal(node.props["data-testid"], "companion-dock");
+  assert.equal(node.props["data-renderer"], "video");
+  const videos = findAll(node, (item) => item.type === "video");
+  assert.equal(videos.length, 2);
+  assert.equal(findAll(node, (item) => item.type === "canvas").length, 0);
+  assert.equal(node.props["data-ready"], "0");
+  assert.equal(texts(byTestId(node, "companion-loading")[0]), "Summoning Terry…");
+});
+
+test("overlay falls back to the v4 canvas rig when v5 cannot load", async () => {
+  resetFiber();
+  resetTerrySession();
+  const api = { companionClip: () => Promise.reject(new Error("v5 unavailable")) };
+  const props = {
+    api: api,
+    animation: "idle",
+    costume: "base",
+    hidden: false,
+    enabled: true,
+    speech: null,
+  };
+  let node = rerender(TerryCompanionOverlay, props);
+  flushEffects();
+  await Promise.resolve();
+  await Promise.resolve();
+  await Promise.resolve();
+  await Promise.resolve();
+  node = rerender(TerryCompanionOverlay, props);
+  flushEffects();
+  node = rerender(TerryCompanionOverlay, props);
+  assert.equal(node.props["data-renderer"], "v4");
   const canvas = findAll(node, (item) => item.type === "canvas");
   assert.equal(canvas.length, 1);
   assert.equal(canvas[0].props["data-companion-v4"], "1");
-  assert.equal(node.props["data-ready"], "0");
-  assert.equal(texts(byTestId(node, "companion-loading")[0]), "Summoning Terry…");
+  assert.equal(byTestId(node, "companion-dock")[0].props["data-ready"], "0");
+});
+
+test("costume dropdown appears only when the v4 fallback rig is active", () => {
+  resetFiber();
+  let video = rerender(CompanionControls, {
+    hidden: false,
+    enabled: true,
+    muted: false,
+    fallback: false,
+    onClick: () => {},
+  });
+  assert.equal(byTestId(video, "companion-hide").length, 1);
+  assert.equal(byTestId(video, "companion-mute").length, 1);
+  assert.equal(byTestId(video, "companion-costume").length, 0);
+
+  resetFiber();
+  const v4 = rerender(CompanionControls, {
+    hidden: false,
+    enabled: true,
+    muted: false,
+    fallback: true,
+    onClick: () => {},
+  });
+  assert.equal(byTestId(v4, "companion-hide").length, 1);
+  assert.equal(byTestId(v4, "companion-mute").length, 1);
+  assert.equal(byTestId(v4, "companion-costume").length, 1);
 });

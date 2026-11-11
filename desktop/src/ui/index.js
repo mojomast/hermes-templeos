@@ -29,6 +29,27 @@ export {
   userMayInput,
   logLine,
   flavorLabel,
+  filterLogEvents,
+  logToolKey,
+  vmStateChip,
+  bbsChip,
+  guestVersionChip,
+  paneLayoutMode,
+  layoutRegions,
+  rectsOverlap,
+  COMPACT_BREAKPOINT_PX,
+  LOG_FILTERS,
 } from "./logic.js";
+
+export {
+  normalizeQuote,
+  loadQuotes,
+  pickQuote,
+  createQuotePicker,
+  quoteKindForLogEvent,
+  quoteKindForBoot,
+  TERRY_IDLE_INTERVAL_MS,
+  QUOTE_EVENT_KINDS,
+} from "./quotes.js";
 
 export { TerryCompanionOverlay, CompanionControls, TerryCompanion } from "./companion.js";

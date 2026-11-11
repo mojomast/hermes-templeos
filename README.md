@@ -1,6 +1,6 @@
 <div align="center">
 
-# TempleOS
+# TempleOS for Hermes
 
 **A local TempleOS-family guest in QEMU. The Hermes agent and you share one live screen.**
 
@@ -15,21 +15,20 @@ Networking is always off. QEMU and ISOs are not bundled.
 [![Tests](https://img.shields.io/badge/tests-pytest%20%2B%20node-0ea5e9)](#development)
 
 <p>
-<img src="docs/images/pane-onboarding.png" alt="TempleOS Desktop pane first-run setup, VM stopped" width="800">
-<img src="docs/images/pane-shared.png" alt="Shared-mode pane showing TinkerOS Command Line Overview after an absolute click" width="800">
+<img src="docs/images/pane-1920x1240.png" alt="World-class TempleOS Desktop pane at 1920x1240: guest screen and activity log on the left, HD Terry on the right" width="960">
 </p>
 <p>
-<img src="docs/images/pane-user-driving.png" alt="Take control: agent paused, the user is driving" width="800">
-<img src="docs/images/pane-agent-log.png" alt="Shared-mode pane with the agent activity log" width="800">
+<img src="docs/images/pane-typing.png" alt="HD Terry typing beside the live TempleOS guest screen" width="680">
+<img src="docs/images/pane-narrow.png" alt="Narrow pane layout with the guest screen and HD Terry stacked in columns" width="300">
 </p>
 
 <sub>
 In memory of <strong>Terry A. Davis</strong> (1969–2018), author of TempleOS.
-TempleOS is public domain. This plugin is an unofficial Hermes integration and is
-not affiliated with Terry's estate, TinkerOS, ZealOS, or Nous Research.
+TempleOS is public domain. This plugin is an unofficial Hermes integration; see
+[Credits](#credits).
 </sub>
 
-[Quickstart](#quickstart) · [Tools](#tools) · [Pane](#desktop-pane) · [Flavors](#flavors) · [Architecture](#architecture) · [Security](#security-and-disclosures) · [Troubleshooting](#troubleshooting) · [Development](#development)
+[Quickstart](#quickstart) · [Tools](#tools) · [Pane](#desktop-pane) · [Flavors](#flavors) · [Temple of Hermes](#temple-of-hermes-guest) · [Architecture](#architecture) · [Security](#security-and-disclosures) · [Troubleshooting](#troubleshooting) · [Development](#development)
 
 </div>
 
@@ -51,6 +50,7 @@ not affiliated with Terry's estate, TinkerOS, ZealOS, or Nous Research.
 4. **Act.** Type, send QEMU keys, click / move (VMMouse absolute on TinkerOS), or inject HolyC. After each consequential act: `wait_idle`, then `read_text` or one `look`.
 5. **Share.** The Desktop pane shows the same screen. **Take control** / **Hand back** pause the agent with `agent_paused`. Shared mode holds off agent input for ~2 s after you type or click.
 6. **Files.** Framed COM1 protocol with a small HolyC helper ([docs/FILES.md](docs/FILES.md)). Host paths stay under the plugin data dir. Never mounts the live RedSea qcow2 while QEMU has it open.
+7. **Companion.** HD Terry is on by default in the pane: six animation states, 69 sourced quotes, and **Hide Terry** / **Quotes** controls. The four tools and their schemas are unchanged.
 
 **Skill id:** `templeos:templeos-operator` — load with `skill_view("templeos:templeos-operator")`.
 
@@ -90,11 +90,13 @@ After an update, if the Desktop pane is missing or stale: **Capabilities → Plu
 ### Environment
 
 | Name | Role |
-|---|---|
+| --- | --- |
 | `TEMPLEOS_HOME` | Plugin data root (ISOs, disks, sockets, frames, exchange). Must not be a filesystem root. Default: Hermes plugin data dir / XDG fallback. |
 | `TEMPLEOS_SMOKE` | `1` enables optional live-QEMU smoke tests (needs a pinned ISO already on disk). |
+| `TOH_BBS_ENABLED` | Opt-in switch for the Temple of Hermes BBS bridge. The bridge is **off by default**; no socket opens until this is enabled. |
+| `TOH_BBS_ENDPOINT` | TLS endpoint used only when the BBS bridge is enabled. There is no compiled-in default endpoint. |
 
-No secrets. No `requires_env`. No dotenv.
+No secrets. No `requires_env`. No dotenv. The BBS bridge accepts only the allow-list destination name `bbs`; transport details come from host configuration, never from guest text.
 
 ## Tools
 
@@ -103,11 +105,11 @@ Hermes **Tool Search** defers plugin tools by default, so their schemas are not 
 Four tools, registered from `templeos/tools.py` under toolset `templeos`. Every handler returns a JSON string `{ok, error, code, fix, ...}`.
 
 | Tool | Ops | Role |
-|---|---|---|
-| `templeos_vm` | `start` `stop` `reset` `snapshot` `restore` `status` `doctor` | Child QEMU lifecycle. `snapshot` ejects non-qcow2 writables first. `restore` issues `cont` if `loadvm` left the VM paused. Sockets are existence flags only, never tokens. |
-| `templeos_screen` | `look` `read_text` `wait_idle` `hash` | PNG look, serial/glyph text, cropped idle wait. Full-frame hashes never stabilize (clock / FPS). |
-| `templeos_input` | `type` `keys` `click` `move` `holyc` | Keyboard, pointer, HolyC. Returns `agent_paused` when you drive or during the shared hold-off. |
-| `templeos_files` | `list` `pull` `push` | Guest paths like `T:/Home/`. Host `src`/`dest` confined under `TEMPLEOS_HOME`. Serial Xfer protocol; FAT push is experimental. |
+| --- | --- | --- |
+| `templeos_vm` | `start` `stop` `reset` `snapshot` `restore` `status` `doctor` `modem` | Child QEMU lifecycle. `snapshot` ejects non-qcow2 writables first; `restore` issues `cont` if `loadvm` left the VM paused; `modem` is a serial profile, not a NIC. Sockets are existence flags only, never tokens. |
+| `templeos_screen` | `look` `read_text` `wait_idle` `hash` `lore` | PNG look, serial/glyph text, cropped idle wait, frame hash, and operator lore. Full-frame hashes never stabilize (clock / FPS). |
+| `templeos_input` | `type` `keys` `click` `move` `holyc` | Keyboard, pointer, and HolyC. Returns `agent_paused` when you drive or during the shared hold-off. |
+| `templeos_files` | `list` `pull` `push` `rpc` | Guest paths like `T:/Home/`; host `src`/`dest` confined under `TEMPLEOS_HOME`. Serial Xfer protocol; `rpc` probes the guest daemon; FAT push is experimental. |
 
 ### Bundled skill
 
@@ -118,7 +120,7 @@ Four tools, registered from `templeos/tools.py` under toolset `templeos`. Every 
 The Hermes Desktop pane (`desktop/plugin.js`, needs Hermes `>=0.23.0`) talks only through `ctx.rest` to `/api/plugins/templeos/`. It does not dial `127.0.0.1`, does not read parent tokens, and does not load remote scripts.
 
 | Mode | Behaviour |
-|---|---|
+| --- | --- |
 | Watch | You see the VM; only the agent injects input. |
 | Shared (default) | Both can type. Your key/click pauses the agent ~2 s. |
 | Take control | Agent tools return `agent_paused` until **Hand back**. |
@@ -128,10 +130,17 @@ Frames are PNG, integer-scaled from 640×480 (ZealOS may present 1024×768). The
 On a fresh ISO boot (no `golden` snapshot), `templeos_vm op=start` auto-dismisses the first-boot **Install onto hard drive** and **Take Tour** prompts in the background (Esc clears AutoComplete focus, then `n` + Enter). Restore a snapshot to skip them.
 
 <p>
-<img src="docs/images/pane-shared.png" alt="Shared mode: TinkerOS desktop in the TempleOS pane" width="800">
 <img src="docs/images/tinkeros-prompt.png" alt="TinkerOS HolyC prompt" width="400">
 <img src="docs/images/tinkeros-click.png" alt="Absolute click opened Command Line Overview" width="400">
 </p>
+
+### HD Terry companion
+
+Terry is the pane's **default video renderer**: six silent 720×1080 transparent VP9 loops at 20 fps — **idle**, **typing**, **speaking**, **wave**, **walk**, and **smoking** as an occasional idle variant. The quote picker reads **69 sourced quotes** from [desktop/terry-quotes.json](desktop/terry-quotes.json); every entry carries a `source_title` and `source_url`, and quote text appears only in the pane bubble.
+
+If VP9 alpha cannot play, the pane falls back to the **v4 canvas rig**. **Hide Terry** hides or restores the sprite, and the **Quotes on / Quotes muted** toggle controls bubbles without hiding Terry. The costume dropdown appears only on the v4 fallback. You can also disable the companion with `companion: off` or `TEMPLEOS_COMPANION=off`; the pane hide toggle only conceals it.
+
+Attribution: **"An original fan tribute with no official TempleOS affiliation."** Pack notes and clip hashes: [desktop/assets/companion/terry/v5/README.md](desktop/assets/companion/terry/v5/README.md).
 
 Source screenshots also live under [`desktop/screenshots/`](desktop/screenshots/).
 
@@ -140,7 +149,7 @@ Source screenshots also live under [`desktop/screenshots/`](desktop/screenshots/
 Bake-off on 9 Nov 2026 (TCG; `/dev/kvm` existed but was not openable on that host). Networking off.
 
 | | **TinkerOS 5.20-rc10** (default) | **TempleOS 5.03** | **ZealOS** (optional) |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | Boot to desktop | ~14 s | ~14 s | ~16 s (AHCI required) |
 | Resolution / tokens | 640×480 / ~414 | 640×480 / ~414 | 1024×768 / ~1036 |
 | Absolute QMP click | Pass (VMMouse) | Fail (no abs handler) | Fail |
@@ -150,6 +159,10 @@ Bake-off on 9 Nov 2026 (TCG; `/dev/kvm` existed but was not openable on that hos
 | Pick | **Default** | Optional stock | Optional AHCI / dark theme |
 
 ISO pins (SHA-256) live in `templeos/flavors.py`. Official URLs only — not Internet Archive.
+
+## Temple of Hermes guest
+
+This plugin can run the [Temple of Hermes](https://github.com/mojomast/temple-of-hermes) **0.1.2** guest in the same local, network-off QEMU shape; **TinkerOS 5.20-rc10 remains the default**. No guest ISO is bundled — supply your own. The optional Temple of Hermes BBS bridge is separate, host-configured, and off by default (see [Environment](#environment)).
 
 ## Architecture
 
@@ -182,6 +195,7 @@ This is what the code is built to do. Catalog reviewers: this is a **child hyper
 - **Child process.** Spawns `qemu-system-x86_64` with an argument array (no shell). Child env is an exact-name allowlist (`templeos.envsafe.child_env`). No dotenv. No `requires_env`. No secret fallback to `os.environ`.
 - **ISO fetch.** Doctor may download the pinned flavor ISO from its official URL and refuse a SHA-256 mismatch (partials deleted). QEMU and ISOs are **not** bundled (catalog rule 17).
 - **Network.** Guest always `-nic none`. Enabling a fork's networking is not offered.
+- **BBS bridge.** Opt-in Temple of Hermes HBBS/1 host bridge. The destination is the literal allow-list name `bbs`; the TLS endpoint comes from host environment or host config, never from guest text. Off by default, no plaintext fallback. Details: [docs/evidence/BBS-TRANSPORT.md](docs/evidence/BBS-TRANSPORT.md).
 - **Sockets.** QMP, VNC, and COM1 are unix sockets under the data dir. Never a LAN VNC port. COM1 stays open for the session or guest bytes are lost.
 - **Paths.** Host paths resolve symlinks and stay under `TEMPLEOS_HOME` / plugin data. The data root must not be `/`.
 - **Files.** Serial Xfer is capped at 256 KiB. Live RedSea qcow2 is never mounted while QEMU holds it. FAT push is experimental.
@@ -191,7 +205,7 @@ This is what the code is built to do. Catalog reviewers: this is a **child hyper
 ## Troubleshooting
 
 | What you see | What it means |
-|---|---|
+| --- | --- |
 | `qemu_missing` | Install `qemu-system-x86_64` and `qemu-img` (see Quickstart). |
 | `iso_missing` / `iso_hash_mismatch` | Run `templeos_vm op=doctor`. Delete a bad ISO and re-fetch. |
 | KVM reported unusable | `/dev/kvm` exists but cannot be opened. Fix group/udev, or stay on TCG. |
@@ -200,6 +214,7 @@ This is what the code is built to do. Catalog reviewers: this is a **child hyper
 | Debugger screen | `G2;` to continue, `Exit;` to leave, or `templeos_vm op=restore` to `golden`. |
 | `agent_paused` | You have Take control, or shared hold-off. Click **Hand back** or wait ~2 s. |
 | Pane blank / stale after update | **Capabilities → Plugins → Rescan.** Enable the plugin first. |
+| Terry is missing | Companion is off (`companion: off` / `TEMPLEOS_COMPANION=off`), assets were not installed, or **Hide Terry** is active. |
 | FAT push `experimental` | Expected. Prefer serial Xfer; bake-off did not see FAT12 as `A:`. |
 | Apple Silicon / Windows | Untested. TCG may work; not a supported primary host yet. |
 
@@ -215,14 +230,22 @@ node scripts/build_desktop.mjs --check
 python3 evals/measure_schemas.py
 ```
 
-`evals/measure_schemas.py` prints one integer: o200k tokens of the four tool schemas. Keep them under about 2,000. This tree measures **892** o200k (**+67** vs the 0.1.0 baseline of 825) from longer tool descriptions that steer Tool Search; still four tools.
+`evals/measure_schemas.py` prints one integer: o200k tokens of the four tool schemas. This tree measures **972** o200k. The count must stay unchanged (**delta 0**) when docs or tool descriptions change; still four tools, under the ~2,000 budget.
 
 Live QEMU tests are marked `@pytest.mark.smoke` and skipped unless `TEMPLEOS_SMOKE=1` and a pinned ISO already exists. Do not download ISOs in CI by default. The box `/dev/kvm` is often unusable, so smokes run in TCG.
 
 Contracts and pane routes: [docs/CONTRACTS.md](docs/CONTRACTS.md).
 
+## Credits
+
+In memory of **Terry A. Davis** (1969–2018), author of TempleOS. TempleOS is public domain by Terry A. Davis.
+
+The HD Terry companion is **"An original fan tribute with no official TempleOS affiliation."** Its 69 quotes are sourced in [desktop/terry-quotes.json](desktop/terry-quotes.json), with a `source_title` and `source_url` on every entry.
+
+This plugin is not affiliated with Terry's estate, TinkerOS, ZealOS, or Nous Research.
+
 ## License
 
 Code is [MIT](LICENSE), © 2026 Kyle Durepos ([mojomast](https://github.com/mojomast)).
 
-TempleOS is public domain by Terry A. Davis. TinkerOS and ZealOS are their respective authors' projects; ISOs are fetched from official URLs at runtime and are not redistributed in this repository. QEMU is a system package (GPL/LGPL).
+TinkerOS and ZealOS are their respective authors' projects; ISOs are fetched from official URLs at runtime and are not redistributed in this repository. QEMU is a system package (GPL/LGPL).

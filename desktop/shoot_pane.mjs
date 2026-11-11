@@ -5,7 +5,7 @@
 import { spawnSync } from "node:child_process";
 import { mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 import { TempleOSPane } from "./src/ui/pane.js";
 import { resetFiber, rerender } from "../tests/js/shims/jsx-runtime.mjs";
@@ -22,6 +22,7 @@ const ONLY = (process.env.TEMPLEOS_SHOT_ONLY || "")
   .filter(Boolean);
 
 const V4_ROOT = path.join(ROOT, "desktop", "assets", "companion", "terry", "v4");
+const V5_EXPORTS = path.join(ROOT, "desktop", "assets", "companion", "terry", "v5", "exports");
 const V4_SOURCE = readFileSync(path.join(ROOT, "desktop", "src", "ui", "terry_v4.js"), "utf8")
   .replace(/^export\s+/gm, "");
 
@@ -47,6 +48,12 @@ function loadV4() {
 }
 
 const V4 = loadV4();
+const QUOTES = JSON.parse(readFileSync(path.join(ROOT, "desktop", "terry-quotes.json"), "utf8"));
+const LONG_QUOTE =
+  Array.isArray(QUOTES) && QUOTES.length
+    ? QUOTES.reduce((best, entry) => (String(entry.text || "").length > String(best.text || "").length ? entry : best), QUOTES[0])
+    : null;
+const SPEECH_TEXT = LONG_QUOTE ? String(LONG_QUOTE.text) : "TEST_FIXTURE_ONLY";
 
 function v4Script(options) {
   const clips = {};
@@ -80,8 +87,54 @@ const frame = sampleClip(clip, DATA.time);
 if (DATA.animation === 'talking' && frame) {
   frame.variants.head_base = speechPlate(DATA.speech.events, DATA.time, frame.variants.head_base);
 }
-if (frame) renderScene(canvas, DATA, images, frame, DATA.costume);
-document.documentElement.dataset.terryV4 = 'drawn';
+if (frame) {
+  renderScene(canvas, DATA, images, frame, DATA.costume);
+  canvas.dataset.terryPainted = '1';
+  const dock = canvas.closest('[data-testid="companion-dock"]');
+  if (dock) dock.dataset.ready = '1';
+  const loading = document.querySelector('[data-testid="companion-loading"]');
+  if (loading) loading.remove();
+  document.documentElement.dataset.terryV4 = 'drawn';
+}
+</script>`;
+}
+
+function v5Script(clip) {
+  const urls = {};
+  for (const name of ["idle", "smoking", "speaking", "typing", "walk", "wave"]) {
+    urls[name] = pathToFileURL(path.join(V5_EXPORTS, name + ".webm")).href;
+  }
+  const name = clip || "idle";
+  return `<script>window.__TERRY_V5__ = ${JSON.stringify(urls)};</script>
+<script>
+(function () {
+  var urls = window.__TERRY_V5__;
+  var clip = ${JSON.stringify(name)};
+  function start() {
+    var videos = document.querySelectorAll('video[data-companion-video]');
+    if (!videos.length) { setTimeout(start, 50); return; }
+    var video = videos[0];
+    var done = function () {
+      var loading = document.querySelector('[data-testid="companion-loading"]');
+      if (loading) loading.remove();
+      var dock = document.querySelector('[data-testid="companion-dock"]');
+      if (dock) dock.dataset.ready = '1';
+      document.documentElement.dataset.terryV5 = 'drawn';
+    };
+    video.classList.add('is-front');
+    video.src = urls[clip] || urls.idle;
+    video.addEventListener('canplay', function () {
+      try { video.currentTime = 0.6; } catch (err) {}
+      done();
+    }, { once: true });
+    video.addEventListener('loadeddata', done, { once: true });
+    var played = video.play();
+    if (played && played.catch) played.catch(function () {});
+    setTimeout(done, 2500);
+  }
+  if (document.readyState === 'complete') start();
+  else window.addEventListener('load', start);
+})();
 </script>`;
 }
 
@@ -159,16 +212,68 @@ function page(body, script = "") {
     --ui-stroke-secondary: rgba(255, 255, 85, 0.25);
     --ui-accent: #55ffff;
   }
-  html, body { margin: 0; height: 100%; background: #000010; color: var(--ui-text-primary); }
-  #root { min-height: 100vh; }
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #000010; color: var(--ui-text-primary); }
+  #root { height: 100vh; overflow: hidden; }
   ${CSS}
 </style>
 </head>
-<body><div id="root">${body}</div>${script}</body>
+<body><div id="root">${body}</div>${script}
+<script>
+window.addEventListener("load", function () {
+  var started = Date.now();
+  function readyToMeasure() {
+    if (document.documentElement.dataset.terryV4 === "drawn") return true;
+    var loading = document.querySelector('[data-testid="companion-loading"]');
+    if (loading && loading.getClientRects().length && getComputedStyle(loading).display !== "none") return false;
+    return Date.now() - started >= 1200;
+  }
+  function measure() {
+    if (!readyToMeasure() && Date.now() - started < 5000) {
+      setTimeout(measure, 50);
+      return;
+    }
+    var map = {
+      screen: '[data-testid="screen"]',
+      log: '[data-testid="agent-log"]',
+      terry: '[data-testid="companion-dock"]',
+      bubble: '[data-testid="companion-bubble"]'
+    };
+    var out = {};
+    Object.keys(map).forEach(function (key) {
+      var el = document.querySelector(map[key]);
+      if (!el) return;
+      var r = el.getBoundingClientRect();
+      out[key] = { x: r.x, y: r.y, width: r.width, height: r.height };
+    });
+    var loading = document.querySelector('[data-testid="companion-loading"]');
+    out.loading = {
+      present: !!loading,
+      visible: !!(loading && loading.getClientRects().length && getComputedStyle(loading).display !== "none")
+    };
+    var bubble = document.querySelector('[data-testid="companion-bubble"]');
+    if (bubble) {
+      out.bubbleText = {
+        scrollHeight: bubble.scrollHeight,
+        clientHeight: bubble.clientHeight,
+        overflowY: getComputedStyle(bubble).overflowY
+      };
+    }
+    var pre = document.createElement("pre");
+    pre.id = "__layout_rects";
+    pre.textContent = JSON.stringify(out);
+    pre.style.position = "fixed";
+    pre.style.left = "-9999px";
+    pre.style.top = "0";
+    document.body.appendChild(pre);
+  }
+  setTimeout(measure, 1200);
+});
+</script>
+</body>
 </html>`;
 }
 
-function render(initial, v4) {
+function render(initial, options) {
   resetFiber();
   const body = toHtml(
     rerender(TempleOSPane, {
@@ -176,7 +281,8 @@ function render(initial, v4) {
       initial: { skipLoad: true, ...initial },
     })
   );
-  return page(body, v4 ? v4Script(v4) : "");
+  if (options && options.v5) return page(body, v5Script(options.clip));
+  return page(body, options ? v4Script(options) : "");
 }
 
 const tinkeros = frameDataUrl("tinkeros-mouse-click.png");
@@ -240,7 +346,86 @@ const log = [
   },
 ];
 
+const worldReady = {
+  ...ready,
+  companion: {
+    enabled: true,
+    hidden: false,
+    character: "terry",
+    animation: "talking",
+    costume: "base",
+    speech: { active: true, text: SPEECH_TEXT },
+  },
+};
+
 const shots = {
+  "pane-1920x1240.png": {
+    size: "1920,1240",
+    html: render(
+      {
+        theme: "hermes",
+        scale: 1.5,
+        viewport: { width: 1920, height: 1240 },
+        frameUrl: tinkeros,
+        log,
+        status: worldReady,
+      },
+      { v5: true, clip: "speaking" }
+    ),
+  },
+  "pane-1280x800.png": {
+    size: "1280,800",
+    html: render(
+      {
+        theme: "hermes",
+        scale: 0.72,
+        viewport: { width: 1280, height: 800 },
+        frameUrl: prompt,
+        log,
+        status: worldReady,
+      },
+      { v5: true, clip: "speaking" }
+    ),
+  },
+  "pane-narrow.png": {
+    size: "780,900",
+    html: render(
+      {
+        theme: "hermes",
+        scale: 0.9,
+        viewport: { width: 780, height: 900 },
+        frameUrl: tinkeros,
+        log,
+        status: worldReady,
+      },
+      { v5: true, clip: "speaking" }
+    ),
+  },
+  "pane-typing.png": {
+    size: "1920,1240",
+    html: render(
+      {
+        theme: "hermes",
+        scale: 1.5,
+        viewport: { width: 1920, height: 1240 },
+        frameUrl: tinkeros,
+        log,
+        status: {
+          ...worldReady,
+          agent_busy: true,
+          companion: {
+            enabled: true,
+            hidden: false,
+            character: "terry",
+            animation: "typing",
+            costume: "base",
+            speech: { active: false, text: "" },
+          },
+        },
+      },
+      { v5: true, clip: "typing" }
+    ),
+  },
   "pane-onboarding.png": {
     size: "1280,1100",
     html: render({
@@ -631,8 +816,8 @@ for (const [name, shot] of Object.entries(shots)) {
       "--disable-dev-shm-usage",
       "--hide-scrollbars",
       "--force-device-scale-factor=1",
-      "--virtual-time-budget=2500",
-      "--timeout=4000",
+      "--virtual-time-budget=5000",
+      "--timeout=9000",
       `--window-size=${shot.size}`,
       `--screenshot=${dest}`,
       `file://${file}`,
@@ -644,4 +829,49 @@ for (const [name, shot] of Object.entries(shots)) {
     process.exit(1);
   }
   console.log("wrote", path.relative(ROOT, dest));
+}
+
+const MEASURE_NAMES = new Set(["pane-1920x1240.png", "pane-1280x800.png", "pane-narrow.png", "pane-typing.png"]);
+const rects = {};
+for (const [name, shot] of Object.entries(shots)) {
+  if (!MEASURE_NAMES.has(name)) continue;
+  if (ONLY.length && !ONLY.includes(name)) continue;
+  const file = path.join("/tmp", name.replace(".png", ".html"));
+  // Chrome's --dump-dom viewport is 88px shorter than the --screenshot
+  // viewport for the same --window-size in this headless build. Add that
+  // chrome allowance here so the measured boxes match the saved PNG.
+  const [width, height] = shot.size.split(",").map(Number);
+  const measureSize = `${width},${height + 88}`;
+  const result = spawnSync(
+    chrome,
+    [
+      "--headless=new",
+      "--no-sandbox",
+      "--disable-gpu",
+      "--disable-dev-shm-usage",
+      "--hide-scrollbars",
+      "--force-device-scale-factor=1",
+      "--virtual-time-budget=5200",
+      "--timeout=9000",
+      `--window-size=${measureSize}`,
+      "--dump-dom",
+      `file://${file}`,
+    ],
+    { encoding: "utf8", timeout: 20000, maxBuffer: 32 * 1024 * 1024 }
+  );
+  const match = result.stdout && result.stdout.match(/<pre id="__layout_rects"[^>]*>([\s\S]*?)<\/pre>/);
+  if (result.status !== 0 || !match) {
+    console.error("could not measure", name, result.stderr || "");
+    continue;
+  }
+  try {
+    rects[name] = JSON.parse(match[1]);
+    console.log("measured", name, JSON.stringify(rects[name]));
+  } catch (err) {
+    console.error("bad rect JSON for", name, err.message);
+  }
+}
+if (Object.keys(rects).length) {
+  writeFileSync(path.join(OUT, "PANE-RECTS.json"), JSON.stringify(rects, null, 2) + "\n");
+  console.log("wrote", path.relative(ROOT, path.join(OUT, "PANE-RECTS.json")));
 }

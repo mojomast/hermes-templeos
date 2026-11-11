@@ -559,8 +559,10 @@
 }
 
 @media (max-width: 900px) {
+  /* Narrow keeps the two-column grid: screen+log left, Terry right. */
   .tos-body {
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(0, 1fr) minmax(180px, 23%);
+    grid-template-rows: minmax(0, 1fr);
   }
   .tos-chip {
     margin-left: 0;
@@ -651,6 +653,28 @@
   image-rendering: auto;
 }
 
+/* HD video companion: two stacked transparent VP9 loops crossfade in ~200ms.
+   object-fit keeps the native 720x1080 aspect while the column changes size,
+   and default smoothing avoids nearest-neighbor pixelation. */
+.tos-companion-video {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+  object-fit: contain;
+  object-position: center bottom;
+  background: transparent;
+  opacity: 0;
+  transition: opacity 200ms ease;
+  image-rendering: auto;
+  pointer-events: none;
+}
+
+.tos-companion-video.is-front {
+  opacity: 1;
+}
+
 .tos-companion-loading {
   position: absolute;
   inset: 0;
@@ -661,6 +685,12 @@
   color: var(--tos-ltgray);
   font-size: 14px;
   pointer-events: none;
+}
+
+/* The moment the v4 rig paints its first frame the summon label is gone;
+   a real bundle error still renders its error text from JS. */
+.tos-companion canvas[data-terry-painted="1"] + .tos-companion-loading {
+  display: none;
 }
 
 .tos-companion-controls {
@@ -741,24 +771,546 @@
 }
 
 @media (max-width: 900px) {
-  .tos-stage,
-  .tos-log,
-  .tos-companion-dock {
+  /* Keep Terry in the right-hand cell; never wrap him below the log. */
+  .tos-stage {
     grid-column: 1;
-    grid-row: auto;
+    grid-row: 1;
+    align-self: stretch;
     justify-self: stretch;
   }
 
+  .tos-companion-dock {
+    grid-column: 2;
+    grid-row: 1;
+    align-self: stretch;
+    justify-self: stretch;
+  }
+}
+
+/* ==========================================================================
+   Pane world-class pass: dense dark dashboard, grouped toolbar, status chips,
+   filterable Agent Log, and a dedicated Terry column that never covers the
+   guest. Wide layout keeps Terry beside screen+log. At <=900px (the documented
+   narrow breakpoint) the screen and log stay in row 1 and Terry collapses to
+   a short dock in row 2, so the screen is never overlapped or covered.
+   ========================================================================== */
+
+.tos-pane {
+  height: 100%;
+  max-height: 100%;
+  overflow: hidden;
+  gap: 8px;
+  padding: 10px 12px 12px;
+}
+
+.tos-top {
+  gap: 8px;
+  padding: 8px 10px;
+  border-radius: 8px;
+}
+
+.tos-chips {
+  display: flex;
+  flex: 1 1 auto;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.tos-chips .tos-chip {
+  margin-left: 0;
+}
+
+.tos-badge,
+.tos-status-chip,
+.tos-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 10px;
+  letter-spacing: 0.045em;
+  line-height: 1.5;
+  white-space: nowrap;
+}
+
+.tos-status-chip {
+  border: 1px solid color-mix(in srgb, var(--tos-ltgray) 42%, var(--tos-dkgray));
+  background: color-mix(in srgb, var(--tos-navy) 20%, var(--tos-black));
+  color: var(--tos-ltgray);
+}
+
+.tos-status-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex: 0 0 auto;
+  background: currentColor;
+  box-shadow: 0 0 6px currentColor;
+}
+
+.tos-status-ok { color: var(--tos-green); border-color: color-mix(in srgb, var(--tos-green) 55%, var(--tos-dkgray)); }
+.tos-status-idle { color: var(--tos-ltgray); }
+.tos-status-warn { color: var(--tos-yellow); border-color: color-mix(in srgb, var(--tos-yellow) 55%, var(--tos-dkgray)); }
+.tos-status-error { color: var(--tos-red); border-color: color-mix(in srgb, var(--tos-red) 60%, var(--tos-dkgray)); }
+.tos-status-loading { color: var(--tos-cyan); border-color: color-mix(in srgb, var(--tos-cyan) 55%, var(--tos-dkgray)); }
+.tos-status-loading .tos-status-dot { animation: tos-pulse 1.2s ease-in-out infinite; }
+.tos-status-empty { color: var(--tos-dkgray); }
+
+@keyframes tos-pulse {
+  0%, 100% { opacity: 0.35; }
+  50% { opacity: 1; }
+}
+
+.tos-toolbar {
+  display: flex;
+  min-width: 0;
+}
+
+.tos-bar {
+  display: flex;
+  flex: 1 1 auto;
+  flex-wrap: wrap;
+  align-items: stretch;
+  gap: 6px;
+  min-width: 0;
+}
+
+.tos-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  min-width: 0;
+  padding: 3px 5px;
+  border: 1px solid rgba(85, 255, 255, 0.16);
+  border-radius: 7px;
+  background: linear-gradient(180deg, rgba(0, 0, 170, 0.2), rgba(0, 0, 0, 0.34));
+}
+
+.tos-group-label {
+  padding: 0 3px;
+  color: var(--tos-ltgray);
+  font-size: 9px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  opacity: 0.72;
+  user-select: none;
+}
+
+.tos-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 8px;
+  border-radius: 4px;
+  font-size: 11px;
+  line-height: 1.5;
+  white-space: nowrap;
+}
+
+.tos-icon {
+  flex: 0 0 auto;
+  opacity: 0.9;
+}
+
+.tos-btn:focus-visible,
+.tos-log-filter:focus-visible,
+.tos-log-follow:focus-visible,
+.tos-companion-costume select:focus-visible,
+.tos-log-scroll:focus-visible,
+.tos-theme:focus-visible {
+  outline: 2px solid var(--tos-cyan);
+  outline-offset: 2px;
+  box-shadow: 0 0 0 3px rgba(85, 255, 255, 0.18);
+}
+
+.tos-modes {
+  display: inline-flex;
+  margin: 0 2px 0 0;
+}
+
+.tos-modes .tos-btn {
+  border-radius: 0;
+  border-left-width: 0;
+}
+
+.tos-modes .tos-btn:first-child {
+  border-left-width: 1px;
+  border-top-left-radius: 4px;
+  border-bottom-left-radius: 4px;
+}
+
+.tos-modes .tos-btn:last-child {
+  border-top-right-radius: 4px;
+  border-bottom-right-radius: 4px;
+}
+
+.tos-theme {
+  margin-left: auto;
+}
+
+.tos-drive {
+  padding: 3px 10px;
+  border-radius: 999px;
+  font-size: 10px;
+  letter-spacing: 0.06em;
+}
+
+.tos-body {
+  grid-template-columns: minmax(0, 1fr) clamp(300px, 34%, 520px);
+  grid-template-rows: minmax(0, 1fr);
+  gap: 10px;
+  min-height: 0;
+}
+
+.tos-stage {
+  gap: 0;
+}
+
+.tos-screen {
+  flex: 0 0 auto;
+  border-radius: 4px;
+}
+
+.tos-screen-stack {
+  width: auto;
+  flex: 0 0 auto;
+}
+
+.tos-log {
+  display: flex;
+  flex-direction: column;
+  margin-top: 6px;
+  padding: 0;
+  height: 210px;
+  max-height: 240px;
+  min-height: 0;
+  overflow: hidden;
+  border-radius: 6px;
+  background: linear-gradient(180deg, rgba(0, 0, 40, 0.72), rgba(0, 0, 0, 0.82));
+}
+
+.tos-log-head {
+  display: flex;
+  flex: 0 0 auto;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 8px;
+  border-bottom: 1px solid rgba(255, 255, 85, 0.18);
+  background: rgba(0, 0, 30, 0.48);
+}
+
+.tos-log h2 {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin: 0;
+  font-size: 11px;
+  letter-spacing: 0.08em;
+}
+
+.tos-log-filters {
+  display: inline-flex;
+  gap: 2px;
+  margin-left: auto;
+}
+
+.tos-log-filter,
+.tos-log-follow {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 2px 7px;
+  border: 1px solid rgba(170, 170, 170, 0.22);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--tos-ltgray);
+  font: inherit;
+  font-size: 10px;
+  letter-spacing: 0.03em;
+  cursor: pointer;
+}
+
+.tos-log-filter:hover,
+.tos-log-follow:hover {
+  border-color: rgba(85, 255, 255, 0.5);
+  color: var(--tos-cyan);
+}
+
+.tos-log-filter.is-on,
+.tos-log-follow.is-on {
+  border-color: rgba(85, 255, 255, 0.62);
+  background: rgba(85, 255, 255, 0.12);
+  color: var(--tos-cyan);
+}
+
+.tos-log-scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  padding: 5px 8px 7px;
+  scrollbar-color: var(--tos-dkgray) transparent;
+  scrollbar-width: thin;
+}
+
+.tos-log-line {
+  display: grid;
+  grid-template-columns: 56px 15px minmax(0, 1fr);
+  gap: 6px;
+  align-items: start;
+  margin: 0;
+  padding: 3px 0;
+  border-bottom: 1px dotted rgba(170, 170, 170, 0.14);
+  white-space: normal;
+  overflow: visible;
+  text-overflow: clip;
+}
+
+.tos-log-time {
+  color: var(--tos-dkgray);
+  font-size: 10px;
+  line-height: 1.5;
+  font-variant-numeric: tabular-nums;
+}
+
+.tos-log-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 15px;
+  height: 15px;
+  color: var(--tos-cyan);
+  font-size: 10px;
+  line-height: 1;
+}
+
+.tos-log-icon::after { content: "·"; }
+.tos-log-icon-vm::after { content: "▣"; }
+.tos-log-icon-screen::after { content: "◉"; }
+.tos-log-icon-input::after { content: "⌨"; }
+.tos-log-icon-files::after { content: "▤"; }
+.tos-log-icon-bbs::after { content: "▥"; }
+.tos-log-icon-user::after { content: "●"; color: var(--tos-yellow); }
+.tos-log-icon-chat::after { content: "✦"; }
+
+.tos-log-body {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.tos-log-summary {
+  color: var(--tos-ltgray);
+  font-size: 11px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.tos-log-meta {
+  color: var(--tos-dkgray);
+  font-size: 9px;
+  letter-spacing: 0.03em;
+}
+
+.tos-log-agent .tos-log-summary { color: var(--tos-cyan); }
+.tos-log-user .tos-log-summary { color: var(--tos-yellow); }
+.tos-log-line.is-failed .tos-log-summary,
+.tos-log-line.is-failed .tos-log-icon { color: var(--tos-red); }
+.tos-log-empty {
+  margin: 4px 0;
+  color: var(--tos-dkgray);
+  font-size: 11px;
+}
+
+.tos-error,
+.tos-info {
+  padding: 5px 9px;
+  border-radius: 5px;
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.tos-error {
+  border: 1px solid rgba(255, 85, 85, 0.5);
+  background: rgba(85, 0, 0, 0.38);
+}
+
+.tos-info {
+  border: 1px solid rgba(85, 255, 255, 0.4);
+  background: rgba(0, 0, 85, 0.35);
+}
+
+.tos-onboard {
+  border-radius: 8px;
+}
+
+.tos-companion-controls {
+  gap: 4px;
+  margin-left: 0;
+}
+
+.tos-companion-controls .tos-btn {
+  font-size: 10px;
+}
+
+.tos-companion-costume select {
+  max-width: 92px;
+  padding: 2px 4px;
+  font-size: 10px;
+}
+
+/* Dedicated Terry column: clipped to its own cell so the bubble can never
+   spill over the guest screen or outside the pane. */
+.tos-pane .tos-companion-dock {
+  overflow: hidden;
+  padding: 6px;
+  border-radius: 8px;
+  min-width: 0;
+  min-height: 0;
+}
+
+.tos-companion-bubble {
+  position: absolute;
+  top: 7px;
+  left: 7px;
+  right: 7px;
+  box-sizing: border-box;
+  min-width: 0;
+  max-width: min(100%, 340px);
+  max-height: min(58%, calc(100% - 14px));
+  overflow-x: hidden;
+  overflow-y: auto;
+  padding: 8px 11px;
+  border-radius: 10px 10px 2px 10px;
+  font-size: 13px;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  scrollbar-width: thin;
+}
+
+.tos-pane[data-theme="hermes"] .tos-status-chip {
+  background: rgba(0, 0, 60, 0.4);
+  border-color: rgba(85, 255, 255, 0.3);
+}
+
+.tos-pane[data-theme="hermes"] .tos-group {
+  border-color: rgba(85, 255, 255, 0.2);
+  background: linear-gradient(180deg, rgba(0, 0, 170, 0.22), rgba(0, 0, 0, 0.4));
+}
+
+.tos-pane[data-theme="hermes"] .tos-log {
+  border-color: rgba(255, 255, 85, 0.32);
+  background: linear-gradient(180deg, rgba(0, 0, 170, 0.24), rgba(0, 0, 0, 0.8));
+}
+
+.tos-pane[data-theme="hermes"] .tos-log-head {
+  border-bottom-color: rgba(85, 255, 255, 0.22);
+  background: rgba(0, 0, 40, 0.52);
+}
+
+@media (max-height: 900px) {
+  .tos-log {
+    height: 140px;
+    max-height: 155px;
+  }
+}
+
+/* Documented narrow breakpoint. The guest screen and Agent Log stay in the
+   left column and Terry keeps a full-height right column (at least 180px),
+   so he is never docked below the screen or the log. The Fit behavior scales
+   the screen into the remaining width; Terry scales proportionally inside
+   his column with the same high-resolution canvas. */
+@media (max-width: 900px) {
+  .tos-pane {
+    padding: 8px;
+  }
+
+  .tos-top {
+    padding: 7px 8px;
+  }
+
+  .tos-chips {
+    order: 3;
+    flex-basis: 100%;
+  }
+
+  .tos-theme {
+    margin-left: auto;
+  }
+
+  .tos-body {
+    grid-template-columns: minmax(0, 1fr) minmax(180px, 23%);
+    grid-template-rows: minmax(0, 1fr);
+    gap: 8px;
+  }
+
   .tos-stage {
-    align-self: start;
+    grid-column: 1;
+    grid-row: 1;
+    align-self: stretch;
+    width: 100%;
+    height: 100%;
+  }
+
+  .tos-pane .tos-companion-dock {
+    grid-column: 2;
+    grid-row: 1;
+    align-self: stretch;
+    justify-self: stretch;
+    order: 0;
+    width: 100%;
+    min-width: 180px;
+    height: 100%;
+    max-height: 100%;
+    min-height: 0;
+    padding: 4px 5px;
+  }
+
+  .tos-pane .tos-companion {
+    height: 100%;
+    max-height: 100%;
   }
 
   .tos-log {
-    order: 2;
+    height: 150px;
+    max-height: 170px;
   }
 
-  .tos-companion-dock {
-    order: 3;
-    align-self: end;
+  .tos-log-line {
+    grid-template-columns: 46px 14px minmax(0, 1fr);
+  }
+
+  .tos-companion-bubble {
+    top: 2px;
+    left: 4px;
+    right: 4px;
+    max-height: min(58%, calc(100% - 8px));
+    padding: 6px 9px;
+    font-size: 12px;
+  }
+}
+
+/* Only truly narrow panes (<600px) may Terry become a slim right-side strip.
+   He still stays in the right column, never below the screen or log. */
+@media (max-width: 599px) {
+  .tos-body {
+    grid-template-columns: minmax(0, 1fr) clamp(96px, 18vw, 150px);
+  }
+
+  .tos-pane .tos-companion-dock {
+    min-width: 0;
+    padding: 3px;
+  }
+
+  .tos-companion-bubble {
+    left: 3px;
+    right: 3px;
+    padding: 5px 7px;
+    font-size: 11px;
+    max-height: calc(100% - 6px);
   }
 }
