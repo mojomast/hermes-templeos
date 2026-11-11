@@ -1,12 +1,29 @@
-ONE LIVE SCREEN — original synthesized score and effects
+ONE LIVE SCREEN — score, effects and narration
 
-Original composition, synthesis and arrangement created for this submission.
-No sampled commercial music or third-party recordings are used in the score
-or effects. The score/effects and their synthesis code are dedicated under
-CC0 1.0 Universal: https://creativecommons.org/publicdomain/zero/1.0/
+Score
+  Original composition and arrangement for this submission, rendered with
+  MorningDAW 1.6.3 (Morningdew Media AB, proprietary freeware, used as a tool;
+  not redistributed). Instruments are played through Surge XT (GPL-3.0, used
+  as a tool). Reverb is Dragonfly Hall and Dragonfly Room (GPL-3.0). Tape
+  colour on the master is Airwindows ToTape6 (MIT). Factory drum samples are
+  referenced from a local MorningDAW install and are not copied into this
+  repository. The .mdproject and spec live in morningdaw/. Rebuild with
+  scripts/music.py; you need your own MorningDAW install.
 
-Narration is generated using the stock Kokoro af_heart voice, not a clone or
-imitation of Terry A. Davis. The script is original. Kokoro-82M model weights
-are Apache 2.0; kokoro-onnx wrapper is MIT. Weights are not redistributed.
-https://huggingface.co/hexgrad/Kokoro-82M
-https://github.com/thewh1teagle/kokoro-onnx
+  The WAV of the score is an original composition. It is not a CC0 dedication,
+  because it includes MorningDAW factory drum sounds used as played parts.
+
+SFX
+  Original synthesized typing, power and glitch effects, created in Python
+  for this submission, with no third-party samples. Dedicated to the public
+  domain under CC0 1.0 Universal:
+  https://creativecommons.org/publicdomain/zero/1.0/
+
+Narration
+  Generated with stock Kokoro-82M v1.0 (full-precision fp32 ONNX) voices:
+  a 60/40 blend of af_heart and af_bella. This is not a clone or imitation of
+  Terry A. Davis. The script is original. Generated WAVs are bundled; model
+  weights are not. Kokoro-82M weights are Apache 2.0; the kokoro-onnx wrapper
+  is MIT.
+  https://huggingface.co/hexgrad/Kokoro-82M
+  https://github.com/thewh1teagle/kokoro-onnx

@@ -1,0 +1,153 @@
+{
+  "title": "One Live Screen",
+  "bpm": 120,
+  "key": "D minor",
+  "chords": [
+    "Dm",
+    "Bb",
+    "F",
+    "C"
+  ],
+  "seed": 1,
+  "style": "synthwave",
+  "gains": {
+    "lead": 0.28,
+    "pad": 0.42,
+    "bass": 0.65,
+    "stab": 0.32,
+    "arp": 0.3
+  },
+  "sections": [
+    {
+      "name": "Intro",
+      "bars": 4,
+      "parts": [
+        "pad",
+        "arp"
+      ],
+      "drums": "hats"
+    },
+    {
+      "name": "Intro",
+      "bars": 4,
+      "parts": [
+        "pad",
+        "arp"
+      ],
+      "drums": "hats"
+    },
+    {
+      "name": "Intro",
+      "bars": 2,
+      "parts": [
+        "pad",
+        "arp"
+      ],
+      "drums": "hats"
+    },
+    {
+      "name": "Drop",
+      "bars": 4,
+      "parts": [
+        "pad",
+        "bass",
+        "arp",
+        "stab"
+      ],
+      "drums": "four"
+    },
+    {
+      "name": "Drop",
+      "bars": 4,
+      "parts": [
+        "pad",
+        "bass",
+        "arp",
+        "stab"
+      ],
+      "drums": "four"
+    },
+    {
+      "name": "Drop",
+      "bars": 4,
+      "parts": [
+        "pad",
+        "bass",
+        "arp",
+        "stab"
+      ],
+      "drums": "four"
+    },
+    {
+      "name": "Drop",
+      "bars": 4,
+      "parts": [
+        "pad",
+        "bass",
+        "arp",
+        "stab"
+      ],
+      "drums": "four"
+    },
+    {
+      "name": "Break",
+      "bars": 4,
+      "parts": [
+        "pad",
+        "lead"
+      ],
+      "drums": "hats",
+      "energy": 0.7
+    },
+    {
+      "name": "Break",
+      "bars": 4,
+      "parts": [
+        "pad",
+        "lead"
+      ],
+      "drums": "hats",
+      "energy": 0.7
+    },
+    {
+      "name": "Hook",
+      "bars": 4,
+      "parts": [
+        "lead",
+        "pad",
+        "bass",
+        "arp",
+        "stab"
+      ],
+      "drums": "four"
+    },
+    {
+      "name": "Hook",
+      "bars": 4,
+      "parts": [
+        "lead",
+        "pad",
+        "bass",
+        "arp",
+        "stab"
+      ],
+      "drums": "four"
+    },
+    {
+      "name": "Outro",
+      "bars": 3,
+      "parts": [
+        "pad"
+      ],
+      "drums": "hit"
+    },
+    {
+      "name": "Tail",
+      "bars": 3,
+      "parts": [
+        "pad"
+      ],
+      "drums": "none"
+    }
+  ]
+}

@@ -1,47 +1,47 @@
 1
-00:00:00,700 --> 00:00:05,399
+00:00:00,700 --> 00:00:05,465
 Sixteen colors. A whole operating system. Welcome to the Temple of Hermes.
 
 2
-00:00:08,500 --> 00:00:13,577
+00:00:08,500 --> 00:00:13,729
 Your agent and you. One live TempleOS screen, inside Hermes Desktop.
 
 3
-00:00:14,500 --> 00:00:18,367
+00:00:14,500 --> 00:00:19,056
 A shared machine in local QEMU. You can take control at any time.
 
 4
-00:00:20,500 --> 00:00:25,265
+00:00:20,500 --> 00:00:25,502
 Let the agent drive. See the screen, click the launcher, type, and work with files.
 
 5
-00:00:28,500 --> 00:00:34,005
+00:00:28,500 --> 00:00:34,085
 Write HolyC. Run it. Read the result. Four tools connect the agent to the machine.
 
 6
-00:00:37,500 --> 00:00:42,418
+00:00:37,500 --> 00:00:42,547
 Now, take control. The agent pauses while you drive. Hand it back when you are ready.
 
 7
-00:00:45,500 --> 00:00:48,738
+00:00:45,500 --> 00:00:48,782
 The Temple of Hermes puts eighteen entries in one launcher.
 
 8
-00:00:51,300 --> 00:00:56,748
+00:00:51,300 --> 00:00:56,875
 Explore WorldSim. Care for the capybara. Take on HolyC challenges in the Dojo.
 
 9
-00:00:58,100 --> 00:01:03,282
+00:00:58,100 --> 00:01:03,324
 Play, browse the Codex, and discover lore and art with characters from the Nous universe.
 
 10
-00:01:05,500 --> 00:01:11,819
+00:01:05,500 --> 00:01:11,851
 Then connect to the BBS. HBBS/1 runs over the guest's COM2 serial modem.
 
 11
-00:01:13,000 --> 00:01:17,460
+00:01:13,000 --> 00:01:17,569
 With an enabled host relay, a human and an agent can post on the same board.
 
 12
-00:01:20,200 --> 00:01:23,828
+00:01:20,200 --> 00:01:23,836
 Hermes TempleOS. One live screen. Built to share.

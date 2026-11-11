@@ -23,7 +23,7 @@ Opening, dense BBS, CTA and memorial reviewed at full resolution; scene contact 
 - Portrait: 40 reverse + 40 shuffled exact-pixel matches; **1,082 canvas text-bound checks**, no violations.
 - Motion and effect controls change pixels; scene boundaries sampled. Framework DOM analysis is not canvas-text certification: custom bounds and actual still review are used separately.
 - Missing/corrupt/short/wrong-alpha media falls back to labelled stills; valid source frames decode. Final mode rejects incomplete footage. Codec fixtures remain outside the footage slots.
-- Original 120 BPM score/SFX and stock female narration: **−15.00 LUFS / −2.79 dBTP PCM**. Drop at exactly 20s. All 12 narration cues match the SRT and finish within their allotted scene windows.
+- MorningDAW 120 BPM score, original SFX and stock Kokoro 60/40 af_heart+af_bella narration: **−15.00 LUFS / −1.50 dBTP PCM**. Music bed **−22.0 LUFS**, ducked under the voice. Drop at 20.00s (5 ms earlier offset applied to the stems; the finished mix transient lands at 20.001s). All 12 narration cues match the SRT and finish within their allotted scene windows.
 
 ## Remaining production inputs
 

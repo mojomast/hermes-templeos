@@ -1,19 +1,38 @@
 {
-  "seed": 64048016,
   "bpm": 120,
+  "key": "D minor",
+  "chords": [
+    "Dm",
+    "Bb",
+    "F",
+    "C"
+  ],
+  "seed": 1,
   "downbeat": 0,
-  "drop": 20,
-  "license": "CC0-1.0",
+  "drop": 20.0,
+  "drop_offset_ms": 5.0,
+  "score": "MorningDAW 1.6.3 + Surge XT + Dragonfly + Airwindows ToTape6",
+  "voice": {
+    "model": "Kokoro-82M v1.0 fp32 ONNX",
+    "id": "blend_heart_bella_60",
+    "mix": "0.6 af_heart + 0.4 af_bella",
+    "speed": 1.0,
+    "lang": "en-us",
+    "polish": "de-ess + 2.5/3.8 kHz presence + 70 Hz highpass"
+  },
+  "bed_lufs": {
+    "input_i": -22.0,
+    "input_tp": -10.8,
+    "input_lra": 4.7,
+    "input_thresh": -42.0
+  },
   "pcm": {
     "input_i": "-15.00",
-    "input_tp": "-2.79",
-    "input_lra": "6.10",
-    "input_thresh": "-26.16",
-    "output_i": "-15.53",
-    "output_tp": "-3.00",
-    "output_lra": "5.90",
-    "output_thresh": "-26.43",
-    "normalization_type": "dynamic",
-    "target_offset": "0.53"
-  }
+    "input_tp": "-1.50",
+    "input_lra": "3.00",
+    "input_thresh": "-35.10"
+  },
+  "loudnorm": "I=-15:TP=-1.5:LRA=11 two-pass",
+  "measured_mix_drop_s": 20.001,
+  "measured_mix_drop_note": "5 ms earlier offset applied to the 44.1 kHz stems; the finished 48 kHz mix transient rises at 20.001 s."
 }

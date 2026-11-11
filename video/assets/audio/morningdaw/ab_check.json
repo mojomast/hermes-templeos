@@ -1,0 +1,52 @@
+{
+  "project": "/workspace/toh-audio-v2-work/morningdaw/one-live-screen.mdproject",
+  "seconds": 28.0,
+  "effects": [
+    {
+      "location": "master",
+      "scope": "mix",
+      "name": "ToTape6",
+      "clap_id": "com.airwindows.consolidated",
+      "diff_db": -1.2,
+      "changed": true,
+      "rms_with_db": -15.5,
+      "rms_without_db": -16.5,
+      "silent_with": false
+    },
+    {
+      "location": "pad:40",
+      "scope": "solo track:0",
+      "name": "Room Snare",
+      "clap_id": "michaelwillis.dragonfly.room",
+      "diff_db": -24.7,
+      "changed": true,
+      "rms_with_db": -17.4,
+      "rms_without_db": -17.3,
+      "silent_with": false
+    },
+    {
+      "location": "track:1",
+      "scope": "solo track:1",
+      "name": "Hall Pad",
+      "clap_id": "michaelwillis.dragonfly.hall",
+      "diff_db": 3.3,
+      "changed": true,
+      "rms_with_db": -27.5,
+      "rms_without_db": -26.8,
+      "silent_with": false
+    },
+    {
+      "location": "track:2",
+      "scope": "solo track:2",
+      "name": "Hall Bells",
+      "clap_id": "michaelwillis.dragonfly.hall",
+      "diff_db": 3.2,
+      "changed": true,
+      "rms_with_db": -27.2,
+      "rms_without_db": -26.1,
+      "silent_with": false
+    }
+  ],
+  "all_changed": true,
+  "unchanged": []
+}
