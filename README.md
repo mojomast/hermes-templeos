@@ -95,8 +95,11 @@ After an update, if the Desktop pane is missing or stale: **Capabilities → Plu
 | `TEMPLEOS_SMOKE` | `1` enables optional live-QEMU smoke tests (needs a pinned ISO already on disk). |
 | `TOH_BBS_ENABLED` | Opt-in switch for the Temple of Hermes BBS bridge. The bridge is **off by default**; no socket opens until this is enabled. |
 | `TOH_BBS_ENDPOINT` | TLS endpoint used only when the BBS bridge is enabled. There is no compiled-in default endpoint. |
+| `TEMPLEOS_CHAT_BRIDGE` | Opt-in Temple of Hermes chat bridge (off by default). |
+| `TEMPLEOS_CHAT_BRIDGE_ENDPOINT` | HTTP(S) agent reply URL used only when the chat bridge is enabled. Plain HTTP is loopback-only. |
+| `TEMPLEOS_CHAT_BRIDGE_TOKEN` | Optional bearer token. Declared in `requires_env` and read only through Hermes `get_secret`. Never from `os.environ`. |
 
-No secrets. No `requires_env`. No dotenv. The BBS bridge accepts only the allow-list destination name `bbs`; transport details come from host configuration, never from guest text.
+No dotenv. The only declared secret is the optional chat-bridge token. The BBS bridge accepts only the allow-list destination name `bbs`; transport details come from host configuration, never from guest text.
 
 ## Tools
 
@@ -193,9 +196,10 @@ TinkerOS / TempleOS: IDE `-cdrom` + qcow2 `if=ide`. ZealOS: AHCI devices (plain 
 This is what the code is built to do. Catalog reviewers: this is a **child hypervisor**, not an OS sandbox.
 
 - **Child process.** Spawns `qemu-system-x86_64` with an argument array (no shell). Child env is an exact-name allowlist (`templeos.envsafe.child_env`). No dotenv. No `requires_env`. No secret fallback to `os.environ`.
-- **ISO fetch.** Doctor may download the pinned flavor ISO from its official URL and refuse a SHA-256 mismatch (partials deleted). QEMU and ISOs are **not** bundled (catalog rule 17).
+- **ISO fetch.** Doctor may download the pinned flavor ISO from its official HTTPS URL and refuse a SHA-256 mismatch (partials deleted). Fetches resolve and vet every address, pin the TCP connection (no DNS rebinding), re-check redirects, and disable ambient proxies. QEMU and ISOs are **not** bundled (catalog rule 17).
 - **Network.** Guest always `-nic none`. Enabling a fork's networking is not offered.
-- **BBS bridge.** Opt-in Temple of Hermes HBBS/1 host bridge. The destination is the literal allow-list name `bbs`; the TLS endpoint comes from host environment or host config, never from guest text. Off by default, no plaintext fallback. Details: [docs/evidence/BBS-TRANSPORT.md](docs/evidence/BBS-TRANSPORT.md).
+- **BBS / chat bridge.** Opt-in Temple of Hermes HBBS/1 and chat bridges, off by default. The BBS destination is the literal allow-list name `bbs`; the TLS endpoint comes from host environment or host config, never from guest text. No plaintext fallback. User-configured loopback or private LAN is allowed; metadata, link-local, and CGNAT are refused. Signup claims are stored mode `0600` under plugin data. The optional chat-bridge token is read only through Hermes secret scope. Details: [docs/evidence/BBS-TRANSPORT.md](docs/evidence/BBS-TRANSPORT.md).
+- **Hooks.** Companion observer hooks fire on session, LLM, and tool events to animate Terry. They return `None` and do not approve, modify, block, or log other tools or file paths.
 - **Sockets.** QMP, VNC, and COM1 are unix sockets under the data dir. Never a LAN VNC port. COM1 stays open for the session or guest bytes are lost.
 - **Paths.** Host paths resolve symlinks and stay under `TEMPLEOS_HOME` / plugin data. The data root must not be `/`.
 - **Files.** Serial Xfer is capped at 256 KiB. Live RedSea qcow2 is never mounted while QEMU holds it. FAT push is experimental.

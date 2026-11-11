@@ -92,16 +92,27 @@ def test_module_entrypoint_uses_env_enabled_bridge(monkeypatch):
 
 def test_token_stays_out_of_repr_and_error_messages(monkeypatch):
     secret = "unit-test-token-not-real"
-    config = ChatBridgeConfig.from_env(
-        {
-            chat_bridge.ENV_ENABLED: "1",
-            chat_bridge.ENV_ENDPOINT: "http://127.0.0.1:9/agent",
-            chat_bridge.ENV_TOKEN: secret,
-        }
+    config = ChatBridgeConfig(
+        enabled=True,
+        endpoint="http://127.0.0.1:9/agent",
+        token=secret,
     )
     assert secret not in repr(config)
     recorder = _Recorder("ok")
     assert ChatBridge(config, transport=recorder).reply("hi") == "ok"
+
+
+def test_from_env_does_not_read_token_from_process_environment(monkeypatch):
+    _clean_env(monkeypatch)
+    monkeypatch.setenv(chat_bridge.ENV_TOKEN, "sentinel-should-not-be-used")
+    config = ChatBridgeConfig.from_env(
+        {
+            chat_bridge.ENV_ENABLED: "1",
+            chat_bridge.ENV_ENDPOINT: "http://127.0.0.1:9/agent",
+            chat_bridge.ENV_TOKEN: "sentinel-should-not-be-used",
+        }
+    )
+    assert config.token is None
 
 
 def test_unreachable_agent_is_unavailable_without_leaking_the_endpoint():

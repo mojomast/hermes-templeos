@@ -9,16 +9,12 @@ and verify the pinned SHA-256 (delete partials on mismatch).
 from __future__ import annotations
 
 import hashlib
-import ipaddress
 import os
-import socket
 import subprocess
 import time
-import urllib.error
-import urllib.request
 from pathlib import Path
 from typing import Any
-from urllib.parse import urlparse
+from templeos.public_http import UnsafeURL, download_https
 
 from templeos.envsafe import child_env
 from templeos.flavors import DEFAULT, FlavorError, get_flavor, iso_filename
@@ -300,78 +296,28 @@ def download_official(
     expected_sha256: str,
     expected_bytes: int | None = None,
 ) -> Path:
-    """Stream ``url`` to ``dest`` after checking it is a public HTTPS official pin."""
+    """Stream ``url`` to ``dest`` after checking it is a public HTTPS official pin.
+
+    Addresses are resolved and vetted, the TCP connection is pinned to that
+    result (no second DNS lookup), redirects are re-checked, and ambient
+    proxies are not used. A SHA-256 mismatch deletes the partial file.
+    """
     dest = Path(dest)
     dest.parent.mkdir(parents=True, exist_ok=True)
     dest.unlink(missing_ok=True)
-    _assert_public_https(url)
-    timeout = _FETCH_TIMEOUT_S
-    limit = None
-    if expected_bytes:
-        limit = int(expected_bytes) + max(1024 * 1024, int(expected_bytes) * 5 // 100)
-
-    class _HttpsRedirect(urllib.request.HTTPRedirectHandler):
-        def redirect_request(self, req, fp, code, msg, headers, newurl):  # type: ignore[override]
-            hops = getattr(req, "_templeos_hops", 0) + 1
-            if hops > _REDIRECT_HOPS:
-                raise OSError("too many redirects while fetching the official ISO")
-            _assert_public_https(newurl)
-            nxt = urllib.request.HTTPRedirectHandler.redirect_request(
-                self, req, fp, code, msg, headers, newurl
-            )
-            if nxt is not None:
-                nxt._templeos_hops = hops  # type: ignore[attr-defined]
-            return nxt
-
-    opener = urllib.request.build_opener(_HttpsRedirect)
-    request = urllib.request.Request(url, method="GET", headers={"User-Agent": "hermes-templeos/0.1"})
-    digest = hashlib.sha256()
-    written = 0
     try:
-        with opener.open(request, timeout=timeout) as resp, dest.open("wb") as handle:
-            final = resp.geturl() if hasattr(resp, "geturl") else url
-            _assert_public_https(final)
-            while True:
-                chunk = resp.read(64 * 1024)
-                if not chunk:
-                    break
-                written += len(chunk)
-                if limit is not None and written > limit:
-                    raise OSError("ISO download exceeded the expected size bound")
-                digest.update(chunk)
-                handle.write(chunk)
-    except (urllib.error.URLError, OSError, TimeoutError, ValueError, socket.timeout):
+        return download_https(
+            url,
+            dest,
+            expected_sha256=expected_sha256,
+            expected_bytes=expected_bytes,
+            timeout=_FETCH_TIMEOUT_S,
+            max_redirects=_REDIRECT_HOPS,
+            headers={"User-Agent": "hermes-templeos/0.1"},
+        )
+    except UnsafeURL as exc:
         dest.unlink(missing_ok=True)
-        raise
-    got = digest.hexdigest()
-    if got != expected_sha256.lower():
-        dest.unlink(missing_ok=True)
-        raise OSError("downloaded ISO failed the pinned SHA-256 check")
-    return dest
-
-
-def _assert_public_https(url: str) -> None:
-    parsed = urlparse(url)
-    if parsed.scheme != "https":
-        raise OSError("ISO fetch requires HTTPS")
-    if parsed.username or parsed.password or parsed.params:
-        raise OSError("refusing ISO URL credentials")
-    host = parsed.hostname
-    if not host or "\x00" in url or any(ord(ch) < 32 for ch in url if ch not in "\t"):
-        raise OSError("refusing a malformed ISO URL")
-    try:
-        infos = socket.getaddrinfo(host, 443, type=socket.SOCK_STREAM)
-    except socket.gaierror as exc:
-        raise OSError(f"could not resolve official ISO host {host}") from exc
-    if not infos:
-        raise OSError(f"could not resolve official ISO host {host}")
-    for info in infos:
-        raw = info[4][0]
-        ip = ipaddress.ip_address(raw)
-        if isinstance(ip, ipaddress.IPv6Address) and ip.ipv4_mapped is not None:
-            ip = ip.ipv4_mapped
-        if not ip.is_global or ip.is_unspecified or ip.is_loopback or ip.is_private or ip.is_link_local or ip.is_multicast or ip.is_reserved:
-            raise OSError("refusing to fetch an ISO from a non-public address")
+        raise OSError(str(exc) or "refusing official ISO URL") from exc
 
 
 def _parse_qemu_version(text: str) -> str | None:

@@ -2,7 +2,7 @@
 
 Handoff for a bee to complete remaining verification (and any follow-up code) so the Hermes **web app** agent uses the four `templeos_*` tools instead of writing a VNC client.
 
-Repo: `mojomast/hermes-templeos`. Branch: `feat/improvements` (PR #2, stacked on `feat/integration` / PR #1). Base SHA before this work: `4bff5af`. The code fix is already committed as `111340ff9d9d4e1b685de189cb56367acc6d4d5e` (`fix: steer agents to templeos_* tools and reattach a live QEMU`). Do not merge, tag, force-push, or deploy to moltussy/Orbit.
+Repo: `mojomast/hermes-templeos`. Branch: `feat/improvements` (PR #2, stacked on `feat/integration` / PR #1). Base SHA before this work: `4bff5af`. The code fix is already committed as `111340ff9d9d4e1b685de189cb56367acc6d4d5e` (`fix: steer agents to templeos_* tools and reattach a live QEMU`). Do not merge, tag, force-push, or deploy to a test host.
 
 The live chat + VM screenshot is a separate brief: `docs/bees/plugin-webapp-demo.md`. Use that for the dark-mode web app demo. Do **not** start QEMU on the shared Hermes box unless the owner lifts the "no QEMU on the box" order.
 
@@ -51,7 +51,7 @@ Light checks already run on that commit (niced, no live QEMU, `TEMPLEOS_SMOKE` u
 3. Follow `docs/bees/plugin-webapp-demo.md` for the dark-mode web app chat demo and `/workspace/templeos-demo/vm-result.png`. The user prompt is: `type a HolyC one-liner that prints 'Hello from Hermes' and 6*7`. Expect `Hello from Hermes` and `42`. Fail if the agent writes a VNC client or dials plugin-data sockets.
 4. If the agent still skips `templeos_*` after the system prompt section is loaded, strengthen the steer (do not turn Tool Search off globally). Options: tighten the prompt section, confirm the gateway actually loaded this SHA, or check that `api_server`/`cli` still has the templeos toolset. Re-run only the affected unit tests, niced (`nice -n 19`).
 5. Optional follow-up, not required for the demo: set `Runtime.guest_serial_ready = True` after a successful guest `Comm*` / files protocol exchange so `holyc via=auto` can use serial when it is truly live. Until then, auto types at the prompt, which is the correct default.
-6. Do not merge, tag, release, or deploy to moltussy/Orbit without an explicit yes from Kyle.
+6. Do not merge, tag, release, or deploy to a test host without an explicit yes from Kyle.
 
 ## Acceptance
 

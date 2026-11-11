@@ -41,6 +41,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Mapping
 from urllib.parse import urlsplit
+from templeos.public_http import UnsafeURL, connect_pinned, resolve_host
 
 from templeos.paths import PathError, home
 
@@ -135,9 +136,9 @@ SIGNUP_PENDING = "pending_moderation"
 SIGNUP_APPROVED = "approved"
 SIGNUP_ERROR_CODES: frozenset[str] = frozenset({"account_pending", "account_exists"})
 
-# Default host-side credential path.  It lives outside the repository and is
-# only a default: callers may pass an explicit path.
-DEFAULT_SIGNUP_CLAIM_PATH = Path("/tmp/bbs-dial/creds")
+# Default host-side credential path, under the plugin data dir (not /tmp).
+# Callers may still pass an explicit path; the repository tree is refused.
+DEFAULT_SIGNUP_CLAIM_PATH = None  # resolved at call time via _default_claim_path()
 
 _TRUE = frozenset({"1", "true", "yes", "on"})
 _FALSE = frozenset({"", "0", "false", "no", "off"})
@@ -489,8 +490,15 @@ def _secret_value(value: Any, *, name: str) -> str:
     return value
 
 
+def _default_claim_path() -> Path:
+    """Mode-0600 signup claims live under plugin data, never the checkout or /tmp."""
+    from templeos.paths import home
+
+    return home() / "bbs" / "creds"
+
+
 def _credential_path(path: str | os.PathLike[str] | None) -> Path:
-    raw = DEFAULT_SIGNUP_CLAIM_PATH if path is None else path
+    raw = _default_claim_path() if path is None else path
     target = Path(raw).expanduser()
     if not target.is_absolute():
         target = Path.cwd() / target
@@ -1254,7 +1262,14 @@ class BbsClient:
         context = _tls_context(config)
         raw: socket.socket | None = None
         try:
-            raw = socket.create_connection((config.host, config.port), timeout=config.connect_timeout_s)
+            # User-configured host: allow loopback/private LAN, never metadata or link-local.
+            infos = resolve_host(
+                config.host,
+                config.port,
+                allow_loopback=True,
+                allow_private=True,
+            )
+            raw = connect_pinned(infos, timeout=config.connect_timeout_s)
             raw.settimeout(config.request_timeout_s)
             wrapped = context.wrap_socket(raw, server_hostname=config.server_name)
         except ssl.SSLError:

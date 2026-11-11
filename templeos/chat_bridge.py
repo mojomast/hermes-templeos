@@ -17,8 +17,9 @@ Environment
     ``http`` or ``https`` URL of the agent reply endpoint. Required for the
     built-in HTTP transport; its value is never echoed in errors.
 ``TEMPLEOS_CHAT_BRIDGE_TOKEN``
-    Optional bearer token sent in the ``Authorization`` header. Never logged
-    and excluded from ``repr``.
+    Optional bearer token sent in the ``Authorization`` header. Read only
+    through ``agent.secret_scope.get_secret`` (declared in ``requires_env``).
+    Never read from ``os.environ``, never logged, and excluded from ``repr``.
 ``TEMPLEOS_CHAT_BRIDGE_TIMEOUT_S``
     Optional positive request timeout; defaults to 20 seconds.
 
@@ -40,9 +41,7 @@ import os
 import threading
 from dataclasses import dataclass, field
 from typing import Any, Callable, Mapping
-from urllib import error as urlerror
-from urllib import request as urlrequest
-from urllib.parse import urlparse
+from templeos.public_http import UnsafeURL, request as pinned_request, split_url
 
 ENV_ENABLED = "TEMPLEOS_CHAT_BRIDGE"
 ENV_ENDPOINT = "TEMPLEOS_CHAT_BRIDGE_ENDPOINT"
@@ -92,11 +91,28 @@ def _endpoint(value: str | None) -> str | None:
     text = (value or "").strip()
     if not text:
         return None
-    parsed = urlparse(text)
-    if parsed.scheme not in ("http", "https") or not parsed.netloc:
+    try:
+        split_url(text)
+    except UnsafeURL as exc:
         # Never echo the configured value; it may contain credentials.
-        raise ChatBridgeError("chat bridge endpoint must be an http or https URL")
+        raise ChatBridgeError("chat bridge endpoint must be an http or https URL") from exc
     return text
+
+
+def _secret_token() -> str | None:
+    """Return the bridge token from Hermes secret scope only. Fail closed."""
+    try:
+        from agent.secret_scope import get_secret
+    except Exception:
+        return None
+    try:
+        value = get_secret(ENV_TOKEN)
+    except Exception:
+        return None
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text or None
 
 
 @dataclass(frozen=True)
@@ -114,7 +130,7 @@ class ChatBridgeConfig:
         return cls(
             enabled=_enabled(env.get(ENV_ENABLED)),
             endpoint=_endpoint(env.get(ENV_ENDPOINT)),
-            token=(env.get(ENV_TOKEN) or "").strip() or None,
+            token=_secret_token(),
             timeout_s=_timeout(env.get(ENV_TIMEOUT)),
         )
 
@@ -162,22 +178,26 @@ def _http_transport(config: ChatBridgeConfig) -> Transport:
         }
         if config.token:
             headers["Authorization"] = f"Bearer {config.token}"
-        request = urlrequest.Request(
-            config.endpoint,
-            data=json.dumps({"text": text}).encode("utf-8"),
-            headers=headers,
-            method="POST",
-        )
         try:
-            with urlrequest.urlopen(request, timeout=config.timeout_s) as response:
-                raw = response.read(MAX_REPLY_BYTES + 1)
-        except (urlerror.URLError, OSError, ValueError) as exc:
+            status, raw = pinned_request(
+                config.endpoint,
+                method="POST",
+                body=json.dumps({"text": text}).encode("utf-8"),
+                headers=headers,
+                timeout=config.timeout_s,
+                max_redirects=0,
+                allow_loopback=True,
+                allow_private=True,
+                https_only=False,
+                max_bytes=MAX_REPLY_BYTES,
+            )
+        except (UnsafeURL, OSError, ValueError, TimeoutError) as exc:
             # Deliberately no endpoint/token in the message.
-            # Drop the cause: URLError/HTTPError tracebacks can carry the
-            # configured URL, which may embed user info.
             raise ChatBridgeUnavailable(
                 f"chat bridge agent is unreachable ({type(exc).__name__})"
             ) from None
+        if status < 200 or status >= 300:
+            raise ChatBridgeUnavailable("chat bridge agent is unreachable (HTTPError)")
         if len(raw) > MAX_REPLY_BYTES:
             raise ChatBridgeUnavailable("agent reply exceeds the bridge size limit")
         return _decode_reply(raw)

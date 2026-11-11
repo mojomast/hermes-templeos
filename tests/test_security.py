@@ -34,7 +34,8 @@ def test_desktop_src_does_not_dial_loopback_or_read_tokens():
 
 def test_plugin_yaml_declares_no_secrets_and_discloses_qemu():
     text = (ROOT / "plugin.yaml").read_text()
-    assert "requires_env: []" in text
+    assert "TEMPLEOS_CHAT_BRIDGE_TOKEN" in text
+    assert "requires_env: []" not in text
     assert 'requires_hermes: ">=0.23.0"' in text
     assert "qemu-system-x86_64" in text
     assert "-nic none" in text
@@ -47,3 +48,7 @@ def test_catalog_draft_is_not_a_real_pin():
     assert "draft" in draft.lower()
     assert 'requires_hermes: ">=0.23.0"' in draft
     assert "spawns qemu-system-x86_64" in draft
+    assert "-nic none" in draft
+    assert "TEMPLEOS_CHAT_BRIDGE_TOKEN" in draft
+    assert "pre_tool_call" in draft
+    assert "child hypervisor" in draft
