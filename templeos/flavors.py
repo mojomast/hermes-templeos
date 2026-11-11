@@ -29,20 +29,20 @@ DISK_SIZE = "2G"
 FLAVORS: dict[str, dict[str, Any]] = {
     "templeoh": {
         "id": "templeoh",
-        "name": "Temple of Hermes 0.1.2",
+        "name": "Temple of Hermes 0.1.3",
         "default": True,
-        "iso_filename": "TempleOfHermes-0.1.2.ISO",
-        "url": "https://github.com/mojomast/temple-of-hermes/releases/download/v0.1.2/TempleOfHermes-0.1.2.ISO",
-        "sha256": "9afc98ed2bb15a3ff26ebaca12ea392079292df6667b3c1c527fdd30d80cdb13",
-        "md5": "713d8111d5780f758538c038228023e9",
-        "bytes": 14_030_848,
+        "iso_filename": "TempleOfHermes-0.1.3.ISO",
+        "url": "https://github.com/mojomast/temple-of-hermes/releases/download/v0.1.3/TempleOfHermes-0.1.3.ISO",
+        "sha256": "fbaa3d6f0a8f9190f295e933c32cb833a61b3cb43a708309acb6c98ff51ac4fd",
+        "md5": "a43c4ac7340479a15203d0e449503425",
+        "bytes": 14_053_376,
         "width": 640,
         "height": 480,
         "bus": "ide",
         "mouse": "vmmouse",
         "serial": "comm",
         "modem": "com2",
-        "release": "v0.1.2",
+        "release": "v0.1.3",
         "hash_crop": {"x": 0, "y": 24, "w": 640, "h": 456},
     },
     "tinkeros": {
@@ -108,7 +108,7 @@ class FlavorError(ValueError):
 
 
 def get_flavor(flavor_id: str | None = None) -> dict[str, Any]:
-    """Return a copy of the flavor record. Default is Temple of Hermes 0.1.2."""
+    """Return a copy of the flavor record. Default is Temple of Hermes 0.1.3."""
     key = (flavor_id or DEFAULT).strip().lower() or DEFAULT
     key = ALIASES.get(key, key)
     if key not in FLAVORS:

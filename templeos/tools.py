@@ -122,7 +122,7 @@ SCHEMA_VM = {
         "snapshot restore status doctor modem). THE supported boot path — never dial "
         "VNC/QMP sockets yourself. Network always off; modem is serial, not a NIC. "
         "snapshot ejects non-qcow2 writables first; restore issues cont if loadvm "
-        "left the VM paused. doctor checks QEMU, ISO pins, and /dev/kvm openability. op=flavor lists or selects the guest image (default templeoh / Temple of Hermes 0.1.2; tinkeros, templeos, and zealos stay selectable), fetches the pinned ISO if needed, and applies it on the next boot if the VM is running. session_start reads the guest journal/projects summary; bbs_digest asks only the configured bbs endpoint for a compact digest. "
+        "left the VM paused. doctor checks QEMU, ISO pins, and /dev/kvm openability. op=flavor lists or selects the guest image (default templeoh / Temple of Hermes 0.1.3; tinkeros, templeos, and zealos stay selectable), fetches the pinned ISO if needed, and applies it on the next boot if the VM is running. session_start reads the guest journal/projects summary; bbs_digest asks only the configured bbs endpoint for a compact digest. "
         "Sockets are existence flags only. If deferred behind tool_search, search "
         "for templeos vm first."
     ),
@@ -137,7 +137,7 @@ SCHEMA_VM = {
             "flavor": {
                 "type": "string",
                 "enum": list(FLAVOR_IDS),
-                "description": "Guest OS. Default templeoh (Temple of Hermes 0.1.2). Optional tinkeros, templeos, zealos.",
+                "description": "Guest OS. Default templeoh (Temple of Hermes 0.1.3). Optional tinkeros, templeos, zealos.",
             },
             "name": {
                 "type": "string",

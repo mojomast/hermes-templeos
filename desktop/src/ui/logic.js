@@ -8,8 +8,8 @@ export const CONTROL_MODES = ["watch", "shared", "user"];
 export const GOLDEN_SNAPSHOT = "golden";
 
 export const FLAVOR_LABELS = {
-  templeoh: "Temple of Hermes 0.1.2",
-  "temple-of-hermes": "Temple of Hermes 0.1.2",
+  templeoh: "Temple of Hermes 0.1.3",
+  "temple-of-hermes": "Temple of Hermes 0.1.3",
   tinkeros: "TinkerOS 5.20-rc10",
   templeos: "TempleOS 5.03",
   zealos: "ZealOS",
@@ -33,7 +33,7 @@ export function guestSize(flavor, status) {
 
 export function flavorLabel(flavor, flavorName) {
   if (flavorName) return String(flavorName);
-  return FLAVOR_LABELS[flavor] || flavor || "Temple of Hermes 0.1.2";
+  return FLAVOR_LABELS[flavor] || flavor || "Temple of Hermes 0.1.3";
 }
 
 export const FLAVOR_PICKER_IDS = ["templeoh", "tinkeros", "templeos", "zealos"];

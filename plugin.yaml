@@ -1,8 +1,8 @@
 name: templeos
-version: "0.1.1"
+version: "0.2.0"
 description: >-
   Skill id templeos:templeos-operator. TempleOS runs official-family guests
-  (default Temple of Hermes 0.1.2; optional TinkerOS 5.20-rc10, stock
+  (default Temple of Hermes 0.1.3; optional TinkerOS 5.20-rc10, stock
   TempleOS 5.03, or ZealOS) in a local QEMU VM so the Hermes agent
   and the user can share the screen. The plugin spawns qemu-system-x86_64 as
   a child (KVM only when /dev/kvm can be opened, otherwise TCG) with a
@@ -67,7 +67,7 @@ config_schema:
     type: str
     default: templeoh
     description: >-
-      Guest OS image. "templeoh" (Temple of Hermes 0.1.2, default; alias
+      Guest OS image. "templeoh" (Temple of Hermes 0.1.3, default; alias
       temple-of-hermes), "tinkeros" (TinkerOS 5.20-rc10), "templeos"
       (TempleOS 5.03), or "zealos". The pane picker persists this through
       /settings. Missing ISOs are fetched from the official pinned URL and
@@ -85,7 +85,7 @@ config_schema:
     type: str
     default: ""
     description: >-
-      Optional local path to TempleOfHermes-0.1.2-disk.qcow2 instead of the
+      Optional local path to TempleOfHermes-0.1.3-disk.qcow2 instead of the
       automatic download. Checked against the pinned SHA-256 and size before
       use; the base file is never modified. TEMPLEOS_DISK_IMAGE overrides
       this path. Empty means use the downloaded official image.

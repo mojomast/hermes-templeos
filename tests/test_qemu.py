@@ -43,7 +43,7 @@ def test_build_argv_tinkeros_and_templeos_are_ide_and_airgapped(tmp_path):
 
 
 def test_build_argv_disk_boot_attaches_overlay_and_no_cdrom(tmp_path):
-    iso = tmp_path / "TempleOfHermes-0.1.2.ISO"
+    iso = tmp_path / "TempleOfHermes-0.1.3.ISO"
     overlay = tmp_path / "templeoh-disk-overlay.qcow2"
     overlay.write_bytes(b"qcow2")
     argv = qemu.build_argv(

@@ -28,12 +28,12 @@ def test_pinned_record_points_at_official_release_asset():
     rec = diskimage.record()
     assert rec["id"] == "templeoh-disk"
     assert rec["flavor"] == "templeoh"
-    assert rec["filename"] == "TempleOfHermes-0.1.2-disk.qcow2"
-    assert rec["sha256"] == "d41672fb148051f3b4d85d06895bfc0f67da0e3af539bf89bbf4933056241087"
-    assert rec["size"] == 11_082_240
+    assert rec["filename"] == "TempleOfHermes-0.1.3-disk.qcow2"
+    assert rec["sha256"] == "d81a3c189093bd0edddad50b7a55d6582d0490204d63720e14fc5fb9d901f1aa"
+    assert rec["size"] == 11_107_840
     assert rec["url"] == (
         "https://github.com/mojomast/temple-of-hermes/releases/download/"
-        "disk-image-0.1.3-preview/TempleOfHermes-0.1.2-disk.qcow2"
+        "v0.1.3/TempleOfHermes-0.1.3-disk.qcow2"
     )
     assert diskimage.FUTURE_DISK_IMAGE_URL == diskimage.DISK_IMAGE_URL
 

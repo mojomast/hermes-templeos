@@ -31,14 +31,14 @@ ENV_DISK_IMAGE = "TEMPLEOS_DISK_IMAGE"
 DISK_FLAVOR = "templeoh"
 DISK_ID = "templeoh-disk"
 
-# Pinned artifact facts from the temple-of-hermes hermes/disk-image-0.1.3
-DISK_FILENAME = "TempleOfHermes-0.1.2-disk.qcow2"
-DISK_SHA256 = "d41672fb148051f3b4d85d06895bfc0f67da0e3af539bf89bbf4933056241087"
-DISK_BYTES = 11_082_240
-# Official prerelease asset (mojomast/temple-of-hermes, tag disk-image-0.1.3-preview).
+# Pinned artifact facts from the temple-of-hermes v0.1.3 release
+DISK_FILENAME = "TempleOfHermes-0.1.3-disk.qcow2"
+DISK_SHA256 = "d81a3c189093bd0edddad50b7a55d6582d0490204d63720e14fc5fb9d901f1aa"
+DISK_BYTES = 11_107_840
+# Official release asset (mojomast/temple-of-hermes, tag v0.1.3).
 DISK_IMAGE_URL: str | None = (
     "https://github.com/mojomast/temple-of-hermes/releases/download/"
-    "disk-image-0.1.3-preview/TempleOfHermes-0.1.2-disk.qcow2"
+    "v0.1.3/TempleOfHermes-0.1.3-disk.qcow2"
 )
 # Back-compat alias for older callers/tests.
 FUTURE_DISK_IMAGE_URL: str | None = DISK_IMAGE_URL

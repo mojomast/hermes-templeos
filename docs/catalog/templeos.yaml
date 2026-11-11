@@ -7,13 +7,16 @@ repo: https://github.com/mojomast/hermes-templeos
 sha: 0000000000000000000000000000000000000000
 subdir: ""
 description: >-
-  Run a local TempleOS-family guest (default Temple of Hermes 0.1.2; optional
+  Run a local TempleOS-family guest (default Temple of Hermes 0.1.3; optional
   TinkerOS 5.20-rc10, stock TempleOS 5.03, or ZealOS) in
   QEMU so the Hermes agent and the user can share one live screen. Disclosure
   — spawns qemu-system-x86_64 as a child (KVM only when /dev/kvm can be
   opened, otherwise TCG) with a minimal non-secret child environment; may
   fetch a pinned ISO from its official HTTPS URL (SHA-256 verified,
-  connection-pinned, no proxy); injects keys and HolyC over QMP/serial;
+  connection-pinned, no proxy); by default also fetches a pinned
+  preinstalled qcow2 disk image the same way and boots it through a
+  copy-on-write overlay, falling back to the ISO (disk_image off disables
+  it); injects keys and HolyC over QMP/serial;
   transfers files over a framed COM1 protocol; keeps a background QEMU
   process; and stores disks and ISOs under plugin data. Networking is always
   off (-nic none). QEMU and ISOs are not bundled. This is a child hypervisor,
@@ -22,15 +25,18 @@ description: >-
   endpoint comes from host config, never from guest text (loopback or
   private LAN allowed only because the operator set them; metadata and
   link-local are refused). The optional TEMPLEOS_CHAT_BRIDGE_TOKEN is read
-  only through Hermes secret scope. Observer hooks animate the Terry
-  companion from session events; they return None and do not approve, modify,
-  or log other tools. The Desktop pane uses ctx.rest only. Terry is an
+  only through Hermes secret scope. Code fetched from the BBS holyc board
+  runs only inside the VM (32 KiB / 15 s caps). One pre_llm_call nudge may add
+  a single short context line (pending BBS replies/mail or a project next
+  step; at most twice a day; the nudge setting or TEMPLEOS_NUDGE turns it
+  off). Other observer hooks animate the Terry companion from session events;
+  they return None and do not approve, modify, or log other tools. The Desktop pane uses ctx.rest only. Terry is an
   original fan tribute with no official TempleOS affiliation.
 maintainer: mojomast
 tier: community
 category: desktop
 requires_hermes: ">=0.23.0"
-version: "0.1.1"
+version: "0.2.0"
 docs_url: https://github.com/mojomast/hermes-templeos#readme
 readme: true
 platforms: []
@@ -44,7 +50,7 @@ screenshots:
 known_issues:
   - "FAT floppy push is experimental; bake-off did not see hot-added FAT12 as A: on TinkerOS live CD."
   - "Primary host is Linux x86_64. Apple Silicon and Windows are untested."
-  - "Temple of Hermes 0.1.2 is the default flavor, pinned to the official GitHub release ISO; TinkerOS, TempleOS 5.03, and ZealOS remain optional. No ISO is bundled."
+  - "Temple of Hermes 0.1.3 is the default flavor, pinned to the official GitHub release ISO and a preinstalled disk image; TinkerOS, TempleOS 5.03, and ZealOS remain optional. No ISO is bundled."
 capabilities:
   provides_tools:
     - templeos_vm

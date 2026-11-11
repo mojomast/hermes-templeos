@@ -15,9 +15,9 @@ from templeos.flavors import (
 from pathlib import Path
 
 
-TOH_URL = "https://github.com/mojomast/temple-of-hermes/releases/download/v0.1.2/TempleOfHermes-0.1.2.ISO"
-TOH_SHA = "9afc98ed2bb15a3ff26ebaca12ea392079292df6667b3c1c527fdd30d80cdb13"
-TOH_BYTES = 14_030_848
+TOH_URL = "https://github.com/mojomast/temple-of-hermes/releases/download/v0.1.3/TempleOfHermes-0.1.3.ISO"
+TOH_SHA = "fbaa3d6f0a8f9190f295e933c32cb833a61b3cb43a708309acb6c98ff51ac4fd"
+TOH_BYTES = 14_053_376
 
 
 def test_default_is_templeoh_and_pins_are_64_hex():
@@ -25,12 +25,12 @@ def test_default_is_templeoh_and_pins_are_64_hex():
     assert FLAVOR_IDS == ("templeoh", "tinkeros", "templeos", "zealos")
     rec = get_flavor()
     assert rec["id"] == "templeoh"
-    assert rec["name"] == "Temple of Hermes 0.1.2"
+    assert rec["name"] == "Temple of Hermes 0.1.3"
     assert rec["default"] is True
     assert rec["url"] == TOH_URL
     assert rec["sha256"] == TOH_SHA
     assert rec["bytes"] == TOH_BYTES
-    assert rec["iso_filename"] == "TempleOfHermes-0.1.2.ISO"
+    assert rec["iso_filename"] == "TempleOfHermes-0.1.3.ISO"
     assert rec["width"] == 640 and rec["height"] == 480
     assert rec["mouse"] == "vmmouse" and rec["serial"] == "comm" and rec["bus"] == "ide"
     assert get_flavor("temple-of-hermes")["id"] == "templeoh"
