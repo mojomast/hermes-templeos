@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { TempleOSPane } from "../../desktop/src/ui/pane.js";
-import { resetTerrySession } from "../../desktop/src/ui/companion.js";
+import { resetTerrySession, TerryCompanionOverlay } from "../../desktop/src/ui/companion.js";
 import { resetFiber, rerender, flushEffects } from "./shims/jsx-runtime.mjs";
 
 function walk(node, visit) {
@@ -274,5 +274,41 @@ test("a stored manual width is restored for the pane session", () => {
   } finally {
     if (previous === undefined) delete globalThis.localStorage;
     else globalThis.localStorage = previous;
+  }
+});
+
+test("the summon label disappears as soon as the v4 canvas paints a frame", () => {
+  resetFiber();
+  resetTerrySession();
+  const previous = globalThis.window;
+  const listeners = {};
+  globalThis.window = {
+    addEventListener(type, fn) {
+      listeners[type] = listeners[type] || [];
+      listeners[type].push(fn);
+    },
+    removeEventListener(type, fn) {
+      listeners[type] = (listeners[type] || []).filter((item) => item !== fn);
+    },
+  };
+  try {
+    const props = {
+      api: { companionClip: () => new Promise(() => {}) },
+      animation: "idle",
+      costume: "base",
+      hidden: false,
+      enabled: true,
+      speech: null,
+    };
+    let node = rerender(TerryCompanionOverlay, props);
+    assert.equal(byTestId(node, "companion-loading").length, 1);
+    flushEffects();
+    assert.equal((listeners["terry-v4-drawn"] || []).length, 1);
+    listeners["terry-v4-drawn"].forEach((fn) => fn());
+    node = rerender(TerryCompanionOverlay, props);
+    assert.equal(byTestId(node, "companion-loading").length, 0);
+  } finally {
+    if (previous === undefined) delete globalThis.window;
+    else globalThis.window = previous;
   }
 });

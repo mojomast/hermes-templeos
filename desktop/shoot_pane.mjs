@@ -86,8 +86,15 @@ const frame = sampleClip(clip, DATA.time);
 if (DATA.animation === 'talking' && frame) {
   frame.variants.head_base = speechPlate(DATA.speech.events, DATA.time, frame.variants.head_base);
 }
-if (frame) renderScene(canvas, DATA, images, frame, DATA.costume);
-document.documentElement.dataset.terryV4 = 'drawn';
+if (frame) {
+  renderScene(canvas, DATA, images, frame, DATA.costume);
+  canvas.dataset.terryPainted = '1';
+  const dock = canvas.closest('[data-testid="companion-dock"]');
+  if (dock) dock.dataset.ready = '1';
+  const loading = document.querySelector('[data-testid="companion-loading"]');
+  if (loading) loading.remove();
+  document.documentElement.dataset.terryV4 = 'drawn';
+}
 </script>`;
 }
 
@@ -173,7 +180,18 @@ function page(body, script = "") {
 <body><div id="root">${body}</div>${script}
 <script>
 window.addEventListener("load", function () {
-  setTimeout(function () {
+  var started = Date.now();
+  function readyToMeasure() {
+    if (document.documentElement.dataset.terryV4 === "drawn") return true;
+    var loading = document.querySelector('[data-testid="companion-loading"]');
+    if (loading && loading.getClientRects().length && getComputedStyle(loading).display !== "none") return false;
+    return Date.now() - started >= 1200;
+  }
+  function measure() {
+    if (!readyToMeasure() && Date.now() - started < 3000) {
+      setTimeout(measure, 50);
+      return;
+    }
     var map = {
       screen: '[data-testid="screen"]',
       log: '[data-testid="agent-log"]',
@@ -187,6 +205,19 @@ window.addEventListener("load", function () {
       var r = el.getBoundingClientRect();
       out[key] = { x: r.x, y: r.y, width: r.width, height: r.height };
     });
+    var loading = document.querySelector('[data-testid="companion-loading"]');
+    out.loading = {
+      present: !!loading,
+      visible: !!(loading && loading.getClientRects().length && getComputedStyle(loading).display !== "none")
+    };
+    var bubble = document.querySelector('[data-testid="companion-bubble"]');
+    if (bubble) {
+      out.bubbleText = {
+        scrollHeight: bubble.scrollHeight,
+        clientHeight: bubble.clientHeight,
+        overflowY: getComputedStyle(bubble).overflowY
+      };
+    }
     var pre = document.createElement("pre");
     pre.id = "__layout_rects";
     pre.textContent = JSON.stringify(out);
@@ -194,7 +225,8 @@ window.addEventListener("load", function () {
     pre.style.left = "-9999px";
     pre.style.top = "0";
     document.body.appendChild(pre);
-  }, 1200);
+  }
+  setTimeout(measure, 1200);
 });
 </script>
 </body>
@@ -315,12 +347,12 @@ const shots = {
     ),
   },
   "pane-narrow.png": {
-    size: "820,1080",
+    size: "780,900",
     html: render(
       {
         theme: "hermes",
-        scale: 0.7,
-        viewport: { width: 820, height: 1080 },
+        scale: 0.9,
+        viewport: { width: 780, height: 900 },
         frameUrl: tinkeros,
         log,
         status: worldReady,

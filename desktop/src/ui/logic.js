@@ -451,6 +451,10 @@ export function logLine(event) {
 /* ---- World-class pane helpers: chips, log filters, layout ---- */
 
 export const COMPACT_BREAKPOINT_PX = 900;
+export const COMPACT_MIN_DOCK_PX = 180;
+export const SLIM_BREAKPOINT_PX = 600;
+export const SLIM_MIN_DOCK_PX = 96;
+export const SLIM_MAX_DOCK_PX = 150;
 
 export const LOG_FILTERS = Object.freeze(["all", "tools", "user", "errors"]);
 
@@ -543,26 +547,30 @@ export function paneLayoutMode(width) {
   return value <= COMPACT_BREAKPOINT_PX ? "compact" : "wide";
 }
 
-/** Deterministic model of the CSS grid: adjacent boxes never overlap. */
+/** Terry's column width for a pane width. It is always on the right:
+ *  full rail at wide sizes, a >=180px rail at the compact breakpoint, and a
+ *  slim right strip only below ~600px. Never a row below the screen/log. */
+export function companionColumnWidth(width) {
+  const value = Math.max(0, Number(width) || 0);
+  if (value < SLIM_BREAKPOINT_PX) {
+    return Math.max(SLIM_MIN_DOCK_PX, Math.min(SLIM_MAX_DOCK_PX, value * 0.18));
+  }
+  if (value <= COMPACT_BREAKPOINT_PX) {
+    return Math.max(COMPACT_MIN_DOCK_PX, Math.min(520, value * 0.23));
+  }
+  return Math.max(300, Math.min(520, value * 0.34));
+}
+
+/** Deterministic model of the CSS grid: adjacent boxes never overlap.
+ *  Screen and log share the left column; Terry keeps the full-height right
+ *  column at every width, including the slim strip below 600px. */
 export function layoutRegions(metrics = {}) {
   const width = Math.max(0, Number(metrics.width) || 0);
   const height = Math.max(0, Number(metrics.height) || 0);
   const gap = Math.max(0, Number(metrics.gap) || 10);
   const logHeight = Math.max(0, Number(metrics.logHeight) || 0);
   const mode = paneLayoutMode(width);
-  const dockWidth = Math.max(0, Math.min(520, Math.max(300, width * 0.34)));
-  if (mode === "compact") {
-    const dockHeight = Math.max(0, Math.min(180, Math.max(120, height * 0.22)));
-    const stageHeight = Math.max(0, height - dockHeight - gap);
-    const screenHeight = Math.max(0, stageHeight - logHeight - gap);
-    return {
-      mode: mode,
-      gap: gap,
-      screen: { x: 0, y: 0, width: width, height: screenHeight },
-      log: { x: 0, y: screenHeight + gap, width: width, height: logHeight },
-      terry: { x: 0, y: stageHeight + gap, width: width, height: dockHeight },
-    };
-  }
+  const dockWidth = companionColumnWidth(width);
   const leftWidth = Math.max(0, width - dockWidth - gap);
   const screenHeight = Math.max(0, height - logHeight - gap);
   return {

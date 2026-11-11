@@ -21,8 +21,17 @@
     "bubble": {
       "x": 1396,
       "y": 148.5,
-      "width": 364,
+      "width": 340,
       "height": 140.828125
+    },
+    "loading": {
+      "present": false,
+      "visible": false
+    },
+    "bubbleText": {
+      "scrollHeight": 139,
+      "clientHeight": 139,
+      "overflowY": "auto"
     }
   },
   "pane-1280x800.png": {
@@ -47,34 +56,52 @@
     "bubble": {
       "x": 848.96875,
       "y": 185.5,
-      "width": 364,
+      "width": 340,
       "height": 140.828125
+    },
+    "loading": {
+      "present": false,
+      "visible": false
+    },
+    "bubbleText": {
+      "scrollHeight": 139,
+      "clientHeight": 139,
+      "overflowY": "auto"
     }
   },
   "pane-narrow.png": {
     "screen": {
       "x": 8,
       "y": 270,
-      "width": 448,
-      "height": 336
+      "width": 576,
+      "height": 432
     },
     "log": {
       "x": 8,
-      "y": 633.9375,
-      "width": 448,
+      "y": 729.9375,
+      "width": 576,
       "height": 150
     },
     "terry": {
-      "x": 8,
-      "y": 905,
-      "width": 804,
-      "height": 168
+      "x": 592,
+      "y": 270,
+      "width": 180,
+      "height": 623
     },
     "bubble": {
-      "x": 13,
-      "y": 908,
-      "width": 360,
-      "height": 90
+      "x": 597,
+      "y": 273,
+      "width": 170,
+      "height": 240.625
+    },
+    "loading": {
+      "present": false,
+      "visible": false
+    },
+    "bubbleText": {
+      "scrollHeight": 239,
+      "clientHeight": 239,
+      "overflowY": "auto"
     }
   }
 }

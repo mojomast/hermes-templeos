@@ -6,9 +6,12 @@ import test from "node:test";
 
 import {
   COMPACT_BREAKPOINT_PX,
+  COMPACT_MIN_DOCK_PX,
+  companionColumnWidth,
   layoutRegions,
   paneLayoutMode,
   rectsOverlap,
+  SLIM_BREAKPOINT_PX,
 } from "../../desktop/src/ui/logic.js";
 import { TempleOSPane } from "../../desktop/src/ui/pane.js";
 import { resetFiber, rerender } from "./shims/jsx-runtime.mjs";
@@ -89,16 +92,46 @@ test("wide: Terry is a full-height column beside the screen+log column", () => {
   }
 });
 
-test("narrow: screen+log stay in row 1 and Terry docks below without overlap", () => {
-  const regions = layoutRegions({ width: 800, height: 1080, logHeight: 150, gap: 8 });
-  assert.equal(regions.mode, "compact");
-  assert.equal(regions.screen.x, 0);
-  assert.equal(regions.screen.width, 800);
-  assert.ok(regions.screen.height > 0);
-  assert.equal(regions.terry.y >= regions.log.y + regions.log.height, true);
-  assert.equal(rectsOverlap(regions.screen, regions.log), false);
-  assert.equal(rectsOverlap(regions.screen, regions.terry), false);
-  assert.equal(rectsOverlap(regions.log, regions.terry), false);
+test("narrow: Terry keeps the right column, never a row below the screen/log", () => {
+  for (const size of [
+    { width: 900, height: 1000, logHeight: 150, gap: 8 },
+    { width: 780, height: 900, logHeight: 150, gap: 8 },
+    { width: 600, height: 800, logHeight: 140, gap: 8 },
+  ]) {
+    const regions = layoutRegions(size);
+    assert.equal(regions.mode, "compact");
+    assert.equal(regions.screen.x, 0);
+    assert.equal(regions.log.x, 0);
+    assert.equal(regions.screen.width, regions.log.width);
+    assert.ok(regions.screen.width > 0);
+    assert.ok(regions.screen.height > 0);
+    assert.equal(regions.terry.y, regions.screen.y);
+    assert.equal(regions.terry.height, size.height);
+    assert.ok(regions.terry.x >= regions.screen.x + regions.screen.width);
+    assert.ok(regions.terry.x >= regions.log.x + regions.log.width);
+    assert.ok(regions.terry.width >= COMPACT_MIN_DOCK_PX);
+    assert.equal(regions.log.y, regions.screen.y + regions.screen.height + regions.gap);
+    assert.equal(rectsOverlap(regions.screen, regions.log), false);
+    assert.equal(rectsOverlap(regions.screen, regions.terry), false);
+    assert.equal(rectsOverlap(regions.log, regions.terry), false);
+  }
+});
+
+test("below 600px Terry becomes a slim right-side strip, still to the right", () => {
+  for (const width of [599, 540, 480, 400]) {
+    const regions = layoutRegions({ width: width, height: 800, logHeight: 140, gap: 8 });
+    assert.equal(regions.mode, "compact");
+    assert.ok(regions.terry.width < COMPACT_MIN_DOCK_PX);
+    assert.ok(regions.terry.width > 0);
+    assert.ok(regions.terry.x >= regions.screen.x + regions.screen.width);
+    assert.ok(regions.terry.x >= regions.log.x + regions.log.width);
+    assert.equal(regions.terry.y, 0);
+    assert.equal(regions.terry.height, 800);
+    assert.equal(rectsOverlap(regions.log, regions.terry), false);
+  }
+  assert.equal(SLIM_BREAKPOINT_PX, 600);
+  assert.equal(companionColumnWidth(599) < COMPACT_MIN_DOCK_PX, true);
+  assert.equal(companionColumnWidth(600), COMPACT_MIN_DOCK_PX);
 });
 
 test("Terry control group keeps hide, costume, and the quote mute toggle", () => {
@@ -111,15 +144,26 @@ test("Terry control group keeps hide, costume, and the quote mute toggle", () =>
   assert.match(String(mute[0].props.title), /quote bubbles/i);
 });
 
-test("CSS keeps the same breakpoint and never stacks a 750px figure under the log", () => {
+test("CSS keeps Terry in a right column at every width and never docks him below", () => {
   assert.match(CSS, /@media \(max-width: 900px\)/);
-  assert.match(CSS, /\.tos-body\s*\{[^}]*grid-template-rows:\s*minmax\(0,\s*1fr\)\s+168px/s);
-  assert.match(CSS, /\.tos-pane \.tos-companion-dock\s*\{[^}]*grid-row:\s*2/s);
+  assert.match(CSS, /@media \(max-width: 599px\)/);
+  assert.match(CSS, /\.tos-body\s*\{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\)\s+minmax\(180px,\s*23%\)/s);
+  assert.match(CSS, /\.tos-pane \.tos-companion-dock\s*\{[^}]*grid-column:\s*2/s);
+  assert.match(CSS, /\.tos-pane \.tos-companion-dock\s*\{[^}]*grid-row:\s*1/s);
   assert.match(CSS, /\.tos-pane \.tos-companion-dock\s*\{[^}]*height:\s*100%/s);
   assert.match(CSS, /\.tos-companion-dock\s*\{[^}]*grid-column:\s*2/s);
   assert.match(CSS, /\.tos-stage-row\s*\{[^}]*display:\s*contents/s);
-  assert.match(CSS, /\.tos-companion-bubble\s*\{[^}]*max-width:\s*min\(100%,\s*340px\)/s);
-  assert.match(CSS, /\.tos-companion-bubble\s*\{[^}]*max-height:\s*42%/s);
-  assert.match(CSS, /\.tos-companion-bubble\s*\{[^}]*overflow:\s*auto/s);
-  assert.match(CSS, /@media \(max-width: 900px\)[\s\S]*?\.tos-companion-bubble\s*\{[^}]*max-height:\s*76px/s);
+  assert.doesNotMatch(CSS, /\.tos-companion-dock[^}]*grid-row:\s*2/s);
+  assert.doesNotMatch(CSS, /grid-template-rows:\s*minmax\(0,\s*1fr\)\s+168px/);
+  assert.match(CSS, /grid-template-columns:\s*minmax\(0,\s*1fr\)\s+clamp\(96px,\s*18vw,\s*150px\)/);
+});
+
+test("CSS bubble fits or scrolls inside Terry's column at every width", () => {
+  assert.match(CSS, /\.tos-companion-bubble\s*\{[^}]*box-sizing:\s*border-box/s);
+  assert.match(CSS, /\.tos-companion-bubble\s*\{[^}]*left:\s*7px/s);
+  assert.match(CSS, /\.tos-companion-bubble\s*\{[^}]*right:\s*7px/s);
+  assert.match(CSS, /\.tos-companion-bubble\s*\{[^}]*overflow-y:\s*auto/s);
+  assert.match(CSS, /\.tos-companion-bubble\s*\{[^}]*max-height:\s*min\(58%,\s*calc\(100%\s*-\s*14px\)\)/s);
+  assert.doesNotMatch(CSS, /max-height:\s*76px/);
+  assert.match(CSS, /\.tos-companion canvas\[data-terry-painted="1"\] \+ \.tos-companion-loading\s*\{[^}]*display:\s*none/s);
 });

@@ -559,8 +559,10 @@
 }
 
 @media (max-width: 900px) {
+  /* Narrow keeps the two-column grid: screen+log left, Terry right. */
   .tos-body {
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(0, 1fr) minmax(180px, 23%);
+    grid-template-rows: minmax(0, 1fr);
   }
   .tos-chip {
     margin-left: 0;
@@ -663,6 +665,12 @@
   pointer-events: none;
 }
 
+/* The moment the v4 rig paints its first frame the summon label is gone;
+   a real bundle error still renders its error text from JS. */
+.tos-companion canvas[data-terry-painted="1"] + .tos-companion-loading {
+  display: none;
+}
+
 .tos-companion-controls {
   display: inline-flex;
   gap: 6px;
@@ -741,25 +749,19 @@
 }
 
 @media (max-width: 900px) {
-  .tos-stage,
-  .tos-log,
-  .tos-companion-dock {
+  /* Keep Terry in the right-hand cell; never wrap him below the log. */
+  .tos-stage {
     grid-column: 1;
-    grid-row: auto;
+    grid-row: 1;
+    align-self: stretch;
     justify-self: stretch;
   }
 
-  .tos-stage {
-    align-self: start;
-  }
-
-  .tos-log {
-    order: 2;
-  }
-
   .tos-companion-dock {
-    order: 3;
-    align-self: end;
+    grid-column: 2;
+    grid-row: 1;
+    align-self: stretch;
+    justify-self: stretch;
   }
 }
 
@@ -1153,9 +1155,12 @@
   top: 7px;
   left: 7px;
   right: 7px;
+  box-sizing: border-box;
+  min-width: 0;
   max-width: min(100%, 340px);
-  max-height: 42%;
-  overflow: auto;
+  max-height: min(58%, calc(100% - 14px));
+  overflow-x: hidden;
+  overflow-y: auto;
   padding: 8px 11px;
   border-radius: 10px 10px 2px 10px;
   font-size: 13px;
@@ -1192,9 +1197,11 @@
   }
 }
 
-/* Documented narrow breakpoint. Screen+log stay in row 1; Terry becomes a
-   compact 168px dock in row 2. Nothing stacks under the log as a 750px
-   figure, and the guest screen keeps its full clickable rectangle. */
+/* Documented narrow breakpoint. The guest screen and Agent Log stay in the
+   left column and Terry keeps a full-height right column (at least 180px),
+   so he is never docked below the screen or the log. The Fit behavior scales
+   the screen into the remaining width; Terry scales proportionally inside
+   his column with the same high-resolution canvas. */
 @media (max-width: 900px) {
   .tos-pane {
     padding: 8px;
@@ -1214,8 +1221,8 @@
   }
 
   .tos-body {
-    grid-template-columns: minmax(0, 1fr);
-    grid-template-rows: minmax(0, 1fr) 168px;
+    grid-template-columns: minmax(0, 1fr) minmax(180px, 23%);
+    grid-template-rows: minmax(0, 1fr);
     gap: 8px;
   }
 
@@ -1228,16 +1235,17 @@
   }
 
   .tos-pane .tos-companion-dock {
-    grid-column: 1;
-    grid-row: 2;
+    grid-column: 2;
+    grid-row: 1;
     align-self: stretch;
     justify-self: stretch;
     order: 0;
     width: 100%;
+    min-width: 180px;
     height: 100%;
     max-height: 100%;
     min-height: 0;
-    padding: 4px 8px;
+    padding: 4px 5px;
   }
 
   .tos-pane .tos-companion {
@@ -1258,8 +1266,29 @@
     top: 2px;
     left: 4px;
     right: 4px;
-    max-height: 76px;
+    max-height: min(58%, calc(100% - 8px));
     padding: 6px 9px;
     font-size: 12px;
+  }
+}
+
+/* Only truly narrow panes (<600px) may Terry become a slim right-side strip.
+   He still stays in the right column, never below the screen or log. */
+@media (max-width: 599px) {
+  .tos-body {
+    grid-template-columns: minmax(0, 1fr) clamp(96px, 18vw, 150px);
+  }
+
+  .tos-pane .tos-companion-dock {
+    min-width: 0;
+    padding: 3px;
+  }
+
+  .tos-companion-bubble {
+    left: 3px;
+    right: 3px;
+    padding: 5px 7px;
+    font-size: 11px;
+    max-height: calc(100% - 6px);
   }
 }

@@ -144,6 +144,7 @@ function fetchBundle(api) {
 export function TerryCompanionOverlay({ api, animation, costume, hidden, enabled, speech }) {
   const canvasRef = useRef(null);
   const [ready, setReady] = useState(false);
+  const [painted, setPainted] = useState(false);
   const [error, setError] = useState("");
   const [bubble, setBubble] = useState((speech && speech.text) || "");
   const [bubbleSource, setBubbleSource] = useState("");
@@ -159,6 +160,7 @@ export function TerryCompanionOverlay({ api, animation, costume, hidden, enabled
   const clicksRef = useRef([]);
   const bubbleRef = useRef(bubble);
   const apiRef = useRef(api);
+  const paintedRef = useRef(false);
 
   const hostAnim = animation || "idle";
   apiRef.current = api;
@@ -169,6 +171,18 @@ export function TerryCompanionOverlay({ api, animation, costume, hidden, enabled
     setBubble(text);
     setBubbleSource("");
   }, [speech && speech.text, speech && speech.active]);
+
+  useEffect(() => {
+    if (typeof window === "undefined" || typeof window.addEventListener !== "function") return undefined;
+    const onDrawn = () => {
+      paintedRef.current = true;
+      setPainted(true);
+    };
+    window.addEventListener("terry-v4-drawn", onDrawn);
+    return () => {
+      if (typeof window.removeEventListener === "function") window.removeEventListener("terry-v4-drawn", onDrawn);
+    };
+  }, []);
 
   useEffect(() => {
     TerryCompanion._say = (text, opts) => {
@@ -238,6 +252,8 @@ export function TerryCompanionOverlay({ api, animation, costume, hidden, enabled
   useEffect(() => {
     if (hidden || enabled === false) {
       setReady(false);
+      setPainted(false);
+      paintedRef.current = false;
       return undefined;
     }
     let cancelled = false;
@@ -362,7 +378,12 @@ export function TerryCompanionOverlay({ api, animation, costume, hidden, enabled
               frame.variants.head_base
             );
           }
-          renderScene(canvas, bundle, bundle.images, frame, costume || "base", { time: elapsed, smoke: true });
+          const drawn = renderScene(canvas, bundle, bundle.images, frame, costume || "base", { time: elapsed, smoke: true });
+          if (drawn && !paintedRef.current) {
+            paintedRef.current = true;
+            canvas.dataset.terryPainted = "1";
+            setPainted(true);
+          }
         }
       }
       rafRef.current = requestAnimationFrame(tick);
@@ -377,7 +398,7 @@ export function TerryCompanionOverlay({ api, animation, costume, hidden, enabled
   if (enabled === false) return null;
   if (hidden) return null;
 
-  const statusText = error ? error : ready ? "" : "Summoning Terry…";
+  const statusText = error ? error : ready || painted ? "" : "Summoning Terry…";
 
   return jsxs("aside", {
     className: "tos-companion-dock",
