@@ -78,6 +78,8 @@ export function flavorShaSummary(status) {
 
 export const DISK_IMAGE_STATE_LABELS = {
   unpublished: "not published",
+  not_downloaded: "downloads on next start",
+  download_failed: "download failed, using live ISO",
   missing: "path set, file missing",
   unverified: "unverified",
   ok: "verified",
@@ -88,7 +90,7 @@ export const DISK_IMAGE_STATE_LABELS = {
 export function diskImageSummary(status) {
   const disk = (status && status.disk_image) || {};
   const enabled = !!disk.enabled;
-  const state = disk.state || (enabled ? "missing" : "unpublished");
+  const state = disk.state || (enabled ? "not_downloaded" : "disabled");
   const label = DISK_IMAGE_STATE_LABELS[state] || "unknown";
   let text;
   if (!enabled) {

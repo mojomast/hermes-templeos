@@ -1863,6 +1863,8 @@ function flavorShaSummary(status) {
 
 const DISK_IMAGE_STATE_LABELS = {
   unpublished: "not published",
+  not_downloaded: "downloads on next start",
+  download_failed: "download failed, using live ISO",
   missing: "path set, file missing",
   unverified: "unverified",
   ok: "verified",
@@ -1873,7 +1875,7 @@ const DISK_IMAGE_STATE_LABELS = {
 function diskImageSummary(status) {
   const disk = (status && status.disk_image) || {};
   const enabled = !!disk.enabled;
-  const state = disk.state || (enabled ? "missing" : "unpublished");
+  const state = disk.state || (enabled ? "not_downloaded" : "disabled");
   const label = DISK_IMAGE_STATE_LABELS[state] || "unknown";
   let text;
   if (!enabled) {
@@ -2810,11 +2812,11 @@ function defaultStatus(initial) {
     apply_on_next_boot: false,
     flavor_notice: "",
     disk_image: {
-      enabled: false,
-      state: "unpublished",
+      enabled: true,
+      state: "not_downloaded",
       verified: false,
       filename: "TempleOfHermes-0.1.2-disk.qcow2",
-      text: "Preinstalled disk off (not published)",
+      text: "Preinstalled disk: downloads on next start",
     },
     kvm: false,
     setup_needed: false,

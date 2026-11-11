@@ -223,6 +223,8 @@ def doctor(*, setup: bool = False, flavor: str | None = None) -> dict[str, Any]:
         kvm_note = f"{KVM_NODE} is absent; falling back to TCG."
 
     iso = ensure_iso(rec["id"], fetch=bool(setup))
+    if setup and diskimage.enabled():
+        diskimage.ensure_image(fetch=True)
     disk_image = diskimage.status()
     disk = disks_dir(root) / f"{rec['id']}.qcow2"
     socks = {key: path.exists() for key, path in socket_paths(root).items()}

@@ -173,6 +173,16 @@ This plugin defaults to the official [Temple of Hermes](https://github.com/mojom
 
 The optional Temple of Hermes BBS bridge is separate, host-configured, and off by default (see [Environment](#environment)).
 
+### Preinstalled disk (local storage)
+
+Temple of Hermes boots from a preinstalled disk image by default, so `C:` is
+writable and survives reboots. The plugin downloads the official
+[disk-image-0.1.3-preview](https://github.com/mojomast/temple-of-hermes/releases/tag/disk-image-0.1.3-preview)
+asset once (SHA-256 `d41672fb…1087`, 11,082,240 bytes), verifies it, and boots a
+per-user copy-on-write overlay. If the download or check fails it boots the live
+ISO. Turn it off in the pane or with `disk_image: "off"`. See
+[docs/DISK-IMAGE.md](docs/DISK-IMAGE.md).
+
 ## Architecture
 
 ```mermaid

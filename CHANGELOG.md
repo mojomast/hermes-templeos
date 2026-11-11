@@ -13,6 +13,7 @@
   a running guest switches on the next boot, with a Reboot now control.
 
 ## Unreleased
+- Temple of Hermes boots a preinstalled disk image by default (local `C:` storage). The pinned asset `TempleOfHermes-0.1.2-disk.qcow2` (SHA-256 `d41672fb148051f3b4d85d06895bfc0f67da0e3af539bf89bbf4933056241087`, 11,082,240 bytes) is downloaded once from the `disk-image-0.1.3-preview` release on doctor setup or first start, verified, and booted through a copy-on-write overlay. A failed download or verification falls back to the live ISO. Set `disk_image: "off"` or uncheck the option in the pane to disable it; `disk_image_path` can point to a local copy instead.
 - Steer agents to the four `templeos_*` tools when Hermes Tool Search defers them: a system prompt section, skill v0.1.2, and tool descriptions require `tool_search`/`skill_view` and forbid VNC/socket workarounds. Prefer `templeos_input op=holyc` for HolyC one-liners. `register()` also installs pane agent-log hooks.
 - `templeos_vm op=start` (and other running-VM ops) reattach QMP/COM1 if QEMU is still alive after a gateway restart, instead of returning `vm_already_running` with no in-process binding.
 - holyc `via=auto` types at the prompt unless `Runtime.guest_serial_ready` (host COM1 open no longer selects serial; silent drop fixed).

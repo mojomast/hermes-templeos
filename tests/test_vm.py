@@ -183,7 +183,7 @@ def test_start_boots_verified_disk_overlay_without_iso(vm_clean, monkeypatch):
     assert overlay.is_file()
 
 
-def test_start_falls_back_to_live_iso_when_disk_unpublished(vm_clean, monkeypatch):
+def test_start_falls_back_to_live_iso_when_disk_download_fails(vm_clean, monkeypatch):
     diskimage.save_config(disk_image="on")
     _pin_iso(vm_clean, monkeypatch, flavor="templeoh")
     _qmp, _serial, _proc, captured = _wire(monkeypatch)

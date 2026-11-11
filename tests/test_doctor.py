@@ -59,9 +59,9 @@ def test_doctor_reports_disk_image_states_without_fetching(tos_home, monkeypatch
     monkeypatch.setattr(doctor, "download_official", lambda *a, **k: calls.append((a, k)))
     report = doctor.doctor()
     assert calls == []
-    assert report["disk_image"]["state"] == "unpublished"
-    assert report["disk_image"]["url"] is None
-    assert report["disk_image"]["enabled"] is False
+    assert report["disk_image"]["state"] == "not_downloaded"
+    assert report["disk_image"]["url"].startswith("https://github.com/mojomast/temple-of-hermes/releases/download/")
+    assert report["disk_image"]["enabled"] is True
     assert any(c["id"] == "disk-image" for c in report["checks"])
 
     payload = b"tiny-verified-disk"
@@ -181,3 +181,21 @@ def test_find_binary_consistent_with_doctor():
     info = doctor.qemu_version()
     assert path is not None
     assert str(path) == info["path"]
+
+
+def test_doctor_setup_fetches_disk_image_when_enabled(tos_home, monkeypatch):
+    calls = []
+    monkeypatch.setattr(doctor, "ensure_iso", lambda *a, **k: {"ok": False, "state": "missing"}, raising=False)
+    monkeypatch.setattr(diskimage, "ensure_image", lambda fetch=True: calls.append(fetch) or {"ok": False})
+    try:
+        doctor.doctor(setup=True)
+    except Exception:
+        pass
+    assert calls == [True]
+    calls.clear()
+    diskimage.save_config(disk_image="off")
+    try:
+        doctor.doctor(setup=True)
+    except Exception:
+        pass
+    assert calls == []

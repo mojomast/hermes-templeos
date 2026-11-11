@@ -67,6 +67,8 @@ function frame(status) {
 }
 
 test("disk summary labels unpublished, path set and verified", () => {
+  assert.equal(diskImageSummary({ disk_image: { enabled: true, state: "not_downloaded" } }).label, "downloads on next start");
+  assert.equal(diskImageSummary({ disk_image: { enabled: true, state: "download_failed" } }).label, "download failed, using live ISO");
   assert.equal(diskImageSummary({ disk_image: { enabled: false, state: "unpublished" } }).label, "not published");
   assert.match(
     diskImageSummary({ disk_image: { enabled: true, state: "missing" } }).text,

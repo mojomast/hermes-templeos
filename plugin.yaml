@@ -74,20 +74,21 @@ config_schema:
       SHA-256 verified; a running guest switches on the next boot.
   disk_image:
     type: str
-    default: "off"
+    default: "on"
     description: >-
-      Optional preinstalled Temple of Hermes disk image with local storage
-      (C:). "off" (default) boots the live ISO; "on" boots the pinned disk
-      through a per-user copy-on-write overlay. Ignored for other flavors and
-      safe to leave off until the image is published.
+      Preinstalled Temple of Hermes disk image with local storage (C:). "on"
+      (default) downloads the official release asset once, checks the pinned
+      SHA-256 and size, and boots it through a per-user copy-on-write overlay;
+      if download or verification fails it boots the live ISO. "off" always
+      boots the live ISO. Ignored for other flavors.
   disk_image_path:
     type: str
     default: ""
     description: >-
-      Local path to the downloaded TempleOfHermes-0.1.2-disk.qcow2. Checked
-      against the pinned SHA-256 and size before use; the base file is never
-      modified. TEMPLEOS_DISK_IMAGE overrides this path. Empty means use the
-      live ISO.
+      Optional local path to TempleOfHermes-0.1.2-disk.qcow2 instead of the
+      automatic download. Checked against the pinned SHA-256 and size before
+      use; the base file is never modified. TEMPLEOS_DISK_IMAGE overrides
+      this path. Empty means use the downloaded official image.
   companion:
     type: str
     default: terry

@@ -2,12 +2,14 @@
 
 The disk is an *option* for the default ``templeoh`` flavor. Temple of Hermes
 remains the default guest; the live ISO + scratch qcow2 path is unchanged when
-this option is off or the image is not available yet.
+this option is off or the image cannot be downloaded or verified.
 
 The pinned image is never modified: when enabled, QEMU boots a per-user
 copy-on-write qcow2 overlay under the plugin data dir whose backing file is the
-verified base image. Nothing here downloads anything, and no URL is invented
-while the image has no published release asset.
+verified base image. The base is fetched once from the official GitHub
+release asset (public HTTPS, connection-pinned, no proxy) into the plugin data
+dir and must match the pinned size and SHA-256; any failure falls back to the
+live ISO.
 """
 
 from __future__ import annotations
@@ -30,13 +32,17 @@ DISK_FLAVOR = "templeoh"
 DISK_ID = "templeoh-disk"
 
 # Pinned artifact facts from the temple-of-hermes hermes/disk-image-0.1.3
-# branch (docs/DISK-IMAGE.md). The image is not published yet, so the URL
-# stays None until a release asset exists.
 DISK_FILENAME = "TempleOfHermes-0.1.2-disk.qcow2"
 DISK_SHA256 = "d41672fb148051f3b4d85d06895bfc0f67da0e3af539bf89bbf4933056241087"
 DISK_BYTES = 11_082_240
-# FUTURE_DISK_IMAGE_URL: set this single constant when the image is published.
-FUTURE_DISK_IMAGE_URL: str | None = None
+# Official prerelease asset (mojomast/temple-of-hermes, tag disk-image-0.1.3-preview).
+DISK_IMAGE_URL: str | None = (
+    "https://github.com/mojomast/temple-of-hermes/releases/download/"
+    "disk-image-0.1.3-preview/TempleOfHermes-0.1.2-disk.qcow2"
+)
+# Back-compat alias for older callers/tests.
+FUTURE_DISK_IMAGE_URL: str | None = DISK_IMAGE_URL
+DEFAULT_DISK_IMAGE = "on"
 
 _MODE = 0o600
 _HASH_CHUNK = 1024 * 1024
@@ -50,14 +56,14 @@ run_command = _default_run
 
 
 def record() -> dict[str, Any]:
-    """Pinned disk-image facts. ``url`` is None until a release exists."""
+    """Pinned disk-image facts (official release asset URL, size, SHA-256)."""
     return {
         "id": DISK_ID,
         "flavor": DISK_FLAVOR,
         "filename": DISK_FILENAME,
         "sha256": DISK_SHA256,
         "size": DISK_BYTES,
-        "url": FUTURE_DISK_IMAGE_URL,
+        "url": DISK_IMAGE_URL,
     }
 
 
@@ -91,9 +97,9 @@ def load_config() -> dict[str, Any]:
     """Persisted option plus the env override. Never touches the filesystem."""
     data = _read_settings()
     try:
-        enabled = _on_off(data.get("disk_image", "off"))
+        enabled = _on_off(data.get("disk_image", DEFAULT_DISK_IMAGE))
     except ValueError:
-        enabled = "off"
+        enabled = DEFAULT_DISK_IMAGE
     path = str(data.get("disk_image_path") or "").strip()
     env_path = str(os.environ.get(ENV_DISK_IMAGE) or "").strip()
     return {
@@ -129,6 +135,48 @@ def configured_path() -> str:
     return str(load_config()["effective_path"] or "")
 
 
+def cached_path(root: Path | None = None) -> Path:
+    """Where the downloaded official base image lives (never modified)."""
+    return disks_dir(root) / DISK_FILENAME
+
+
+def _download(url: str, dest: Path) -> Path:
+    from templeos.doctor import download_official
+
+    return download_official(url, dest, expected_sha256=DISK_SHA256, expected_bytes=DISK_BYTES)
+
+
+download_image = _download
+
+
+def ensure_image(*, fetch: bool = True) -> dict[str, Any]:
+    """Verify the configured or cached image; download the official pin if allowed.
+
+    Never raises: a failed download or verification returns a structured
+    status so callers fall back to the live ISO.
+    """
+    info = verify()
+    if info["ok"] or info.get("path_set") or not fetch:
+        return info
+    rec = record()
+    if not rec["url"]:
+        return info
+    dest = cached_path()
+    try:
+        download_image(str(rec["url"]), dest)
+    except Exception as exc:  # network, TLS, size or SHA-256 failure
+        dest.unlink(missing_ok=True)
+        return {
+            **info,
+            "ok": False,
+            "state": "download_failed",
+            "code": "disk_image_download_failed",
+            "message": f"Preinstalled disk download failed: {type(exc).__name__}.",
+            "fix": "Check network access to github.com, or set disk_image off to boot the live ISO.",
+        }
+    return verify()
+
+
 def sha256_file(path: Path) -> str:
     digest = hashlib.sha256()
     with Path(path).open("rb") as handle:
@@ -148,6 +196,10 @@ def verify(path: str | os.PathLike[str] | None = None) -> dict[str, Any]:
     """
     rec = record()
     raw = str(path or configured_path() or "").strip()
+    from_cache = False
+    if not raw and cached_path().is_file():
+        raw = str(cached_path())
+        from_cache = True
     base = {
         "id": rec["id"],
         "filename": rec["filename"],
@@ -156,6 +208,19 @@ def verify(path: str | os.PathLike[str] | None = None) -> dict[str, Any]:
         "url": rec["url"],
     }
     if not raw:
+        if rec["url"]:
+            return {
+                **base,
+                "ok": False,
+                "state": "not_downloaded",
+                "code": "disk_image_not_downloaded",
+                "path": None,
+                "sha256": None,
+                "bytes": None,
+                "path_set": False,
+                "message": "The preinstalled disk image has not been downloaded yet.",
+                "fix": "Run templeos_vm op=doctor setup or start the VM to fetch the pinned image.",
+            }
         if rec["url"] is None:
             return {
                 **base,
@@ -194,7 +259,7 @@ def verify(path: str | os.PathLike[str] | None = None) -> dict[str, Any]:
             "path": str(image),
             "sha256": None,
             "bytes": None,
-            "path_set": True,
+            "path_set": not from_cache,
             "message": "The configured preinstalled disk image is missing.",
             "fix": "Download the pinned image and point disk_image_path at it.",
         }
@@ -208,7 +273,7 @@ def verify(path: str | os.PathLike[str] | None = None) -> dict[str, Any]:
             "path": str(image),
             "sha256": None,
             "bytes": size,
-            "path_set": True,
+            "path_set": not from_cache,
             "message": (
                 f"Disk image size {size} does not match the pinned {rec['size']} bytes."
             ),
@@ -224,7 +289,7 @@ def verify(path: str | os.PathLike[str] | None = None) -> dict[str, Any]:
             "path": str(image),
             "sha256": digest,
             "bytes": size,
-            "path_set": True,
+            "path_set": not from_cache,
             "message": "Disk image SHA-256 does not match the pinned hash.",
             "fix": "Replace the file with the official pinned download.",
         }
@@ -236,7 +301,7 @@ def verify(path: str | os.PathLike[str] | None = None) -> dict[str, Any]:
         "path": str(image),
         "sha256": digest,
         "bytes": size,
-        "path_set": True,
+        "path_set": not from_cache,
         "message": "Preinstalled disk image verified.",
         "fix": None,
     }
@@ -253,6 +318,8 @@ def status() -> dict[str, Any]:
             text = "Off; verified disk image available. Temple of Hermes boots the live ISO."
         elif state == "unpublished":
             text = "Off; preinstalled disk is not published yet. Temple of Hermes boots the live ISO."
+        elif state in ("not_downloaded", "download_failed"):
+            text = "Off; Temple of Hermes boots the live ISO. Turn on to download the preinstalled disk."
         elif state == "missing":
             text = "Off; disk_image_path is set but the image is missing."
         else:
@@ -261,6 +328,10 @@ def status() -> dict[str, Any]:
         text = "Verified; local storage (C:) boots from a copy-on-write overlay."
     elif state == "unpublished":
         text = "Not published yet; set disk_image_path to a verified image."
+    elif state == "not_downloaded":
+        text = "On; the official disk image downloads and verifies on the next start (live ISO until then)."
+    elif state == "download_failed":
+        text = "Download or verification failed; booting the live ISO instead."
     elif state == "missing":
         text = "disk_image_path is set but the image is missing."
     else:
@@ -351,7 +422,7 @@ def create_overlay(
     return ensure_overlay(base, overlay, replace=replace)
 
 
-def boot_plan(flavor_id: str | None = None) -> dict[str, Any]:
+def boot_plan(flavor_id: str | None = None, *, fetch: bool = True) -> dict[str, Any]:
     """Decide whether to boot the disk overlay or the normal live ISO.
 
     Returns ``mode="disk"`` only for the default Temple of Hermes flavor when the
@@ -372,6 +443,12 @@ def boot_plan(flavor_id: str | None = None) -> dict[str, Any]:
         }
     if not info["enabled"]:
         return {"mode": "iso", "enabled": False, "reason": "option_off", "status": info}
+    if not info["verified"] and fetch and not info.get("path_set"):
+        fetched = ensure_image(fetch=True)
+        info = status()
+        if not fetched.get("ok") and fetched.get("state") == "download_failed":
+            info = {**info, "verified": False, "state": "download_failed",
+                    "code": fetched.get("code"), "text": "Download or verification failed; booting the live ISO instead."}
     if not info["verified"]:
         return {
             "mode": "iso",
