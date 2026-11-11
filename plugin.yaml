@@ -72,6 +72,23 @@ config_schema:
       (TempleOS 5.03), or "zealos". The pane picker persists this through
       /settings. Missing ISOs are fetched from the official pinned URL and
       SHA-256 verified; a running guest switches on the next boot.
+  disk_image:
+    type: str
+    default: "on"
+    description: >-
+      Preinstalled Temple of Hermes disk image with local storage (C:). "on"
+      (default) downloads the official release asset once, checks the pinned
+      SHA-256 and size, and boots it through a per-user copy-on-write overlay;
+      if download or verification fails it boots the live ISO. "off" always
+      boots the live ISO. Ignored for other flavors.
+  disk_image_path:
+    type: str
+    default: ""
+    description: >-
+      Optional local path to TempleOfHermes-0.1.2-disk.qcow2 instead of the
+      automatic download. Checked against the pinned SHA-256 and size before
+      use; the base file is never modified. TEMPLEOS_DISK_IMAGE overrides
+      this path. Empty means use the downloaded official image.
   companion:
     type: str
     default: terry

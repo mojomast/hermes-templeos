@@ -19,7 +19,7 @@ from collections import deque
 from datetime import datetime, timezone
 from typing import Any, Callable
 
-from templeos import PLUGIN_ID, __version__
+from templeos import PLUGIN_ID, __version__, diskimage
 from templeos.arbiter import get_arbiter
 from templeos.flavors import DEFAULT, FLAVOR_IDS, FlavorError, get_flavor
 from templeos.settings import apply_flavor_choice, flavor_status, load_preferred, save_preferred
@@ -350,6 +350,10 @@ def _attach_flavor_settings(body: dict[str, Any]) -> dict[str, Any]:
     body["flavor_sha256"] = info.get("sha256")
     body["apply_on_next_boot"] = bool(info.get("apply_on_next_boot"))
     body["flavor_notice"] = info.get("notice")
+    try:
+        body["disk_image"] = diskimage.status()
+    except Exception:
+        body["disk_image"] = None
     if not body.get("running"):
         _apply_flavor_dims(body, preferred)
     return body
@@ -984,15 +988,33 @@ def _frame_since(request: Any) -> str | None:
 
 
 def settings_payload(body: dict[str, Any] | None = None) -> dict[str, Any]:
-    """Get or set the persisted guest-image choice via ctx.rest /settings."""
+    """Get or set the persisted guest-image choice via ctx.rest /settings.
+
+    Also persists the optional preinstalled Temple of Hermes disk toggle and
+    path. No tool schema changes: the pane keeps using this existing route.
+    """
     body = body or {}
+    disk_touched = "disk_image" in body or "disk_image_path" in body
+    if disk_touched:
+        try:
+            diskimage.save_config(
+                disk_image=body.get("disk_image") if "disk_image" in body else None,
+                disk_image_path=body.get("disk_image_path") if "disk_image_path" in body else None,
+            )
+        except ValueError as exc:
+            return _json_err(str(exc), Code.INVALID_ARGS)
     raw = body.get("flavor")
     if raw:
         fetch_raw = body.get("fetch")
         fetch = fetch_raw not in {False, 0, "0", "false", "False", "no", "off"}
         result = apply_flavor_choice(str(raw), fetch=fetch)
         status = status_payload()
-        status["settings"] = {"flavor": result.get("preferred_flavor") or result.get("flavor")}
+        cfg = diskimage.load_config()
+        status["settings"] = {
+            "flavor": result.get("preferred_flavor") or result.get("flavor"),
+            "disk_image": cfg["disk_image"],
+            "disk_image_path": cfg["disk_image_path"],
+        }
         if result.get("iso_fetch") is not None:
             status["iso_fetch"] = result["iso_fetch"]
         if result.get("notice"):
@@ -1008,9 +1030,17 @@ def settings_payload(body: dict[str, Any] | None = None) -> dict[str, Any]:
         return status
     info = flavor_status()
     status = status_payload()
-    status["settings"] = {"flavor": info.get("preferred_flavor")}
+    cfg = diskimage.load_config()
+    status["settings"] = {
+        "flavor": info.get("preferred_flavor"),
+        "disk_image": cfg["disk_image"],
+        "disk_image_path": cfg["disk_image_path"],
+    }
     if info.get("notice"):
         status["notice"] = info["notice"]
+    disk = status.get("disk_image")
+    if disk_touched and isinstance(disk, dict) and disk.get("text") and not status.get("notice"):
+        status["notice"] = disk["text"]
     return status
 
 

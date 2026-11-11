@@ -14,6 +14,7 @@ import {
   clampScreenWidth,
   filterLogEvents,
   fitGuestDisplay,
+  diskImageSummary,
   flavorLabel,
   flavorShaSummary,
   FLAVOR_LABELS,
@@ -231,10 +232,11 @@ function stateChip(testid, chip) {
 }
 
 
-function flavorPicker({ status, disabled, fetching, onChange, onApplyNow }) {
+function flavorPicker({ status, disabled, fetching, onChange, onApplyNow, onToggleDisk }) {
   const summary = flavorShaSummary(status);
   const selected = preferredFlavorId(status);
   const pending = !!status.apply_on_next_boot;
+  const disk = diskImageSummary(status);
   const options = status.flavors && status.flavors.length
     ? status.flavors
     : FLAVOR_PICKER_IDS.map((id) => ({ id, name: FLAVOR_LABELS[id] || id }));
@@ -269,6 +271,35 @@ function flavorPicker({ status, disabled, fetching, onChange, onApplyNow }) {
         title: summary.sha ? summary.name + " SHA-256 " + summary.sha : summary.label,
         children: fetching ? "Downloading and verifying SHA-256…" : summary.text,
       }),
+      selected === "templeoh"
+        ? jsxs("div", {
+            className: "tos-disk-option",
+            "data-testid": "disk-image-option",
+            children: [
+              jsxs("label", {
+                className: "tos-disk-toggle",
+                children: [
+                  jsx("input", {
+                    type: "checkbox",
+                    "data-testid": "disk-image-toggle",
+                    checked: disk.enabled,
+                    disabled: !!disabled,
+                    onChange: (event) =>
+                      onToggleDisk(!!(event && event.target && event.target.checked)),
+                  }),
+                  jsx("span", { children: "Preinstalled disk (local storage)" }),
+                ],
+              }),
+              jsx("span", {
+                className: "tos-disk-status",
+                "data-testid": "disk-image-status",
+                "data-state": disk.state,
+                title: disk.message || disk.text,
+                children: disk.text,
+              }),
+            ],
+          })
+        : null,
       pending
         ? jsxs("span", {
             className: "tos-flavor-pending",
@@ -306,6 +337,13 @@ function defaultStatus(initial) {
     flavors: [],
     apply_on_next_boot: false,
     flavor_notice: "",
+    disk_image: {
+      enabled: true,
+      state: "not_downloaded",
+      verified: false,
+      filename: "TempleOfHermes-0.1.2-disk.qcow2",
+      text: "Preinstalled disk: downloads on next start",
+    },
     kvm: false,
     setup_needed: false,
     ready: false,
@@ -676,6 +714,10 @@ export function TempleOSPane({ transport, initial } = {}) {
     return run("flavor", () => api.settings({ flavor: id, fetch: true }));
   }
 
+  function onToggleDisk(next) {
+    return run("disk-image", () => api.settings({ disk_image: next ? "on" : "off" }));
+  }
+
   function onApplyFlavorNow() {
     const id = preferredFlavorId(status);
     return run("flavor-reboot", () => {
@@ -820,6 +862,7 @@ export function TempleOSPane({ transport, initial } = {}) {
                     fetching: busy === "flavor",
                     onChange: onSelectFlavor,
                     onApplyNow: onApplyFlavorNow,
+                    onToggleDisk: onToggleDisk,
                   }),
                 ],
               }),
@@ -932,6 +975,7 @@ export function TempleOSPane({ transport, initial } = {}) {
                 fetching: busy === "flavor",
                 onChange: onSelectFlavor,
                 onApplyNow: onApplyFlavorNow,
+                onToggleDisk: onToggleDisk,
               }),
               jsx("button", { type: "button", className: "tos-btn tos-primary", "data-testid": "setup", disabled: disabled, onClick: onSetup, children: busy === "setup" ? "Setting up…" : "Set up" }),
               jsx("p", { className: "tos-hint", children: "Pick the OS image first. Set up fetches the official pin, verifies SHA-256, and reports whether /dev/kvm can be opened. Then press Start. A running guest switches on the next boot." }),

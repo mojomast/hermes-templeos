@@ -67,6 +67,22 @@ def test_machine_args_are_airgapped():
         machine_args(accel="whp")
 
 
+def test_disk_args_boots_verified_overlay_without_cdrom(tmp_path):
+    iso = tmp_path / "cd.iso"
+    overlay = tmp_path / "templeoh-disk-overlay.qcow2"
+    args = disk_args("templeoh", iso, overlay, boot_from_disk=True)
+    assert "-cdrom" not in args
+    assert args[args.index("-boot") + 1].startswith("order=c")
+    drive = args[args.index("-drive") + 1]
+    assert str(overlay) in drive
+    assert "format=qcow2" in drive
+    assert "if=ide" in drive and "media=disk" in drive
+    # Other flavors keep their live-ISO path even if the flag is passed.
+    zeal = disk_args("zealos", iso, overlay, boot_from_disk=True)
+    assert "-cdrom" not in zeal
+    assert "ahci,id=ahci" in zeal
+
+
 def test_disk_and_socket_args(tmp_path):
     iso = tmp_path / "cd.iso"
     disk = tmp_path / "d.qcow2"
