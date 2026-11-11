@@ -146,6 +146,7 @@ export function TerryCompanionOverlay({ api, animation, costume, hidden, enabled
   const [ready, setReady] = useState(false);
   const [error, setError] = useState("");
   const [bubble, setBubble] = useState((speech && speech.text) || "");
+  const [bubbleSource, setBubbleSource] = useState("");
   const bundleRef = useRef(null);
   const clipsRef = useRef(new Map());
   const animRef = useRef(animation || "idle");
@@ -166,12 +167,15 @@ export function TerryCompanionOverlay({ api, animation, costume, hidden, enabled
   useEffect(() => {
     const text = speech && speech.active !== false ? String((speech && speech.text) || "") : "";
     setBubble(text);
+    setBubbleSource("");
   }, [speech && speech.text, speech && speech.active]);
 
   useEffect(() => {
     TerryCompanion._say = (text, opts) => {
       const raw = String(text || "").trim();
       setBubble(raw);
+      const quote = opts && opts.quote;
+      setBubbleSource(raw && quote && quote.source_title ? String(quote.source_title) : "");
       const live = apiRef.current;
       if (live && typeof live.companionSay === "function") {
         return Promise.resolve(live.companionSay({ say: raw, hold_s: opts && opts.hold_s })).catch(() => {});
@@ -386,6 +390,8 @@ export function TerryCompanionOverlay({ api, animation, costume, hidden, enabled
         ? jsx("div", {
             className: "tos-companion-bubble",
             "data-testid": "companion-bubble",
+            title: bubbleSource ? "Approved quote — " + bubbleSource : "Terry",
+            "data-source": bubbleSource || undefined,
             children: bubble,
           })
         : jsx("div", { className: "tos-companion-bubble-slot", "aria-hidden": "true" }),
@@ -421,7 +427,7 @@ export function TerryCompanionOverlay({ api, animation, costume, hidden, enabled
   });
 }
 
-export function CompanionControls({ hidden, onToggleHidden, costume, onCostume, costumes, enabled }) {
+export function CompanionControls({ hidden, onToggleHidden, costume, onCostume, costumes, enabled, muted, onToggleMuted }) {
   if (enabled === false) return null;
   const options = costumes && costumes.length ? costumes : ["base", "cowboy", "wizard", "chef"];
   return jsxs("div", {
@@ -437,8 +443,18 @@ export function CompanionControls({ hidden, onToggleHidden, costume, onCostume, 
         onClick: onToggleHidden,
         children: hidden ? "Show Terry" : "Hide Terry",
       }),
+      jsx("button", {
+        type: "button",
+        className: "tos-btn tos-companion-mute" + (muted ? " is-on" : ""),
+        "data-testid": "companion-mute",
+        "aria-pressed": muted ? "true" : "false",
+        title: muted ? "Unmute Terry's quote bubbles (Terry stays visible)" : "Mute Terry's quote bubbles (Terry stays visible)",
+        onClick: onToggleMuted,
+        children: muted ? "Quotes muted" : "Quotes on",
+      }),
       jsxs("label", {
         className: "tos-companion-costume",
+        title: "Choose Terry's costume",
         children: [
           jsx("span", { className: "tos-sr-only", children: "Costume" }),
           jsxs("select", {

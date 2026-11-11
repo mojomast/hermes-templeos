@@ -1,0 +1,54 @@
+PIL bbox checks (PIL only; no image is displayed or read in-model)
+
+pane-1920x1240.png:
+  screen rect (12.0,140.5)-(972.0,860.5) size=960.0x720.0
+  screen content bbox (13.0,142.0)-(970.0,859.0)
+  log rect (12.0,888.4)-(972.0,1098.4) size=960.0x210.0
+  log content bbox (26.0,894.0)-(962.0,1050.0)
+  terry rect (1388.0,140.5)-(1908.0,1229.0) size=520.0x1088.5
+  terry content bbox (1388.0,142.0)-(1907.0,1214.0)
+  bubble rect (1396.0,148.5)-(1760.0,289.3) size=364.0x140.8
+  bubble content bbox (1409.0,161.0)-(1732.0,278.0)
+  overlap screen/log: none
+  overlap screen/terry: none
+  overlap log/terry: none
+  screen/log width delta: 0.0px
+  log below screen: yes
+  bubble inside Terry column: yes
+  RESULT: PASS
+
+pane-1280x800.png:
+  screen rect (12.0,177.5)-(472.8,523.1) size=460.8x345.6
+  screen content bbox (13.0,179.0)-(471.0,521.0)
+  log rect (12.0,551.0)-(472.8,691.0) size=460.8x140.0
+  log content bbox (26.0,557.0)-(463.0,677.0)
+  terry rect (841.0,177.5)-(1268.0,789.0) size=427.0x611.5
+  terry content bbox (841.0,186.0)-(1212.0,776.0)
+  bubble rect (849.0,185.5)-(1213.0,326.3) size=364.0x140.8
+  bubble content bbox (862.0,198.0)-(1185.0,315.0)
+  overlap screen/log: none
+  overlap screen/terry: none
+  overlap log/terry: none
+  screen/log width delta: 0.0px
+  log below screen: yes
+  bubble inside Terry column: yes
+  RESULT: PASS
+
+pane-narrow.png:
+  screen rect (8.0,270.0)-(456.0,606.0) size=448.0x336.0
+  screen content bbox (9.0,271.0)-(454.0,604.0)
+  log rect (8.0,633.9)-(456.0,783.9) size=448.0x150.0
+  log content bbox (22.0,640.0)-(446.0,759.0)
+  terry rect (8.0,905.0)-(812.0,1073.0) size=804.0x168.0
+  terry content bbox (13.0,907.0)-(428.0,1064.0)
+  bubble rect (13.0,908.0)-(373.0,998.0) size=360.0x90.0
+  bubble content bbox (24.0,916.0)-(359.0,993.0)
+  overlap screen/log: none
+  overlap screen/terry: none
+  overlap log/terry: none
+  screen/log width delta: 0.0px
+  log below screen: yes
+  bubble inside Terry column: yes
+  RESULT: PASS
+
+OVERALL: PASS

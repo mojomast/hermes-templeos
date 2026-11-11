@@ -472,6 +472,7 @@ function TerryCompanionOverlay({ api, animation, costume, hidden, enabled, speec
   const [ready, setReady] = useState(false);
   const [error, setError] = useState("");
   const [bubble, setBubble] = useState((speech && speech.text) || "");
+  const [bubbleSource, setBubbleSource] = useState("");
   const bundleRef = useRef(null);
   const clipsRef = useRef(new Map());
   const animRef = useRef(animation || "idle");
@@ -492,12 +493,15 @@ function TerryCompanionOverlay({ api, animation, costume, hidden, enabled, speec
   useEffect(() => {
     const text = speech && speech.active !== false ? String((speech && speech.text) || "") : "";
     setBubble(text);
+    setBubbleSource("");
   }, [speech && speech.text, speech && speech.active]);
 
   useEffect(() => {
     TerryCompanion._say = (text, opts) => {
       const raw = String(text || "").trim();
       setBubble(raw);
+      const quote = opts && opts.quote;
+      setBubbleSource(raw && quote && quote.source_title ? String(quote.source_title) : "");
       const live = apiRef.current;
       if (live && typeof live.companionSay === "function") {
         return Promise.resolve(live.companionSay({ say: raw, hold_s: opts && opts.hold_s })).catch(() => {});
@@ -712,6 +716,8 @@ function TerryCompanionOverlay({ api, animation, costume, hidden, enabled, speec
         ? jsx("div", {
             className: "tos-companion-bubble",
             "data-testid": "companion-bubble",
+            title: bubbleSource ? "Approved quote — " + bubbleSource : "Terry",
+            "data-source": bubbleSource || undefined,
             children: bubble,
           })
         : jsx("div", { className: "tos-companion-bubble-slot", "aria-hidden": "true" }),
@@ -747,7 +753,7 @@ function TerryCompanionOverlay({ api, animation, costume, hidden, enabled, speec
   });
 }
 
-function CompanionControls({ hidden, onToggleHidden, costume, onCostume, costumes, enabled }) {
+function CompanionControls({ hidden, onToggleHidden, costume, onCostume, costumes, enabled, muted, onToggleMuted }) {
   if (enabled === false) return null;
   const options = costumes && costumes.length ? costumes : ["base", "cowboy", "wizard", "chef"];
   return jsxs("div", {
@@ -763,8 +769,18 @@ function CompanionControls({ hidden, onToggleHidden, costume, onCostume, costume
         onClick: onToggleHidden,
         children: hidden ? "Show Terry" : "Hide Terry",
       }),
+      jsx("button", {
+        type: "button",
+        className: "tos-btn tos-companion-mute" + (muted ? " is-on" : ""),
+        "data-testid": "companion-mute",
+        "aria-pressed": muted ? "true" : "false",
+        title: muted ? "Unmute Terry's quote bubbles (Terry stays visible)" : "Mute Terry's quote bubbles (Terry stays visible)",
+        onClick: onToggleMuted,
+        children: muted ? "Quotes muted" : "Quotes on",
+      }),
       jsxs("label", {
         className: "tos-companion-costume",
+        title: "Choose Terry's costume",
         children: [
           jsx("span", { className: "tos-sr-only", children: "Costume" }),
           jsxs("select", {
@@ -825,8 +841,570 @@ function nextTheme(theme) {
   return { "HERMES_PALETTE": HERMES_PALETTE, "HERMES_ASSETS": HERMES_ASSETS, "THEMES": THEMES, "nextTheme": nextTheme };
 })();
 
-// desktop/src/ui/logic.js
+// desktop/src/ui/quotes.js
 const __m5 = (function () {
+/** Approved Terry quote picker.
+ *
+ * The production list lives in desktop/terry-quotes.json and is supplied by
+ * the coordinator. Nothing here invents, scrapes, or recalls a quote: the
+ * picker only ever returns entries that were supplied by the caller's data
+ * file.
+ *
+ * Schema: [{ text: str, source_title: str, source_url: str, date?: str }]
+ */
+
+const TERRY_IDLE_INTERVAL_MS = 45000;
+const QUOTE_EVENT_KINDS = Object.freeze(["boot", "tool_success", "idle"]);
+
+function text(value) {
+  return typeof value === "string" ? value : "";
+}
+
+/** Validate one entry. Malformed entries return null and are skipped.
+ *  Approved quote text is preserved verbatim; the bubble wraps/scrolls it. */
+function normalizeQuote(entry) {
+  if (!entry || typeof entry !== "object" || Array.isArray(entry)) return null;
+  const body = text(entry.text);
+  const title = text(entry.source_title);
+  const url = text(entry.source_url);
+  if (!body.trim() || !title.trim() || !url.trim()) return null;
+  if (entry.date != null && typeof entry.date !== "string") return null;
+  return {
+    text: body,
+    source_title: title,
+    source_url: url,
+    ...(entry.date != null ? { date: entry.date } : {}),
+  };
+}
+
+/** Load an array of schema entries, ignoring everything malformed. */
+function loadQuotes(raw) {
+  if (!Array.isArray(raw)) return [];
+  const out = [];
+  for (const entry of raw) {
+    const quote = normalizeQuote(entry);
+    if (quote) out.push(quote);
+  }
+  return out;
+}
+
+function randomIndex(length, random, avoid) {
+  if (length <= 0) return -1;
+  const roll = Number(random());
+  const safe = Number.isFinite(roll) ? Math.min(0.999999, Math.max(0, roll)) : 0;
+  let index = Math.floor(safe * length);
+  if (length > 1 && index === avoid) index = (index + 1) % length;
+  return index;
+}
+
+/** Pick a random approved quote, or null when empty/malformed/muted. */
+function pickQuote(raw, options = {}) {
+  const quotes = loadQuotes(raw);
+  if (!quotes.length) return null;
+  if (options.muted) return null;
+  const index = randomIndex(quotes.length, options.random || Math.random, options.avoid);
+  if (index < 0) return null;
+  return { ...quotes[index] };
+}
+
+function quoteKindForLogEvent(event) {
+  if (!event || typeof event !== "object") return null;
+  if (event.source !== "agent") return null;
+  if (!event.tool) return null;
+  if (event.ok === false) return null;
+  return "tool_success";
+}
+
+function quoteKindForBoot(previousRunning, nextRunning) {
+  if (previousRunning === true) return null;
+  if (nextRunning !== true) return null;
+  return "boot";
+}
+
+/** Stateful, injectable wrapper used by the pane and by unit tests. */
+function createQuotePicker(raw, options = {}) {
+  let quotes = loadQuotes(raw);
+  let muted = !!options.muted;
+  let lastIndex = -1;
+  let timer = null;
+  let idleClear = null;
+  const random = typeof options.random === "function" ? options.random : Math.random;
+  const idleIntervalMs = Math.max(
+    1000,
+    Number(options.idleIntervalMs) || TERRY_IDLE_INTERVAL_MS
+  );
+
+  function stopIdle() {
+    if (timer == null) return;
+    const clear =
+      idleClear ||
+      options.clearIntervalFn ||
+      (typeof clearInterval === "function" ? clearInterval : null);
+    if (typeof clear === "function") clear(timer);
+    timer = null;
+    idleClear = null;
+  }
+
+  return {
+    get size() {
+      return quotes.length;
+    },
+    quotes() {
+      return quotes.map((quote) => ({ ...quote }));
+    },
+    isMuted() {
+      return muted;
+    },
+    setMuted(next) {
+      muted = !!next;
+      return muted;
+    },
+    toggleMuted() {
+      muted = !muted;
+      return muted;
+    },
+    pick(kind) {
+      if (muted || !quotes.length) return null;
+      const index = randomIndex(quotes.length, random, lastIndex);
+      if (index < 0) return null;
+      lastIndex = index;
+      return { ...quotes[index], kind: kind || "idle" };
+    },
+    say(sayFn, kind) {
+      if (typeof sayFn !== "function") return null;
+      const quote = this.pick(kind || "idle");
+      if (!quote) return null;
+      const opts = { kind: quote.kind, quote: { ...quote }, hold_s: 6 };
+      sayFn(quote.text, opts);
+      return quote;
+    },
+    startIdle(sayFn, idleOptions = {}) {
+      stopIdle();
+      if (typeof sayFn !== "function" || muted || !quotes.length) return null;
+      const set =
+        idleOptions.setIntervalFn ||
+        (typeof setInterval === "function" ? setInterval : null);
+      if (typeof set !== "function") return null;
+      const interval = Math.max(
+        1000,
+        Number(idleOptions.intervalMs) || idleIntervalMs
+      );
+      idleClear =
+        idleOptions.clearIntervalFn ||
+        options.clearIntervalFn ||
+        (typeof clearInterval === "function" ? clearInterval : null);
+      timer = set(() => this.say(sayFn, "idle"), interval);
+      if (timer && typeof timer.unref === "function") timer.unref();
+      return timer;
+    },
+    stopIdle,
+    idleIntervalMs,
+    replace(rawQuotes) {
+      quotes = loadQuotes(rawQuotes);
+      lastIndex = -1;
+      return quotes.length;
+    },
+  };
+}
+
+  return { "TERRY_IDLE_INTERVAL_MS": TERRY_IDLE_INTERVAL_MS, "QUOTE_EVENT_KINDS": QUOTE_EVENT_KINDS, "normalizeQuote": normalizeQuote, "loadQuotes": loadQuotes, "pickQuote": pickQuote, "quoteKindForLogEvent": quoteKindForLogEvent, "quoteKindForBoot": quoteKindForBoot, "createQuotePicker": createQuotePicker };
+})();
+
+// desktop/terry-quotes.json
+const __m6 = (function () {
+const __json = [
+  {
+    "text": "TempleOS is God's official temple. Just like Solomon's temple, this is a community focal point where offerings are made and God's oracle is consulted.",
+    "source_title": "TempleOS Charter (Doc/Charter.DD)",
+    "source_url": "https://github.com/cia-foundation/TempleOS/blob/archive/Doc/Charter.DD"
+  },
+  {
+    "text": "God said 640x480 16 color graphics is a covenant like circumcision.",
+    "source_title": "TempleOS Charter (Doc/Charter.DD)",
+    "source_url": "https://github.com/cia-foundation/TempleOS/blob/archive/Doc/Charter.DD"
+  },
+  {
+    "text": "God said His temple must be perfect.",
+    "source_title": "TempleOS Charter (Doc/Charter.DD)",
+    "source_url": "https://github.com/cia-foundation/TempleOS/blob/archive/Doc/Charter.DD"
+  },
+  {
+    "text": "The vision is the same usage model and niche as the Commodore 64 -- a non-networked, simple machine where programming was the goal, not just a means to an end.",
+    "source_title": "TempleOS Charter (Doc/Charter.DD)",
+    "source_url": "https://github.com/cia-foundation/TempleOS/blob/archive/Doc/Charter.DD"
+  },
+  {
+    "text": "It's a kayak, not a Titanic -- it will crash if you do something wrong. You quickly reboot, however.",
+    "source_title": "TempleOS Welcome (Doc/Welcome.DD)",
+    "source_url": "https://github.com/cia-foundation/TempleOS/blob/archive/Doc/Welcome.DD"
+  },
+  {
+    "text": "Low line count is the highest good, so it is easy to learn the whole thing.",
+    "source_title": "TempleOS Charter (Doc/Charter.DD)",
+    "source_url": "https://github.com/cia-foundation/TempleOS/blob/archive/Doc/Charter.DD"
+  },
+  {
+    "text": "Users should see the light at the end of the tunnel.",
+    "source_title": "TempleOS Charter (Doc/Charter.DD)",
+    "source_url": "https://github.com/cia-foundation/TempleOS/blob/archive/Doc/Charter.DD"
+  },
+  {
+    "text": "Any genius can make it complicated. Like in physics, it takes a supra-genius to make it simple.",
+    "source_title": "TempleOS Charter (Doc/Charter.DD)",
+    "source_url": "https://github.com/cia-foundation/TempleOS/blob/archive/Doc/Charter.DD"
+  },
+  {
+    "text": "We do not put any hooks for future changes. \"Perfect\" means we always act as though it is final, for all time.",
+    "source_title": "TempleOS Charter (Doc/Charter.DD)",
+    "source_url": "https://github.com/cia-foundation/TempleOS/blob/archive/Doc/Charter.DD"
+  },
+  {
+    "text": "Ring-0-only. Everything runs in kernel mode, including user applications.",
+    "source_title": "TempleOS Charter (Doc/Charter.DD)",
+    "source_url": "https://github.com/cia-foundation/TempleOS/blob/archive/Doc/Charter.DD"
+  },
+  {
+    "text": "Simplicity is a goal to keep the line count down, so it's easy to tinker with.",
+    "source_title": "TempleOS Welcome (Doc/Welcome.DD)",
+    "source_url": "https://github.com/cia-foundation/TempleOS/blob/archive/Doc/Welcome.DD"
+  },
+  {
+    "text": "I cherry-pick what it will and won't do, to make it maximally beautiful.",
+    "source_title": "TempleOS Welcome (Doc/Welcome.DD)",
+    "source_url": "https://github.com/cia-foundation/TempleOS/blob/archive/Doc/Welcome.DD"
+  },
+  {
+    "text": "Once I was no longer using standard C/C++ syntax, I decided to change everything I didn't like and call it HolyC.",
+    "source_title": "TempleOS Welcome (Doc/Welcome.DD)",
+    "source_url": "https://github.com/cia-foundation/TempleOS/blob/archive/Doc/Welcome.DD"
+  },
+  {
+    "text": "The resulting simplicity of no protections is why TempleOS has value. In facts, that's the point of TempleOS.",
+    "source_title": "TempleOS Welcome (Doc/Welcome.DD)",
+    "source_url": "https://github.com/cia-foundation/TempleOS/blob/archive/Doc/Welcome.DD"
+  },
+  {
+    "text": "I hated learning one language for command line scripts and another for programming.",
+    "source_title": "TempleOS Welcome (Doc/Welcome.DD)",
+    "source_url": "https://github.com/cia-foundation/TempleOS/blob/archive/Doc/Welcome.DD"
+  },
+  {
+    "text": "I limited it to 100,000 lines of code, forever!",
+    "source_title": "TempleOS Strategy (Doc/Strategy.DD)",
+    "source_url": "https://github.com/cia-foundation/TempleOS/blob/archive/Doc/Strategy.DD"
+  },
+  {
+    "text": "I say, \"2Gig for code should be enough.\"",
+    "source_title": "TempleOS Strategy (Doc/Strategy.DD)",
+    "source_url": "https://github.com/cia-foundation/TempleOS/blob/archive/Doc/Strategy.DD"
+  },
+  {
+    "text": "TempleOS is a motorcycle -- if you lean-over too far, a motorcycle will crash. Don't do that!",
+    "source_title": "TempleOS Strategy (Doc/Strategy.DD)",
+    "source_url": "https://github.com/cia-foundation/TempleOS/blob/archive/Doc/Strategy.DD"
+  },
+  {
+    "text": "Sometimes, I cut corners in the interest of keeping the code beautiful.",
+    "source_title": "TempleOS Strategy (Doc/Strategy.DD)",
+    "source_url": "https://github.com/cia-foundation/TempleOS/blob/archive/Doc/Strategy.DD"
+  },
+  {
+    "text": "Yes, I wrote the compiler from scratch.",
+    "source_title": "TempleOS FAQ (Doc/FAQ.DD)",
+    "source_url": "https://github.com/cia-foundation/TempleOS/blob/archive/Doc/FAQ.DD"
+  },
+  {
+    "text": "TempleOS compiles, doesn't interpret, and uses no byte code anywhere.",
+    "source_title": "TempleOS FAQ (Doc/FAQ.DD)",
+    "source_url": "https://github.com/cia-foundation/TempleOS/blob/archive/Doc/FAQ.DD"
+  },
+  {
+    "text": "God told me to stick with 640x480 16 color and single-voice 8-bit signed MIDI-like sample for sound.",
+    "source_title": "TempleOS Credits (Doc/Credits.DD)",
+    "source_url": "https://github.com/cia-foundation/TempleOS/blob/archive/Doc/Credits.DD"
+  },
+  {
+    "text": "I was chosen by God to make His temple, an operating system.",
+    "source_title": "Uses This interview: Terry Davis",
+    "source_url": "https://usesthis.com/interviews/terry.davis/",
+    "date": "2014-05-20"
+  },
+  {
+    "text": "I made a complete operating system including making the tools.",
+    "source_title": "Uses This interview: Terry Davis",
+    "source_url": "https://usesthis.com/interviews/terry.davis/",
+    "date": "2014-05-20"
+  },
+  {
+    "text": "For ten years, I worked on programming TempleOS, full time. I finished, basically, and the last year has been tiny touch-ups here and there.",
+    "source_title": "God's Lonely Programmer (VICE / Motherboard)",
+    "source_url": "https://www.vice.com/en/article/gods-lonely-programmer/",
+    "date": "2014-11-25"
+  },
+  {
+    "text": "It's really obvious what to do next, and it can keep you busy for the first ten years.",
+    "source_title": "God's Lonely Programmer (VICE / Motherboard)",
+    "source_url": "https://www.vice.com/en/article/gods-lonely-programmer/",
+    "date": "2014-11-25"
+  },
+  {
+    "text": "Is it going to be as big as Solomon's Temple? I don't know. But we'll see. What else is there?",
+    "source_title": "God's Lonely Programmer (VICE / Motherboard)",
+    "source_url": "https://www.vice.com/en/article/gods-lonely-programmer/",
+    "date": "2014-11-25"
+  },
+  {
+    "text": "I've attempted to lower the bar, so amateurs can contribute.",
+    "source_title": "The J Operating System (OSNews)",
+    "source_url": "https://www.osnews.com/story/13117/the-j-operating-system/",
+    "date": "2005-12-29"
+  },
+  {
+    "text": "I hope to recreate the dynamic environment that used to exist when the Commodore 64 was around and everyone was creating odd-ball software.",
+    "source_title": "The J Operating System (OSNews)",
+    "source_url": "https://www.osnews.com/story/13117/the-j-operating-system/",
+    "date": "2005-12-29"
+  },
+  {
+    "text": "An idiot admires complexity, a genius admires simplicity.",
+    "source_title": "Terry Davis on Simplicity (YouTube clip); also Wikiquote",
+    "source_url": "https://www.youtube.com/watch?v=k0qmkQGqpM8"
+  },
+  {
+    "text": "Write games, don't play them.",
+    "source_title": "TempleOS Demo/Games/ZoneOut.HC (Battlezone homage popup)",
+    "source_url": "https://github.com/cia-foundation/TempleOS/blob/archive/Demo/Games/ZoneOut.HC"
+  },
+  {
+    "text": "LoseThos is not a general purpose operating system, which is a fairly radical concept.",
+    "source_title": "Recreational Programming With LoseThos (OSNews), Terry writing to OSNews",
+    "source_url": "https://www.osnews.com/story/23796/recreational-programming-with-losethos/",
+    "date": "2010-09-12"
+  },
+  {
+    "text": "I enjoyed finding-out about all the internals of my Commodore 64 when I was a kid and I imagine many people today at first think \"open source\" means they will be able to get involved under the hood, only to discover it is intimidatingly complex.",
+    "source_title": "Recreational Programming With LoseThos (OSNews), Terry writing to OSNews",
+    "source_url": "https://www.osnews.com/story/23796/recreational-programming-with-losethos/",
+    "date": "2010-09-12"
+  },
+  {
+    "text": "There's no reason for another Linux, so LoseThos is fundamentally different.",
+    "source_title": "Recreational Programming With LoseThos (OSNews), Terry writing to OSNews",
+    "source_url": "https://www.osnews.com/story/23796/recreational-programming-with-losethos/",
+    "date": "2010-09-12"
+  },
+  {
+    "text": "The only reason memory protection and security exists is to protect against bugs and malware.",
+    "source_title": "Recreational Programming With LoseThos (OSNews), Terry writing to OSNews",
+    "source_url": "https://www.osnews.com/story/23796/recreational-programming-with-losethos/",
+    "date": "2010-09-12"
+  },
+  {
+    "text": "The wisdom is that opening the door to using any standards squelches innovation.",
+    "source_title": "Recreational Programming With LoseThos (OSNews), Terry writing to OSNews",
+    "source_url": "https://www.osnews.com/story/23796/recreational-programming-with-losethos/",
+    "date": "2010-09-12"
+  },
+  {
+    "text": "The multicore technique is master/slave instead of SMP. You write your programs to directly control the other cores. This is lots of fun.",
+    "source_title": "Recreational Programming With LoseThos (OSNews), Terry writing to OSNews",
+    "source_url": "https://www.osnews.com/story/23796/recreational-programming-with-losethos/",
+    "date": "2010-09-12"
+  },
+  {
+    "text": "The vision is a C64 ROM.",
+    "source_title": "Hacker News comment by TerryADavis",
+    "source_url": "https://news.ycombinator.com/item?id=9781736",
+    "date": "2015-06-26"
+  },
+  {
+    "text": "DOS and C64 had no protection and no problems.",
+    "source_title": "Hacker News comment by TerryADavis",
+    "source_url": "https://news.ycombinator.com/item?id=9781736",
+    "date": "2015-06-26"
+  },
+  {
+    "text": "I hate arbitrary buffer size limits.",
+    "source_title": "Hacker News comment by TerryADavis",
+    "source_url": "https://news.ycombinator.com/item?id=9781736",
+    "date": "2015-06-26"
+  },
+  {
+    "text": "The code is beautiful. I always break compatibility to keep it perfect.",
+    "source_title": "Hacker News comment by TerryADavis",
+    "source_url": "https://news.ycombinator.com/item?id=9781736",
+    "date": "2015-06-26"
+  },
+  {
+    "text": "You must stop assuming everything grows in size. It is done and it is a fixed size.",
+    "source_title": "Hacker News comment by TerryADavis",
+    "source_url": "https://news.ycombinator.com/item?id=9781736",
+    "date": "2015-06-26"
+  },
+  {
+    "text": "My compiler compiles 100,000 lines of code a second.",
+    "source_title": "Hacker News comment by TerryADavis",
+    "source_url": "https://news.ycombinator.com/item?id=9781622",
+    "date": "2015-06-25"
+  },
+  {
+    "text": "TempleOS is ring-0-only. No system call overhead.",
+    "source_title": "Hacker News comment by TerryADavis",
+    "source_url": "https://news.ycombinator.com/item?id=11369017",
+    "date": "2016-03-27"
+  },
+  {
+    "text": "I am a professional operating system developer. In 1990, I was hired to work on Ticketmaster's VAX operating system.",
+    "source_title": "Hacker News comment by TerryADavis",
+    "source_url": "https://news.ycombinator.com/item?id=11341441",
+    "date": "2016-03-23"
+  },
+  {
+    "text": "At Ticketmaster, I learned the first thing you write when you start on bare metal is a debugger.",
+    "source_title": "Hacker News comment by TerryADavis",
+    "source_url": "https://news.ycombinator.com/item?id=11167532",
+    "date": "2016-02-24"
+  },
+  {
+    "text": "The difference between an amateur operating system project and a professional one is writing a compiler.",
+    "source_title": "Hacker News comment by TerryADavis",
+    "source_url": "https://news.ycombinator.com/item?id=11167532",
+    "date": "2016-02-24"
+  },
+  {
+    "text": "Linux is designed like a 1970's mainframe. TempleOS is designed like a C64.",
+    "source_title": "Hacker News comment by TerryADavis",
+    "source_url": "https://news.ycombinator.com/item?id=10402757",
+    "date": "2015-10-16"
+  },
+  {
+    "text": "Every genius makes it more complicated. It takes a super-genius to make is simpler.",
+    "source_title": "Hacker News comment by TerryADavis",
+    "source_url": "https://news.ycombinator.com/item?id=10339814",
+    "date": "2015-10-06"
+  },
+  {
+    "text": "I wrote all the code from scratch, including a 20,000 line of code compiler that makes x86_64 machine code from HolyC or Asm and operates AOT and JIT.",
+    "source_title": "Hacker News comment by TerryADavis",
+    "source_url": "https://news.ycombinator.com/item?id=10061171",
+    "date": "2015-08-14"
+  },
+  {
+    "text": "My JIT mode is not interpreted. It optimizes and compiles to x86_64 machine code.",
+    "source_title": "Hacker News comment by TerryADavis",
+    "source_url": "https://news.ycombinator.com/item?id=10061171",
+    "date": "2015-08-14"
+  },
+  {
+    "text": "You might wonder why TempleOS is barely doing 640x480 at 30fps. The GPU is 2000 times faster than the CPU.",
+    "source_title": "Hacker News comment by TerryADavis",
+    "source_url": "https://news.ycombinator.com/item?id=11046692",
+    "date": "2016-02-06"
+  },
+  {
+    "text": "I am in charge of the 100,000 lines of code, myself. It is managable by one person.",
+    "source_title": "Hacker News comment by TerryADavis",
+    "source_url": "https://news.ycombinator.com/item?id=10835474",
+    "date": "2016-01-04"
+  },
+  {
+    "text": "I have an ace up my sleeve because God talks. Not just to me!",
+    "source_title": "Hacker News comment by TerryADavis",
+    "source_url": "https://news.ycombinator.com/item?id=9246953",
+    "date": "2015-03-22"
+  },
+  {
+    "text": "It's a supplemental operating system -- a new concept. You use Windows or Linux as your primary operating system and LoseThos for screwing around programming. Believe it or not, people used home computers before the Internet.",
+    "source_title": "Hacker News comment by losethos",
+    "source_url": "https://news.ycombinator.com/item?id=491568",
+    "date": "2009-02-23"
+  },
+  {
+    "text": "I don't want a literal C64 -- just the complete open simple access... but 64-bit and 3Ghz and multicored.",
+    "source_title": "Hacker News comment by TempleOS",
+    "source_url": "https://news.ycombinator.com/item?id=7817137",
+    "date": "2014-05-29"
+  },
+  {
+    "text": "I have no use for github.",
+    "source_title": "Hacker News comment by MusicOS (Terry on LoseThos)",
+    "source_url": "https://news.ycombinator.com/item?id=4466935",
+    "date": "2012-09-02"
+  },
+  {
+    "text": "I wrote 135,000 lines of code over the past 9 years, including a kernel, 64-bit compiler, graphics library, boot loaders, device drivers, editor, tools like grep, etc., and 150 demo programs. 9 years is a very long time.",
+    "source_title": "Hacker News comment by MusicOS (Terry on LoseThos)",
+    "source_url": "https://news.ycombinator.com/item?id=4466935",
+    "date": "2012-09-02"
+  },
+  {
+    "text": "My compiler for LoseThos is not very optimal, but it doesn't matter! I made many improvements, only to discover no benefit.",
+    "source_title": "Hacker News comment by MusicOS (Terry on LoseThos)",
+    "source_url": "https://news.ycombinator.com/item?id=4466755",
+    "date": "2012-09-02"
+  },
+  {
+    "text": "I do almost all of my development in TempleOS with my own compiler, editor and tools.",
+    "source_title": "Uses This interview: Terry Davis",
+    "source_url": "https://usesthis.com/interviews/terry.davis/",
+    "date": "2014-05-20"
+  },
+  {
+    "text": "It kind of developed on its own, I didn't plan it.",
+    "source_title": "God's Lonely Programmer (VICE / Motherboard)",
+    "source_url": "https://www.vice.com/en/article/gods-lonely-programmer/",
+    "date": "2014-11-25"
+  },
+  {
+    "text": "The way God works is he caused the course of my life. I can see how it's been a charmed life in some ways, so I think He planned it.",
+    "source_title": "God's Lonely Programmer (VICE / Motherboard)",
+    "source_url": "https://www.vice.com/en/article/gods-lonely-programmer/",
+    "date": "2014-11-25"
+  },
+  {
+    "text": "Today I find the people most similar to me are atheist-scientist people. The difference is God has talked to me, so I'm basically like an atheist who God has talked to.",
+    "source_title": "God's Lonely Programmer (VICE / Motherboard)",
+    "source_url": "https://www.vice.com/en/article/gods-lonely-programmer/",
+    "date": "2014-11-25"
+  },
+  {
+    "text": "The vision for LoseThos is a 64-bit Commodore 64 that's a thousand times faster than the original and has a shell that is C/C++ instead of BASIC. It's for recreational programming.",
+    "source_title": "LoseThos 64-Bit Operating System (Terry's site, archived)",
+    "source_url": "https://web.archive.org/web/20111008223814/http://www.losethos.com/",
+    "date": "2011-10-08"
+  },
+  {
+    "text": "I'm a rocket scientist, though not a very good one.",
+    "source_title": "LoseThos 64-Bit Operating System (Terry's site, archived)",
+    "source_url": "https://web.archive.org/web/20111008223814/http://www.losethos.com/",
+    "date": "2011-10-08"
+  },
+  {
+    "text": "Let's be clear, I'm literally the smartest programmer that has ever lived.",
+    "source_title": "Terry Davis: literally the smartest programmer thats ever lived (YouTube)",
+    "source_url": "https://www.youtube.com/watch?v=PMJFOtjiYbM&t=0s"
+  },
+  {
+    "text": "A lot of the improvements to a language are kind of junk, but I came up with some genuine improvements.",
+    "source_title": "Terry Davis on switch statements / language improvements (YouTube)",
+    "source_url": "https://www.youtube.com/watch?v=v-2xtENq1bk&t=23s"
+  },
+  {
+    "text": "You get out of God what you put in.",
+    "source_title": "The 64 Bit Temple Operating System (YouTube)",
+    "source_url": "https://www.youtube.com/watch?v=Bz3Z5wsZrn4&t=38s"
+  },
+  {
+    "text": "If you don't have arguments you don't need parentheses for functions.",
+    "source_title": "The 64 Bit Temple Operating System (YouTube)",
+    "source_url": "https://www.youtube.com/watch?v=Bz3Z5wsZrn4&t=406s"
+  }
+];
+  return { "default": __json };
+})();
+
+// desktop/src/ui/logic.js
+const __m7 = (function () {
 /** Pure helpers for the TempleOS pane. */
 
 const DEFAULT_WIDTH = 640;
@@ -1277,11 +1855,148 @@ function logLine(event) {
   return (time ? time + "  " : "") + who + "  " + summary + suffix;
 }
 
-  return { "DEFAULT_WIDTH": DEFAULT_WIDTH, "DEFAULT_HEIGHT": DEFAULT_HEIGHT, "ZEALOS_WIDTH": ZEALOS_WIDTH, "ZEALOS_HEIGHT": ZEALOS_HEIGHT, "CONTROL_MODES": CONTROL_MODES, "GOLDEN_SNAPSHOT": GOLDEN_SNAPSHOT, "FLAVOR_LABELS": FLAVOR_LABELS, "POLL_VISIBLE_MS": POLL_VISIBLE_MS, "POLL_FOCUSED_MS": POLL_FOCUSED_MS, "POLL_IDLE_MS": POLL_IDLE_MS, "POLL_STOPPED_MS": POLL_STOPPED_MS, "POLL_HIDDEN_MS": POLL_HIDDEN_MS, "POLL_SLOW_MS": POLL_SLOW_MS, "guestSize": guestSize, "flavorLabel": flavorLabel, "integerScale": integerScale, "SCREEN_SIZE_KEY": SCREEN_SIZE_KEY, "fitGuestDisplay": fitGuestDisplay, "measureScreenSpace": measureScreenSpace, "maxScreenWidth": maxScreenWidth, "clampScreenWidth": clampScreenWidth, "parseScreenPref": parseScreenPref, "serializeScreenPref": serializeScreenPref, "screenDisplay": screenDisplay, "readStoredScreenPref": readStoredScreenPref, "writeStoredScreenPref": writeStoredScreenPref, "mapPointerToGuest": mapPointerToGuest, "modeLabel": modeLabel, "accelLabel": accelLabel, "statusSummary": statusSummary, "drivingChip": drivingChip, "firstCheck": firstCheck, "checkState": checkState, "checkMissing": checkMissing, "needsOnboarding": needsOnboarding, "pollIntervalMs": pollIntervalMs, "isReleaseHatch": isReleaseHatch, "qcodeFor": qcodeFor, "keyEventToPayload": keyEventToPayload, "nextMode": nextMode, "userMayInput": userMayInput, "formatLogTime": formatLogTime, "logLine": logLine };
+/* ---- World-class pane helpers: chips, log filters, layout ---- */
+
+const COMPACT_BREAKPOINT_PX = 900;
+
+const LOG_FILTERS = Object.freeze(["all", "tools", "user", "errors"]);
+
+function filterLogEvents(events, filter) {
+  const list = Array.isArray(events) ? events : [];
+  switch (filter) {
+    case "tools":
+      return list.filter((event) => !!(event && event.tool));
+    case "user":
+      return list.filter((event) => !!event && event.source === "user");
+    case "errors":
+      return list.filter((event) => !!event && event.ok === false);
+    default:
+      return list.slice();
+  }
+}
+
+function logToolKey(event) {
+  if (!event) return "chat";
+  const tool = String(event.tool || event.source || "").toLowerCase();
+  if (tool.includes("vm")) return "vm";
+  if (tool.includes("screen") || tool.includes("frame")) return "screen";
+  if (tool.includes("input") || tool.includes("keyboard")) return "input";
+  if (tool.includes("file") || tool.includes("serial")) return "files";
+  if (tool.includes("bbs")) return "bbs";
+  return event.source === "user" ? "user" : "chat";
+}
+
+function vmStateChip(status, loaded = true) {
+  const body = status || {};
+  if (body.vm_error || body.code === "vm_error") {
+    return { state: "error", label: "VM error", title: "The guest reported an error. Open the Agent Log for details." };
+  }
+  if (!loaded) {
+    return { state: "loading", label: "VM checking", title: "Waiting for the first status reply." };
+  }
+  if (body.starting || body.state === "starting" || body.transition === "starting") {
+    return { state: "loading", label: "VM starting", title: "QEMU is starting the guest." };
+  }
+  if (body.running) {
+    return { state: "ok", label: "VM running", title: "The guest is running." };
+  }
+  if (body.setup_needed) {
+    return { state: "warn", label: "VM not set up", title: "QEMU or the pinned ISO is missing." };
+  }
+  return { state: "idle", label: "VM stopped", title: "The guest is stopped. Press Start." };
+}
+
+function bbsChip(status, loaded = true) {
+  const body = status || {};
+  const raw = body.bbs;
+  if (!loaded) {
+    return { state: "loading", label: "BBS checking", title: "Waiting for the first status reply." };
+  }
+  if (raw && typeof raw === "object") {
+    if (raw.error) {
+      return { state: "error", label: "BBS error", title: "The BBS link reported an error. The guest still runs locally." };
+    }
+    if (raw.connected === true || raw.online === true || raw.ok === true) {
+      return { state: "ok", label: "BBS online", title: "The local BBS link is online." };
+    }
+    return { state: "idle", label: "BBS offline", title: "No BBS session is open." };
+  }
+  if (typeof raw === "string" && raw.trim()) {
+    const value = raw.trim();
+    const lower = value.toLowerCase();
+    const state = lower.includes("error") ? "error" : lower.includes("on") || lower.includes("ready") ? "ok" : "idle";
+    return { state: state, label: "BBS " + value, title: "BBS status from the guest." };
+  }
+  return { state: "empty", label: "BBS idle", title: "The BBS has not reported a session yet." };
+}
+
+function guestVersionChip(status, loaded = true) {
+  const body = status || {};
+  const raw = body.guest_version || body.version || body.flavor_name || body.flavor;
+  if (typeof raw === "string" && raw.trim()) {
+    const value = raw.trim();
+    const label = value.toLowerCase().startsWith("guest") ? value : "Guest " + value;
+    return { state: "ok", label: label, title: "Guest flavour reported by the host." };
+  }
+  if (!loaded) {
+    return { state: "loading", label: "Guest checking", title: "Waiting for the first status reply." };
+  }
+  return { state: "empty", label: "Guest unknown", title: "The host did not report a guest version." };
+}
+
+function paneLayoutMode(width) {
+  const value = Number(width);
+  if (!Number.isFinite(value) || value <= 0) return "wide";
+  return value <= COMPACT_BREAKPOINT_PX ? "compact" : "wide";
+}
+
+/** Deterministic model of the CSS grid: adjacent boxes never overlap. */
+function layoutRegions(metrics = {}) {
+  const width = Math.max(0, Number(metrics.width) || 0);
+  const height = Math.max(0, Number(metrics.height) || 0);
+  const gap = Math.max(0, Number(metrics.gap) || 10);
+  const logHeight = Math.max(0, Number(metrics.logHeight) || 0);
+  const mode = paneLayoutMode(width);
+  const dockWidth = Math.max(0, Math.min(520, Math.max(300, width * 0.34)));
+  if (mode === "compact") {
+    const dockHeight = Math.max(0, Math.min(180, Math.max(120, height * 0.22)));
+    const stageHeight = Math.max(0, height - dockHeight - gap);
+    const screenHeight = Math.max(0, stageHeight - logHeight - gap);
+    return {
+      mode: mode,
+      gap: gap,
+      screen: { x: 0, y: 0, width: width, height: screenHeight },
+      log: { x: 0, y: screenHeight + gap, width: width, height: logHeight },
+      terry: { x: 0, y: stageHeight + gap, width: width, height: dockHeight },
+    };
+  }
+  const leftWidth = Math.max(0, width - dockWidth - gap);
+  const screenHeight = Math.max(0, height - logHeight - gap);
+  return {
+    mode: mode,
+    gap: gap,
+    screen: { x: 0, y: 0, width: leftWidth, height: screenHeight },
+    log: { x: 0, y: screenHeight + gap, width: leftWidth, height: logHeight },
+    terry: { x: leftWidth + gap, y: 0, width: dockWidth, height: height },
+  };
+}
+
+function rectsOverlap(a, b, epsilon = 0) {
+  if (!a || !b) return false;
+  const pad = Math.max(0, Number(epsilon) || 0);
+  return (
+    a.x < b.x + b.width - pad &&
+    b.x < a.x + a.width - pad &&
+    a.y < b.y + b.height - pad &&
+    b.y < a.y + a.height - pad
+  );
+}
+
+  return { "DEFAULT_WIDTH": DEFAULT_WIDTH, "DEFAULT_HEIGHT": DEFAULT_HEIGHT, "ZEALOS_WIDTH": ZEALOS_WIDTH, "ZEALOS_HEIGHT": ZEALOS_HEIGHT, "CONTROL_MODES": CONTROL_MODES, "GOLDEN_SNAPSHOT": GOLDEN_SNAPSHOT, "FLAVOR_LABELS": FLAVOR_LABELS, "POLL_VISIBLE_MS": POLL_VISIBLE_MS, "POLL_FOCUSED_MS": POLL_FOCUSED_MS, "POLL_IDLE_MS": POLL_IDLE_MS, "POLL_STOPPED_MS": POLL_STOPPED_MS, "POLL_HIDDEN_MS": POLL_HIDDEN_MS, "POLL_SLOW_MS": POLL_SLOW_MS, "guestSize": guestSize, "flavorLabel": flavorLabel, "integerScale": integerScale, "SCREEN_SIZE_KEY": SCREEN_SIZE_KEY, "fitGuestDisplay": fitGuestDisplay, "measureScreenSpace": measureScreenSpace, "maxScreenWidth": maxScreenWidth, "clampScreenWidth": clampScreenWidth, "parseScreenPref": parseScreenPref, "serializeScreenPref": serializeScreenPref, "screenDisplay": screenDisplay, "readStoredScreenPref": readStoredScreenPref, "writeStoredScreenPref": writeStoredScreenPref, "mapPointerToGuest": mapPointerToGuest, "modeLabel": modeLabel, "accelLabel": accelLabel, "statusSummary": statusSummary, "drivingChip": drivingChip, "firstCheck": firstCheck, "checkState": checkState, "checkMissing": checkMissing, "needsOnboarding": needsOnboarding, "pollIntervalMs": pollIntervalMs, "isReleaseHatch": isReleaseHatch, "qcodeFor": qcodeFor, "keyEventToPayload": keyEventToPayload, "nextMode": nextMode, "userMayInput": userMayInput, "formatLogTime": formatLogTime, "logLine": logLine, "COMPACT_BREAKPOINT_PX": COMPACT_BREAKPOINT_PX, "LOG_FILTERS": LOG_FILTERS, "filterLogEvents": filterLogEvents, "logToolKey": logToolKey, "vmStateChip": vmStateChip, "bbsChip": bbsChip, "guestVersionChip": guestVersionChip, "paneLayoutMode": paneLayoutMode, "layoutRegions": layoutRegions, "rectsOverlap": rectsOverlap };
 })();
 
 // desktop/src/ui/pane.js
-const __m6 = (function () {
+const __m8 = (function () {
   const jsx = __ext3;
   const jsxs = __ext4;
   const useEffect = __ext0;
@@ -1295,30 +2010,42 @@ const __m6 = (function () {
   const isAbortError = __m0["isAbortError"];
   const getHostTransport = __m1["getHostTransport"];
   const CompanionControls = __m3["CompanionControls"];
+  const TerryCompanion = __m3["TerryCompanion"];
   const TerryCompanionOverlay = __m3["TerryCompanionOverlay"];
   const HERMES_ASSETS = __m4["HERMES_ASSETS"];
   const nextTheme = __m4["nextTheme"];
-  const GOLDEN_SNAPSHOT = __m5["GOLDEN_SNAPSHOT"];
-  const accelLabel = __m5["accelLabel"];
-  const drivingChip = __m5["drivingChip"];
-  const clampScreenWidth = __m5["clampScreenWidth"];
-  const fitGuestDisplay = __m5["fitGuestDisplay"];
-  const flavorLabel = __m5["flavorLabel"];
-  const guestSize = __m5["guestSize"];
-  const keyEventToPayload = __m5["keyEventToPayload"];
-  const logLine = __m5["logLine"];
-  const mapPointerToGuest = __m5["mapPointerToGuest"];
-  const maxScreenWidth = __m5["maxScreenWidth"];
-  const measureScreenSpace = __m5["measureScreenSpace"];
-  const checkState = __m5["checkState"];
-  const firstCheck = __m5["firstCheck"];
-  const needsOnboarding = __m5["needsOnboarding"];
-  const pollIntervalMs = __m5["pollIntervalMs"];
-  const readStoredScreenPref = __m5["readStoredScreenPref"];
-  const screenDisplay = __m5["screenDisplay"];
-  const statusSummary = __m5["statusSummary"];
-  const userMayInput = __m5["userMayInput"];
-  const writeStoredScreenPref = __m5["writeStoredScreenPref"];
+  const createQuotePicker = __m5["createQuotePicker"];
+  const quoteKindForBoot = __m5["quoteKindForBoot"];
+  const quoteKindForLogEvent = __m5["quoteKindForLogEvent"];
+  const TERRY_IDLE_INTERVAL_MS = __m5["TERRY_IDLE_INTERVAL_MS"];
+  const TERRY_QUOTES = __m6["default"];
+  const GOLDEN_SNAPSHOT = __m7["GOLDEN_SNAPSHOT"];
+  const accelLabel = __m7["accelLabel"];
+  const bbsChip = __m7["bbsChip"];
+  const drivingChip = __m7["drivingChip"];
+  const clampScreenWidth = __m7["clampScreenWidth"];
+  const filterLogEvents = __m7["filterLogEvents"];
+  const fitGuestDisplay = __m7["fitGuestDisplay"];
+  const flavorLabel = __m7["flavorLabel"];
+  const formatLogTime = __m7["formatLogTime"];
+  const guestSize = __m7["guestSize"];
+  const guestVersionChip = __m7["guestVersionChip"];
+  const keyEventToPayload = __m7["keyEventToPayload"];
+  const logToolKey = __m7["logToolKey"];
+  const mapPointerToGuest = __m7["mapPointerToGuest"];
+  const maxScreenWidth = __m7["maxScreenWidth"];
+  const measureScreenSpace = __m7["measureScreenSpace"];
+  const paneLayoutMode = __m7["paneLayoutMode"];
+  const checkState = __m7["checkState"];
+  const firstCheck = __m7["firstCheck"];
+  const needsOnboarding = __m7["needsOnboarding"];
+  const pollIntervalMs = __m7["pollIntervalMs"];
+  const readStoredScreenPref = __m7["readStoredScreenPref"];
+  const screenDisplay = __m7["screenDisplay"];
+  const statusSummary = __m7["statusSummary"];
+  const userMayInput = __m7["userMayInput"];
+  const vmStateChip = __m7["vmStateChip"];
+  const writeStoredScreenPref = __m7["writeStoredScreenPref"];
 
 function documentIsHidden() {
   return typeof document !== "undefined" && document.visibilityState === "hidden";
@@ -1380,6 +2107,136 @@ function measurePane(stage) {
   });
 }
 
+function eventKey(event, index) {
+  if (typeof event === "string") return "text:" + index + ":" + event;
+  if (event && event.id != null) return "id:" + String(event.id);
+  if (!event || typeof event !== "object") return "missing:" + index;
+  return [
+    event.at || event.ts || "",
+    event.source || "",
+    event.tool || "",
+    event.op || "",
+    event.summary || "",
+  ].join("|");
+}
+
+const ICON_PATHS = {
+  power: ["M12 3v9", "M6.6 6.6a8 8 0 1 0 10.8 0"],
+  stop: ["M5 5h14v14H5z"],
+  reset: ["M4 10a8 8 0 1 1 2.3 6.7", "M4 4v6h6"],
+  save: ["M5 4h11l3 3v13H5z", "M8 4v6h7V4", "M8 20v-6h8v6"],
+  restore: ["M20 10a8 8 0 1 0-2.3 6.7", "M20 4v6h-6"],
+  eye: ["M2 12s3.6-6 10-6 10 6 10 6-3.6 6-10 6S2 12 2 12z", "M12 9a3 3 0 1 0 0 6 3 3 0 0 0 0-6z"],
+  users: ["M8 11a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7z", "M2 21v-2a5 5 0 0 1 5-5h2a5 5 0 0 1 5 5v2", "M16 4.4a3.5 3.5 0 0 1 0 6.9", "M17.5 14a5 5 0 0 1 4.5 5v2"],
+  keyboard: ["M3 6h18v12H3z", "M7 10h.01", "M11 10h.01", "M15 10h.01", "M19 10h.01", "M7 14h10"],
+  hand: ["M8 12V5.5a1.5 1.5 0 0 1 3 0V11", "M11 11V4.5a1.5 1.5 0 0 1 3 0V11", "M14 11V5.5a1.5 1.5 0 0 1 3 0V13", "M8 11V9a1.5 1.5 0 0 0-3 0v5a7 7 0 0 0 7 7h2a5 5 0 0 0 5-5v-3"],
+  fit: ["M4 9V4h5", "M15 4h5v5", "M20 15v5h-5", "M9 20H4v-5"],
+  gear: ["M12 8.5a3.5 3.5 0 1 0 0 7 3.5 3.5 0 0 0 0-7z", "M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1-2.8 2.8-.1-.1a1.7 1.7 0 0 0-1.9-.3 1.7 1.7 0 0 0-1 1.6v.2h-4v-.2a1.7 1.7 0 0 0-1-1.6 1.7 1.7 0 0 0-1.9.3l-.1.1L4.2 17l.1-.1a1.7 1.7 0 0 0 .3-1.9A1.7 1.7 0 0 0 3 14H2.8v-4H3a1.7 1.7 0 0 0 1.6-1 1.7 1.7 0 0 0-.3-1.9L4.2 7 7 4.2l.1.1A1.7 1.7 0 0 0 9 4.6a1.7 1.7 0 0 0 1-1.6v-.2h4V3a1.7 1.7 0 0 0 1 1.6 1.7 1.7 0 0 0 1.9-.3l.1-.1L19.8 7l-.1.1a1.7 1.7 0 0 0-.3 1.9 1.7 1.7 0 0 0 1.6 1h.2v4H21a1.7 1.7 0 0 0-1.6 1z"],
+  mute: ["M11 5 6 9H3v6h3l5 4z", "M16 9a4 4 0 0 1 0 6", "M19 6a8 8 0 0 1 0 12"],
+  sound: ["M11 5 6 9H3v6h3l5 4z", "M15.5 8.5a5 5 0 0 1 0 7"],
+  follow: ["M6 3v12", "M6 15a4 4 0 0 0 4 4h8", "M15 16l3 3-3 3", "M6 3l4 4-4 4"],
+  lock: ["M6 11h12v10H6z", "M8 11V7a4 4 0 0 1 8 0v4"],
+  unlock: ["M6 11h12v10H6z", "M8 11V7a4 4 0 0 1 7.5-2"],
+  filter: ["M3 5h18l-7 8v6l-4 2v-8z"],
+  terminal: ["M4 4h16v16H4z", "M7 9l3 3-3 3", "M12 15h5"],
+};
+
+function Icon({ name, size }) {
+  const paths = ICON_PATHS[name] || ICON_PATHS.terminal;
+  return jsx("svg", {
+    className: "tos-icon",
+    viewBox: "0 0 24 24",
+    width: size || 14,
+    height: size || 14,
+    fill: "none",
+    stroke: "currentColor",
+    strokeWidth: "1.8",
+    strokeLinecap: "round",
+    strokeLinejoin: "round",
+    "aria-hidden": "true",
+    focusable: "false",
+    children: paths.map((d, index) => jsx("path", { d: d }, String(index))),
+  });
+}
+
+function actionButton(props) {
+  const label = props.label;
+  const className =
+    "tos-btn" +
+    (props.primary ? " tos-primary" : "") +
+    (props.pressed ? " is-on" : "") +
+    (props.className ? " " + props.className : "");
+  return jsxs("button", {
+    type: "button",
+    className: className,
+    "data-testid": props.testid,
+    disabled: props.disabled,
+    title: props.title || label,
+    "aria-pressed": props.pressed == null ? undefined : String(!!props.pressed),
+    onClick: props.onClick,
+    children: [
+      props.icon ? jsx(Icon, { name: props.icon }) : null,
+      jsx("span", { className: "tos-btn-label", children: label }),
+    ],
+  });
+}
+
+function logRow(event, index) {
+  if (typeof event === "string") {
+    return jsx("div", { className: "tos-log-line", children: [
+      jsx("time", { className: "tos-log-time", children: "--:--:--" }),
+      jsx("span", { className: "tos-log-icon tos-log-icon-chat", "aria-hidden": "true" }),
+      jsx("span", { className: "tos-log-summary", children: event }),
+    ] }, "text-" + index);
+  }
+  const toolKey = logToolKey(event);
+  const summary = (event && (event.summary || [event.tool, event.op].filter(Boolean).join(" "))) || "event";
+  const meta = [
+    event && event.source === "user" ? "You" : "Agent",
+    event && event.tool ? event.tool : "",
+    event && event.op ? event.op : "",
+  ].filter(Boolean).join(" · ");
+  return jsxs(
+    "div",
+    {
+      className:
+        "tos-log-line tos-log-" +
+        ((event && event.source) || "agent") +
+        (event && event.ok === false ? " is-failed" : ""),
+      "data-tool": toolKey,
+      children: [
+        jsx("time", {
+          className: "tos-log-time",
+          dateTime: event && (event.at || event.ts) ? String(event.at || event.ts) : undefined,
+          children: formatLogTime(event) || "--:--:--",
+        }),
+        jsx("span", { className: "tos-log-icon tos-log-icon-" + toolKey, "aria-hidden": "true" }),
+        jsxs("span", {
+          className: "tos-log-body",
+          children: [
+            jsx("span", { className: "tos-log-summary", children: summary }),
+            jsx("span", { className: "tos-log-meta", children: meta }),
+          ],
+        }),
+      ],
+    },
+    String((event && event.id) || index)
+  );
+}
+
+function stateChip(testid, chip) {
+  return jsx("span", {
+    className: "tos-status-chip tos-status-" + chip.state,
+    "data-testid": testid,
+    "data-state": chip.state,
+    title: chip.title,
+    children: [
+      jsx("span", { className: "tos-status-dot", "aria-hidden": "true" }),
+      jsx("span", { children: chip.label }),
+    ],
+  });
+}
+
 function defaultStatus(initial) {
   return {
     running: false,
@@ -1427,6 +2284,10 @@ function TempleOSPane({ transport, initial } = {}) {
   );
   const [theme, setTheme] = useState((initial && initial.theme) || "hermes");
   const [unchanged, setUnchanged] = useState(!!(initial && initial.unchanged));
+  const [logFilter, setLogFilter] = useState("all");
+  const [logFollow, setLogFollow] = useState(true);
+  const [quotesMuted, setQuotesMuted] = useState(!!(initial && initial.quotesMuted));
+  const [statusLoaded, setStatusLoaded] = useState(skip || !!(initial && initial.status));
   const [screenPref, setScreenPref] = useState(() => {
     if (initial && initial.screenPref) return { mode: initial.screenPref.mode === "manual" ? "manual" : "fit", width: Number(initial.screenPref.width) || 0 };
     return readStoredScreenPref();
@@ -1444,6 +2305,14 @@ function TempleOSPane({ transport, initial } = {}) {
   const prevUrl = useRef((initial && initial.frameUrl) || "");
   const shaRef = useRef((initial && initial.sha256) || "");
   const statusRef = useRef(status);
+  const runningRef = useRef(!!(initial && initial.status && initial.status.running));
+  const logScrollRef = useRef(null);
+  const logSeenRef = useRef(new Set());
+  const logHydratedRef = useRef(false);
+  const pickerRef = useRef(null);
+  if (!pickerRef.current) {
+    pickerRef.current = createQuotePicker(TERRY_QUOTES, { muted: !!quotesMuted });
+  }
   const focusedRef = useRef(focused);
   const unchangedRef = useRef(unchanged);
   const hiddenRef = useRef(hidden);
@@ -1489,6 +2358,7 @@ function TempleOSPane({ transport, initial } = {}) {
         .then((body) => {
           if (!cancelled) {
             applyStatus(body, setStatus);
+            setStatusLoaded(true);
             if (body && body.companion) {
               if (typeof body.companion.hidden === "boolean") setCompanionHidden(!!body.companion.hidden);
               if (body.companion.costume) setCompanionCostume(body.companion.costume);
@@ -1559,6 +2429,65 @@ function TempleOSPane({ transport, initial } = {}) {
   useEffect(() => {
     writeStoredScreenPref(screenPref);
   }, [screenPref.mode, screenPref.width]);
+
+  function sayQuote(text, opts) {
+    Promise.resolve(TerryCompanion.say(text, opts)).catch(() => {});
+  }
+
+  function toggleQuotesMuted() {
+    const next = !quotesMuted;
+    setQuotesMuted(next);
+    pickerRef.current.setMuted(next);
+    if (next) sayQuote("");
+  }
+
+  function onLogScroll(event) {
+    const node = event && event.currentTarget;
+    if (!node) return;
+    const distance = (Number(node.scrollHeight) || 0) - (Number(node.scrollTop) || 0) - (Number(node.clientHeight) || 0);
+    setLogFollow(distance <= 24);
+  }
+
+  useEffect(() => {
+    const picker = pickerRef.current;
+    picker.setMuted(quotesMuted);
+    if (quotesMuted || picker.size === 0) {
+      picker.stopIdle();
+      return undefined;
+    }
+    picker.startIdle(sayQuote, { intervalMs: TERRY_IDLE_INTERVAL_MS });
+    return () => picker.stopIdle();
+  }, [quotesMuted]);
+
+  useEffect(() => {
+    const kind = quoteKindForBoot(runningRef.current, !!status.running);
+    runningRef.current = !!status.running;
+    if (!kind || quotesMuted) return;
+    pickerRef.current.say(sayQuote, kind);
+  }, [status.running, quotesMuted]);
+
+  useEffect(() => {
+    const events = Array.isArray(log) ? log : [];
+    if (!logHydratedRef.current) {
+      logHydratedRef.current = true;
+      events.forEach((event, index) => logSeenRef.current.add(eventKey(event, index)));
+      return;
+    }
+    events.forEach((event, index) => {
+      const key = eventKey(event, index);
+      if (logSeenRef.current.has(key)) return;
+      logSeenRef.current.add(key);
+      if (quotesMuted) return;
+      const kind = quoteKindForLogEvent(event);
+      if (kind) pickerRef.current.say(sayQuote, kind);
+    });
+  }, [log, quotesMuted]);
+
+  useEffect(() => {
+    if (!logFollow) return;
+    const node = logScrollRef.current;
+    if (node && typeof node === "object") node.scrollTop = node.scrollHeight;
+  }, [log, logFilter, logFollow]);
 
   useEffect(() => {
     const stage = stageRef.current;
@@ -1642,6 +2571,7 @@ function TempleOSPane({ transport, initial } = {}) {
     return work()
       .then((body) => {
         applyStatus(body, setStatus);
+        if (body && typeof body === "object") setStatusLoaded(true);
         setBusy("");
         if (body && Array.isArray(body.events)) refreshLog(body);
         return body;
@@ -1721,6 +2651,13 @@ function TempleOSPane({ transport, initial } = {}) {
   spaceRef.current = box;
   const chip = statusSummary(status);
   const drive = drivingChip(status);
+  const vmChip = vmStateChip(status, statusLoaded);
+  const bbs = bbsChip(status, statusLoaded);
+  const guest = guestVersionChip(status, statusLoaded);
+  const filteredLog = filterLogEvents(log, logFilter);
+  const layoutMode = paneLayoutMode(
+    (box && box.width) || (initial && initial.viewport && initial.viewport.width) || 0
+  );
   const onboarding = needsOnboarding(status);
   const flavor = flavorLabel(status.flavor, status.flavor_name);
   const accel = accelLabel(status.accel, status.kvm);
@@ -1733,6 +2670,7 @@ function TempleOSPane({ transport, initial } = {}) {
     "data-mode": status.mode,
     "data-running": running ? "1" : "0",
     "data-theme": theme,
+    "data-layout": layoutMode,
     style: themeStyle(theme),
     children: [
       jsxs("header", {
@@ -1750,15 +2688,26 @@ function TempleOSPane({ transport, initial } = {}) {
               }),
             ],
           }),
-          jsx("span", { className: "tos-badge", "data-testid": "flavor-badge", children: flavor }),
-          jsx("span", { className: "tos-badge tos-badge-accel", "data-testid": "accel-badge", children: accel }),
-          jsx("span", { className: "tos-badge", "data-testid": "snapshot-badge", children: status.snapshot || "no snapshot" }),
-          jsx("span", {
-            className: "tos-chip",
-            "data-testid": "status-chip",
-            "data-mode": status.mode,
-            "data-paused": status.agent_paused ? "1" : "0",
-            children: chip,
+          jsxs("div", {
+            className: "tos-chips",
+            role: "group",
+            "aria-label": "Guest status",
+            children: [
+              jsx("span", { className: "tos-badge", "data-testid": "flavor-badge", title: "Guest flavour", children: flavor }),
+              jsx("span", { className: "tos-badge tos-badge-accel", "data-testid": "accel-badge", title: "Hardware acceleration", children: accel }),
+              jsx("span", { className: "tos-badge", "data-testid": "snapshot-badge", title: "Active snapshot", children: status.snapshot || "no snapshot" }),
+              stateChip("vm-state-chip", vmChip),
+              stateChip("bbs-status-chip", bbs),
+              stateChip("guest-version-chip", guest),
+              jsx("span", {
+                className: "tos-chip",
+                "data-testid": "status-chip",
+                "data-mode": status.mode,
+                "data-paused": status.agent_paused ? "1" : "0",
+                "data-state": vmChip.state,
+                children: chip,
+              }),
+            ],
           }),
           jsx("button", {
             type: "button",
@@ -1767,55 +2716,99 @@ function TempleOSPane({ transport, initial } = {}) {
             "aria-label": "Switch pane theme",
             title: theme === "hermes" ? "Switch to VGA chrome" : "Switch to Temple of Hermes theme",
             onClick: () => setTheme(nextTheme(theme)),
-            children: theme === "hermes" ? "Temple" : "VGA",
+            children: [
+              jsx(Icon, { name: "gear" }),
+              jsx("span", { className: "tos-btn-label", children: theme === "hermes" ? "Temple" : "VGA" }),
+            ],
           }),
         ],
       }),
       jsxs("div", {
-        className: "tos-bar",
+        className: "tos-toolbar",
         children: [
-          jsx("button", { type: "button", className: "tos-btn tos-primary", "data-testid": "start", disabled: disabled || running, onClick: onStart, children: busy === "start" ? "Starting…" : "Start" }),
-          jsx("button", { type: "button", className: "tos-btn", "data-testid": "stop", disabled: disabled || !running, onClick: onStop, children: "Stop" }),
-          jsx("button", { type: "button", className: "tos-btn", "data-testid": "reset", disabled: disabled || !running, onClick: onReset, children: "Reset" }),
-          jsx("button", { type: "button", className: "tos-btn", "data-testid": "snapshot-save", disabled: disabled || !running, onClick: onSave, children: "Snapshot golden" }),
-          jsx("button", { type: "button", className: "tos-btn", "data-testid": "snapshot-restore", disabled: disabled, onClick: onRestore, children: "Restore golden" }),
           jsxs("div", {
-            className: "tos-modes",
-            role: "group",
-            "aria-label": "Control mode",
+            className: "tos-bar",
+            role: "toolbar",
+            "aria-label": "TempleOS controls",
             children: [
-              modeButton("watch", "Watch", status.mode, disabled, setMode),
-              modeButton("shared", "Shared", status.mode, disabled, setMode),
-              modeButton("user", "You drive", status.mode, disabled, setMode),
+              jsxs("div", {
+                className: "tos-group",
+                role: "group",
+                "aria-label": "VM power",
+                children: [
+                  jsx("span", { className: "tos-group-label", children: "Power" }),
+                  actionButton({ testid: "start", label: busy === "start" ? "Starting…" : "Start", icon: "power", primary: true, disabled: disabled || running, onClick: onStart, title: "Start the guest" }),
+                  actionButton({ testid: "stop", label: "Stop", icon: "stop", disabled: disabled || !running, onClick: onStop, title: "Stop the guest" }),
+                  actionButton({ testid: "reset", label: "Reset", icon: "reset", disabled: disabled || !running, onClick: onReset, title: "Reset the guest" }),
+                ],
+              }),
+              jsxs("div", {
+                className: "tos-group",
+                role: "group",
+                "aria-label": "Snapshots",
+                children: [
+                  jsx("span", { className: "tos-group-label", children: "Snapshots" }),
+                  actionButton({ testid: "snapshot-save", label: busy === "save" ? "Saving…" : "Save", icon: "save", disabled: disabled || !running, onClick: onSave, title: "Save the golden snapshot" }),
+                  actionButton({ testid: "snapshot-restore", label: busy === "restore" ? "Restoring…" : "Restore", icon: "restore", disabled: disabled, onClick: onRestore, title: "Restore the golden snapshot" }),
+                ],
+              }),
+              jsxs("div", {
+                className: "tos-group",
+                role: "group",
+                "aria-label": "Input mode",
+                children: [
+                  jsx("span", { className: "tos-group-label", children: "Input" }),
+                  jsxs("div", {
+                    className: "tos-modes",
+                    role: "group",
+                    "aria-label": "Control mode",
+                    children: [
+                      modeButton("watch", "Watch", status.mode, disabled, setMode),
+                      modeButton("shared", "Shared", status.mode, disabled, setMode),
+                      modeButton("user", "You drive", status.mode, disabled, setMode),
+                    ],
+                  }),
+                  actionButton({ testid: "take-control", label: "Take control", icon: "hand", primary: true, disabled: disabled || status.mode === "user", onClick: () => setMode("take"), title: "Take the keyboard from the agent" }),
+                  actionButton({ testid: "hand-back", label: "Hand back", icon: "users", disabled: disabled || status.mode === "shared", onClick: () => setMode("handback"), title: "Hand the keyboard back to the agent" }),
+                ],
+              }),
+              jsxs("div", {
+                className: "tos-group",
+                role: "group",
+                "aria-label": "View",
+                children: [
+                  jsx("span", { className: "tos-group-label", children: "View" }),
+                  actionButton({ testid: "screen-fit", label: "Fit", icon: "fit", pressed: screenPref.mode === "fit", onClick: chooseFit, title: "Fit the guest to the pane (double-click the corner handle too)" }),
+                ],
+              }),
+              jsxs("div", {
+                className: "tos-group tos-group-terry",
+                role: "group",
+                "aria-label": "Terry companion",
+                children: [
+                  jsx("span", { className: "tos-group-label", children: "Terry" }),
+                  jsx(CompanionControls, {
+                    hidden: companionHidden,
+                    enabled: !(status.companion && status.companion.enabled === false),
+                    costume: companionCostume,
+                    costumes: (status.companion && status.companion.costumes) || ["base", "cowboy", "wizard", "chef"],
+                    muted: quotesMuted,
+                    onToggleMuted: toggleQuotesMuted,
+                    onToggleHidden: () => {
+                      setCompanionHidden((prev) => {
+                        const next = !prev;
+                        api.companionSet({ hidden: next }).catch(() => {});
+                        return next;
+                      });
+                    },
+                    onCostume: (name) => {
+                      setCompanionCostume(name);
+                      api.companionSet({ costume: name }).catch(() => {});
+                    },
+                  }),
+                ],
+              }),
             ],
-          }),
-          jsx("button", { type: "button", className: "tos-btn tos-primary", "data-testid": "take-control", disabled: disabled || status.mode === "user", onClick: () => setMode("take"), children: "Take control" }),
-          jsx("button", { type: "button", className: "tos-btn", "data-testid": "hand-back", disabled: disabled || status.mode === "shared", onClick: () => setMode("handback"), children: "Hand back" }),
-          jsx("button", {
-            type: "button",
-            className: "tos-btn" + (screenPref.mode === "fit" ? " is-on" : ""),
-            "data-testid": "screen-fit",
-            "aria-pressed": screenPref.mode === "fit" ? "true" : "false",
-            title: "Fit the guest to the pane",
-            onClick: chooseFit,
-            children: "Fit",
-          }),
-          jsx(CompanionControls, {
-            hidden: companionHidden,
-            enabled: !(status.companion && status.companion.enabled === false),
-            costume: companionCostume,
-            costumes: (status.companion && status.companion.costumes) || ["base", "cowboy", "wizard", "chef"],
-            onToggleHidden: () => {
-              setCompanionHidden((prev) => {
-                const next = !prev;
-                api.companionSet({ hidden: next }).catch(() => {});
-                return next;
-              });
-            },
-            onCostume: (name) => {
-              setCompanionCostume(name);
-              api.companionSet({ costume: name }).catch(() => {});
-            },
           }),
         ],
       }),
@@ -1916,20 +2909,73 @@ function TempleOSPane({ transport, initial } = {}) {
               jsxs("section", {
                 className: "tos-log",
                 "data-testid": "agent-log",
+                "data-filter": logFilter,
+                "data-follow": logFollow ? "1" : "0",
                 children: [
-                  jsx("h2", { children: "Agent log" }),
-                  log.length
-                    ? log.map((event, i) =>
-                        jsx(
-                          "p",
-                          {
-                            className: "tos-log-line tos-log-" + (event.source || "agent") + (event.ok === false ? " is-failed" : ""),
-                            children: typeof event === "string" ? event : logLine(event),
-                          },
-                          String((event && event.id) || i)
-                        )
-                      )
-                    : jsx("p", { className: "tos-log-empty", children: "The agent has not injected input yet." }),
+                  jsxs("div", {
+                    className: "tos-log-head",
+                    children: [
+                      jsxs("h2", {
+                        children: [
+                          jsx(Icon, { name: "terminal", size: 13 }),
+                          jsx("span", { children: "Agent log" }),
+                        ],
+                      }),
+                      jsxs("div", {
+                        className: "tos-log-filters",
+                        role: "group",
+                        "aria-label": "Filter the Agent Log",
+                        children: ["all", "tools", "user", "errors"].map((name) =>
+                          jsx(
+                            "button",
+                            {
+                              type: "button",
+                              className: "tos-log-filter" + (logFilter === name ? " is-on" : ""),
+                              "data-testid": "log-filter-" + name,
+                              "aria-pressed": logFilter === name ? "true" : "false",
+                              title: "Show " + name,
+                              onClick: () => setLogFilter(name),
+                              children: name === "user" ? "You" : name.charAt(0).toUpperCase() + name.slice(1),
+                            },
+                            name
+                          )
+                        ),
+                      }),
+                      jsx("button", {
+                        type: "button",
+                        className: "tos-log-follow" + (logFollow ? " is-on" : ""),
+                        "data-testid": "log-follow",
+                        "aria-pressed": logFollow ? "true" : "false",
+                        title: logFollow ? "Auto-follow is locked on. Click to stop following." : "Follow new Agent Log events again.",
+                        onClick: () => setLogFollow((prev) => !prev),
+                        children: [
+                          jsx(Icon, { name: logFollow ? "lock" : "unlock", size: 13 }),
+                          jsx("span", { children: logFollow ? "Following" : "Follow" }),
+                        ],
+                      }),
+                    ],
+                  }),
+                  jsx("div", {
+                    className: "tos-log-scroll",
+                    ref: logScrollRef,
+                    onScroll: onLogScroll,
+                    tabIndex: 0,
+                    "aria-live": "polite",
+                    "aria-label": "Agent Log events",
+                    children: filteredLog.length
+                      ? filteredLog.map((event, i) => logRow(event, i))
+                      : jsx("p", {
+                          className: "tos-log-empty",
+                          children:
+                            logFilter === "tools"
+                              ? "No tool calls yet."
+                              : logFilter === "user"
+                                ? "No user actions yet."
+                                : logFilter === "errors"
+                                  ? "No errors. Quiet and healthy."
+                                  : "The agent has not injected input yet.",
+                        }),
+                  }),
                 ],
               }),
                 ],
@@ -1960,15 +3006,20 @@ const POLL_TICK = 100;
 
 function modeButton(mode, label, current, disabled, setMode) {
   const op = mode === "user" ? "take" : mode === "shared" ? "handback" : "watch";
+  const icon = mode === "watch" ? "eye" : mode === "user" ? "keyboard" : "users";
   return jsx("button", {
     type: "button",
     className: "tos-btn" + (current === mode ? " is-on" : ""),
     "data-testid": "mode-" + mode,
     "aria-pressed": current === mode ? "true" : "false",
+    title: "Set control mode to " + label,
     disabled: disabled,
     onClick: () => setMode(op),
-    children: label,
-  });
+    children: [
+      jsx(Icon, { name: icon }),
+      jsx("span", { className: "tos-btn-label", children: label }),
+    ],
+  }, mode);
 }
 
 function checkRow(label, value) {
@@ -1985,10 +3036,10 @@ function checkRow(label, value) {
 })();
 
 // desktop/src/ui/register.js
-const __m7 = (function () {
+const __m9 = (function () {
   const jsx = __ext3;
   const setHostTransport = __m1["setHostTransport"];
-  const TempleOSPane = __m6["TempleOSPane"];
+  const TempleOSPane = __m8["TempleOSPane"];
 
 const PANE_ID = "templeos";
 const PANE_TITLE = "TempleOS";
@@ -2040,14 +3091,15 @@ function createDesktopPlugin() {
 })();
 
 // desktop/src/ui/index.js
-const __m8 = (function () {
+const __m10 = (function () {
 
 
-  return { "TempleOSPane": __m6["TempleOSPane"], "PANE_ID": __m7["PANE_ID"], "PANE_TITLE": __m7["PANE_TITLE"], "createPaneContribution": __m7["createPaneContribution"], "registerTempleOSPane": __m7["registerTempleOSPane"], "createDesktopPlugin": __m7["createDesktopPlugin"], "DEFAULT_WIDTH": __m5["DEFAULT_WIDTH"], "DEFAULT_HEIGHT": __m5["DEFAULT_HEIGHT"], "CONTROL_MODES": __m5["CONTROL_MODES"], "GOLDEN_SNAPSHOT": __m5["GOLDEN_SNAPSHOT"], "guestSize": __m5["guestSize"], "integerScale": __m5["integerScale"], "mapPointerToGuest": __m5["mapPointerToGuest"], "modeLabel": __m5["modeLabel"], "accelLabel": __m5["accelLabel"], "statusSummary": __m5["statusSummary"], "drivingChip": __m5["drivingChip"], "needsOnboarding": __m5["needsOnboarding"], "firstCheck": __m5["firstCheck"], "checkState": __m5["checkState"], "pollIntervalMs": __m5["pollIntervalMs"], "isReleaseHatch": __m5["isReleaseHatch"], "qcodeFor": __m5["qcodeFor"], "keyEventToPayload": __m5["keyEventToPayload"], "nextMode": __m5["nextMode"], "userMayInput": __m5["userMayInput"], "logLine": __m5["logLine"], "flavorLabel": __m5["flavorLabel"], "TerryCompanionOverlay": __m3["TerryCompanionOverlay"], "CompanionControls": __m3["CompanionControls"], "TerryCompanion": __m3["TerryCompanion"] };
+
+  return { "TempleOSPane": __m8["TempleOSPane"], "PANE_ID": __m9["PANE_ID"], "PANE_TITLE": __m9["PANE_TITLE"], "createPaneContribution": __m9["createPaneContribution"], "registerTempleOSPane": __m9["registerTempleOSPane"], "createDesktopPlugin": __m9["createDesktopPlugin"], "DEFAULT_WIDTH": __m7["DEFAULT_WIDTH"], "DEFAULT_HEIGHT": __m7["DEFAULT_HEIGHT"], "CONTROL_MODES": __m7["CONTROL_MODES"], "GOLDEN_SNAPSHOT": __m7["GOLDEN_SNAPSHOT"], "guestSize": __m7["guestSize"], "integerScale": __m7["integerScale"], "mapPointerToGuest": __m7["mapPointerToGuest"], "modeLabel": __m7["modeLabel"], "accelLabel": __m7["accelLabel"], "statusSummary": __m7["statusSummary"], "drivingChip": __m7["drivingChip"], "needsOnboarding": __m7["needsOnboarding"], "firstCheck": __m7["firstCheck"], "checkState": __m7["checkState"], "pollIntervalMs": __m7["pollIntervalMs"], "isReleaseHatch": __m7["isReleaseHatch"], "qcodeFor": __m7["qcodeFor"], "keyEventToPayload": __m7["keyEventToPayload"], "nextMode": __m7["nextMode"], "userMayInput": __m7["userMayInput"], "logLine": __m7["logLine"], "flavorLabel": __m7["flavorLabel"], "filterLogEvents": __m7["filterLogEvents"], "logToolKey": __m7["logToolKey"], "vmStateChip": __m7["vmStateChip"], "bbsChip": __m7["bbsChip"], "guestVersionChip": __m7["guestVersionChip"], "paneLayoutMode": __m7["paneLayoutMode"], "layoutRegions": __m7["layoutRegions"], "rectsOverlap": __m7["rectsOverlap"], "COMPACT_BREAKPOINT_PX": __m7["COMPACT_BREAKPOINT_PX"], "LOG_FILTERS": __m7["LOG_FILTERS"], "normalizeQuote": __m5["normalizeQuote"], "loadQuotes": __m5["loadQuotes"], "pickQuote": __m5["pickQuote"], "createQuotePicker": __m5["createQuotePicker"], "quoteKindForLogEvent": __m5["quoteKindForLogEvent"], "quoteKindForBoot": __m5["quoteKindForBoot"], "TERRY_IDLE_INTERVAL_MS": __m5["TERRY_IDLE_INTERVAL_MS"], "QUOTE_EVENT_KINDS": __m5["QUOTE_EVENT_KINDS"], "TerryCompanionOverlay": __m3["TerryCompanionOverlay"], "CompanionControls": __m3["CompanionControls"], "TerryCompanion": __m3["TerryCompanion"] };
 })();
 
 const TEMPLEOS_STYLE_ID = "templeos-desktop-styles";
-const TEMPLEOS_STYLES = "/* TempleOS pane. 16-color accents on Hermes chrome variables. */\n\n.tos-pane {\n  height: 100%;\n  min-height: 0;\n  color-scheme: dark;\n  --tos-black: #000000;\n  --tos-navy: #0000aa;\n  --tos-yellow: #ffff55;\n  --tos-white: #ffffff;\n  --tos-ltgray: #aaaaaa;\n  --tos-dkgray: #555555;\n  --tos-cyan: #55ffff;\n  --tos-green: #55ff55;\n  --tos-red: #ff5555;\n  --tos-blue: #5555ff;\n  --tos-brown: #aa5500;\n  display: flex;\n  flex-direction: column;\n  gap: 10px;\n  padding: 12px 14px 16px;\n  color: var(--tos-yellow);\n  background:\n    linear-gradient(180deg, color-mix(in srgb, var(--tos-navy) 35%, var(--tos-black)) 0 52px, var(--tos-black) 52px);\n  font-family: \"IBM Plex Mono\", \"Lucida Console\", ui-monospace, monospace;\n  min-height: 100%;\n  box-sizing: border-box;\n}\n\n.tos-top,\n.tos-bar {\n  display: flex;\n  flex-wrap: wrap;\n  gap: 8px;\n  align-items: center;\n}\n\n.tos-brand {\n  display: flex;\n  gap: 8px;\n  align-items: center;\n  margin-right: 6px;\n}\n\n.tos-brand strong {\n  display: block;\n  font-size: 14px;\n  letter-spacing: 0.08em;\n  text-transform: uppercase;\n  color: var(--tos-yellow);\n}\n\n.tos-brand em {\n  display: block;\n  font-style: normal;\n  font-size: 10px;\n  letter-spacing: 0.16em;\n  text-transform: uppercase;\n  color: var(--tos-ltgray);\n}\n\n.tos-mark {\n  width: 22px;\n  height: 22px;\n  background:\n    linear-gradient(180deg, var(--tos-navy), #000055);\n  box-shadow: inset 0 0 0 1px var(--tos-yellow);\n}\n\n.tos-badge,\n.tos-chip,\n.tos-btn {\n  font: inherit;\n  color: var(--tos-yellow);\n  background: transparent;\n  border: 1px solid color-mix(in srgb, var(--tos-yellow) 55%, var(--tos-dkgray));\n  border-radius: 2px;\n  padding: 3px 9px;\n  letter-spacing: 0.02em;\n}\n\n.tos-badge,\n.tos-chip {\n  font-size: 11px;\n  text-transform: uppercase;\n}\n\n.tos-badge-accel {\n  color: var(--tos-cyan);\n  border-color: color-mix(in srgb, var(--tos-cyan) 50%, var(--tos-dkgray));\n}\n\n.tos-chip {\n  margin-left: auto;\n  border-radius: 999px;\n  color: var(--tos-ltgray);\n  text-transform: none;\n}\n\n.tos-btn {\n  cursor: pointer;\n  background: color-mix(in srgb, var(--tos-navy) 40%, transparent);\n}\n\n.tos-btn:hover:not(:disabled) {\n  background: color-mix(in srgb, var(--tos-navy) 80%, var(--tos-black));\n  border-color: var(--tos-yellow);\n}\n\n.tos-btn:disabled {\n  opacity: 0.4;\n  cursor: default;\n  color: var(--tos-ltgray);\n  border-color: var(--tos-dkgray);\n  background: transparent;\n}\n\n.tos-btn.is-on,\n.tos-primary {\n  background: color-mix(in srgb, var(--tos-navy) 85%, var(--tos-black));\n  border-color: var(--tos-yellow);\n  color: var(--tos-yellow);\n  font-weight: 650;\n}\n\n.tos-modes {\n  display: flex;\n  gap: 0;\n  margin-left: 4px;\n}\n\n.tos-modes .tos-btn {\n  border-radius: 0;\n}\n\n.tos-modes .tos-btn:first-child {\n  border-top-left-radius: 2px;\n  border-bottom-left-radius: 2px;\n}\n\n.tos-modes .tos-btn:last-child {\n  border-top-right-radius: 2px;\n  border-bottom-right-radius: 2px;\n}\n\n.tos-drive {\n  align-self: flex-start;\n  padding: 4px 12px;\n  border: 1px solid var(--tos-yellow);\n  background: color-mix(in srgb, var(--tos-navy) 70%, var(--tos-black));\n  color: var(--tos-yellow);\n  font-size: 12px;\n  letter-spacing: 0.04em;\n  text-transform: uppercase;\n}\n\n.tos-drive-agent {\n  border-color: var(--tos-cyan);\n  color: var(--tos-cyan);\n}\n\n.tos-drive-user {\n  border-color: var(--tos-green);\n  color: var(--tos-green);\n}\n\n.tos-onboard {\n  padding: 12px 14px;\n  border: 1px solid color-mix(in srgb, var(--tos-yellow) 50%, var(--tos-dkgray));\n  background: color-mix(in srgb, var(--tos-navy) 22%, var(--tos-black));\n}\n\n.tos-onboard h2,\n.tos-log h2 {\n  margin: 0 0 8px;\n  font-size: 13px;\n  font-weight: 650;\n  letter-spacing: 0.08em;\n  text-transform: uppercase;\n  color: var(--tos-yellow);\n}\n\n.tos-onboard p,\n.tos-hint,\n.tos-hatch,\n.tos-error,\n.tos-info,\n.tos-log,\n.tos-placeholder {\n  font-size: 13px;\n  line-height: 1.45;\n}\n\n.tos-onboard p,\n.tos-hint {\n  margin: 0 0 10px;\n  color: var(--tos-ltgray);\n  max-width: 62ch;\n}\n\n.tos-checks {\n  display: flex;\n  flex-wrap: wrap;\n  gap: 8px 18px;\n  margin: 0 0 12px;\n  padding: 0;\n  list-style: none;\n}\n\n.tos-check-ok { color: var(--tos-green); }\n.tos-check-no { color: var(--tos-red); }\n.tos-check-unknown { color: var(--tos-ltgray); }\n\n.tos-body {\n  display: grid;\n  /* Left column is the guest with the Agent Log under it. Terry keeps the\n     right column at full pane height, so the screen can use the leftover width. */\n  grid-template-columns: minmax(0, 1fr) minmax(300px, 40%);\n  grid-template-rows: minmax(0, 1fr);\n  gap: 12px;\n  align-items: stretch;\n  flex: 1 1 auto;\n  min-height: 0;\n  min-width: 0;\n}\n\n.tos-stage {\n  grid-column: 1;\n  grid-row: 1;\n  align-self: stretch;\n  display: flex;\n  flex-direction: column;\n  align-items: flex-start;\n  min-width: 0;\n  min-height: 0;\n  width: 100%;\n  height: 100%;\n  overflow: hidden;\n}\n\n.tos-screen-stack {\n  display: flex;\n  flex-direction: column;\n  align-items: stretch;\n  max-width: 100%;\n  min-width: 0;\n  min-height: 0;\n}\n\n.tos-screen {\n  position: relative;\n  box-sizing: border-box;\n  max-width: 100%;\n  background: var(--tos-black);\n  border: 1px solid var(--tos-dkgray);\n  image-rendering: pixelated;\n  overflow: hidden;\n  outline: none;\n  cursor: crosshair;\n  box-shadow: 0 0 0 1px var(--tos-black);\n}\n\n.tos-screen img {\n  display: block;\n  width: 100%;\n  height: 100%;\n  image-rendering: pixelated;\n  image-rendering: crisp-edges;\n}\n\n.tos-resize-handle {\n  position: absolute;\n  right: 0;\n  bottom: 0;\n  width: 16px;\n  height: 16px;\n  padding: 0;\n  border: 0;\n  z-index: 3;\n  cursor: nwse-resize;\n  touch-action: none;\n  background: linear-gradient(135deg, transparent 0 46%, var(--tos-cyan) 46% 62%, transparent 62% 70%, var(--tos-yellow) 70%);\n}\n\n.tos-screen.is-focused {\n  border-color: var(--tos-cyan);\n  box-shadow: 0 0 0 2px var(--tos-cyan);\n}\n\n.tos-placeholder {\n  display: flex;\n  align-items: center;\n  justify-content: center;\n  width: 100%;\n  height: 100%;\n  color: var(--tos-yellow);\n  text-align: center;\n  padding: 16px;\n  box-sizing: border-box;\n}\n\n.tos-hatch {\n  margin: 6px 0 0;\n  color: var(--tos-cyan);\n  font-size: 11px;\n  letter-spacing: 0.04em;\n}\n\n.tos-hatch-idle {\n  color: var(--tos-ltgray);\n}\n\n.tos-log {\n  box-sizing: border-box;\n  width: 100%;\n  height: 210px;\n  max-height: 240px;\n  flex: 0 0 auto;\n  margin: 8px 0 0;\n  overflow: auto;\n  padding: 10px 12px;\n  border: 1px solid color-mix(in srgb, var(--tos-yellow) 35%, var(--tos-dkgray));\n  background: color-mix(in srgb, var(--tos-navy) 18%, var(--tos-black));\n}\n\n.tos-log-line,\n.tos-log p {\n  margin: 0 0 6px;\n  color: var(--tos-ltgray);\n  white-space: nowrap;\n  overflow: hidden;\n  text-overflow: ellipsis;\n}\n\n.tos-log-agent { color: var(--tos-cyan); }\n.tos-log-user { color: var(--tos-yellow); }\n.tos-log-line.is-failed { color: var(--tos-red); }\n.tos-log-empty { color: var(--ui-text-tertiary, var(--tos-dkgray)); }\n\n.tos-error { color: var(--tos-red); }\n.tos-info { color: var(--tos-cyan); }\n\n/* Temple of Hermes theme.\n   Palette: art/palette.json (TempleOS gr32_palette_std), branch hermes/art\n   @ 97d7ad2. Header strip, wallpaper and icons come from the same branch. */\n\n.tos-pane[data-theme=\"hermes\"] {\n  --tos-hermes-gold: #ffff55;\n  --tos-hermes-cyan: #55ffff;\n  --tos-hermes-azure: #5555ff;\n  --tos-hermes-violet: #ff55ff;\n  --tos-hermes-teal: #00aaaa;\n  --tos-hermes-marble: #aaaaaa;\n  --tos-hermes-ink: #000000;\n  --tos-hermes-deep: #0000aa;\n  color: var(--tos-hermes-gold);\n  background:\n    radial-gradient(120% 72% at 50% 0%, rgba(85, 85, 255, 0.22), rgba(0, 0, 0, 0) 62%),\n    linear-gradient(180deg, rgba(0, 0, 0, 0.74) 0 62px, rgba(0, 0, 0, 0.9) 62px),\n    var(--tos-hermes-wallpaper) center / cover no-repeat,\n    var(--tos-hermes-ink);\n}\n\n.tos-pane[data-theme=\"hermes\"] .tos-top {\n  position: relative;\n  padding: 10px 12px 13px;\n  border: 1px solid rgba(85, 255, 255, 0.42);\n  background:\n    linear-gradient(90deg, rgba(0, 0, 0, 0.88), rgba(0, 0, 0, 0.58) 60%, rgba(0, 0, 0, 0.88)),\n    var(--tos-hermes-header) center / cover no-repeat;\n  box-shadow:\n    inset 0 0 26px rgba(0, 0, 170, 0.5),\n    0 0 20px rgba(85, 255, 255, 0.14);\n}\n\n.tos-pane[data-theme=\"hermes\"] .tos-top::after {\n  content: \"\";\n  position: absolute;\n  left: 8px;\n  right: 8px;\n  bottom: 4px;\n  height: 3px;\n  background: repeating-linear-gradient(\n    90deg,\n    var(--tos-hermes-cyan) 0 2px,\n    transparent 2px 7px\n  );\n  opacity: 0.55;\n  pointer-events: none;\n}\n\n.tos-pane[data-theme=\"hermes\"] .tos-mark {\n  width: 30px;\n  height: 30px;\n  background: var(--tos-hermes-mark) center / contain no-repeat;\n  image-rendering: pixelated;\n  box-shadow:\n    0 0 0 1px rgba(255, 255, 85, 0.7),\n    0 0 12px rgba(85, 255, 255, 0.35);\n}\n\n.tos-pane[data-theme=\"hermes\"] .tos-brand strong {\n  color: var(--tos-hermes-gold);\n  text-shadow: 0 0 10px rgba(255, 255, 85, 0.28);\n}\n\n.tos-pane[data-theme=\"hermes\"] .tos-brand em {\n  color: var(--tos-hermes-cyan);\n}\n\n.tos-pane[data-theme=\"hermes\"] .tos-badge {\n  color: var(--tos-hermes-cyan);\n  border-color: rgba(85, 255, 255, 0.55);\n  background: rgba(0, 0, 170, 0.18);\n}\n\n.tos-pane[data-theme=\"hermes\"] .tos-badge-accel {\n  color: var(--tos-hermes-gold);\n  border-color: rgba(255, 255, 85, 0.6);\n}\n\n.tos-pane[data-theme=\"hermes\"] .tos-chip {\n  color: var(--tos-hermes-violet);\n  border-color: rgba(255, 85, 255, 0.5);\n  background: rgba(255, 85, 255, 0.16);\n}\n\n.tos-pane[data-theme=\"hermes\"] .tos-btn {\n  color: var(--tos-hermes-gold);\n  border-color: rgba(255, 255, 85, 0.5);\n  background: linear-gradient(180deg, rgba(0, 0, 170, 0.35), rgba(0, 0, 0, 0.45));\n}\n\n.tos-pane[data-theme=\"hermes\"] .tos-btn:hover:not(:disabled) {\n  color: var(--tos-white);\n  border-color: var(--tos-hermes-cyan);\n  background: linear-gradient(180deg, rgba(85, 85, 255, 0.42), rgba(0, 0, 170, 0.6));\n}\n\n.tos-pane[data-theme=\"hermes\"] .tos-btn.is-on,\n.tos-pane[data-theme=\"hermes\"] .tos-primary {\n  color: var(--tos-white);\n  border-color: var(--tos-hermes-cyan);\n  background: linear-gradient(180deg, rgba(85, 85, 255, 0.48), rgba(0, 0, 170, 0.62));\n  box-shadow: 0 0 10px rgba(85, 255, 255, 0.2);\n}\n\n.tos-pane[data-theme=\"hermes\"] .tos-theme {\n  color: var(--tos-hermes-violet);\n  border-color: rgba(255, 85, 255, 0.55);\n}\n\n.tos-pane[data-theme=\"hermes\"] .tos-theme::before {\n  content: \"\";\n  display: inline-block;\n  width: 12px;\n  height: 12px;\n  margin-right: 5px;\n  vertical-align: -2px;\n  background: var(--tos-hermes-nous) center / contain no-repeat;\n  image-rendering: pixelated;\n}\n\n.tos-pane[data-theme=\"hermes\"] .tos-drive {\n  color: var(--tos-hermes-cyan);\n  border-color: var(--tos-hermes-cyan);\n  background: linear-gradient(90deg, rgba(0, 0, 170, 0.58), rgba(0, 0, 0, 0.72));\n  box-shadow: 0 0 12px rgba(85, 255, 255, 0.12);\n}\n\n.tos-pane[data-theme=\"hermes\"] .tos-drive-user {\n  color: var(--tos-green);\n  border-color: var(--tos-green);\n}\n\n.tos-pane[data-theme=\"hermes\"] .tos-onboard {\n  border-color: rgba(85, 255, 255, 0.42);\n  background:\n    linear-gradient(180deg, rgba(0, 0, 170, 0.3), rgba(0, 0, 0, 0.62));\n  box-shadow: inset 0 0 22px rgba(0, 0, 170, 0.38);\n}\n\n.tos-pane[data-theme=\"hermes\"] .tos-onboard h2,\n.tos-pane[data-theme=\"hermes\"] .tos-log h2 {\n  color: var(--tos-hermes-gold);\n}\n\n.tos-pane[data-theme=\"hermes\"] .tos-log h2::before {\n  content: \"\";\n  display: inline-block;\n  width: 16px;\n  height: 16px;\n  margin-right: 6px;\n  vertical-align: -3px;\n  background: var(--tos-hermes-chat) center / contain no-repeat;\n  image-rendering: pixelated;\n}\n\n.tos-pane[data-theme=\"hermes\"] .tos-hint::before {\n  content: \"\";\n  display: inline-block;\n  width: 16px;\n  height: 16px;\n  margin-right: 6px;\n  vertical-align: -3px;\n  background: var(--tos-hermes-capy) center / contain no-repeat;\n  image-rendering: pixelated;\n}\n\n.tos-pane[data-theme=\"hermes\"] .tos-screen {\n  border-color: rgba(85, 255, 255, 0.45);\n  box-shadow:\n    0 0 0 1px var(--tos-hermes-ink),\n    0 0 26px rgba(0, 0, 170, 0.5);\n}\n\n.tos-pane[data-theme=\"hermes\"] .tos-screen.is-focused {\n  border-color: var(--tos-hermes-cyan);\n  box-shadow:\n    0 0 0 2px var(--tos-hermes-cyan),\n    0 0 30px rgba(85, 255, 255, 0.3);\n}\n\n.tos-pane[data-theme=\"hermes\"] .tos-log {\n  border-color: rgba(255, 255, 85, 0.32);\n  background:\n    linear-gradient(180deg, rgba(0, 0, 170, 0.22), rgba(0, 0, 0, 0.7));\n  box-shadow: inset 0 0 18px rgba(0, 0, 170, 0.32);\n}\n\n.tos-pane[data-theme=\"hermes\"] .tos-log-agent {\n  color: var(--tos-hermes-cyan);\n}\n\n.tos-pane[data-theme=\"hermes\"] .tos-log-user {\n  color: var(--tos-hermes-gold);\n}\n\n.tos-pane[data-theme=\"hermes\"] .tos-log-line.is-failed,\n.tos-pane[data-theme=\"hermes\"] .tos-error {\n  color: var(--tos-red);\n}\n\n.tos-pane[data-theme=\"hermes\"] .tos-info,\n.tos-pane[data-theme=\"hermes\"] .tos-hatch {\n  color: var(--tos-hermes-cyan);\n}\n\n.tos-pane[data-theme=\"hermes\"] .tos-check-ok {\n  color: var(--tos-green);\n}\n\n.tos-pane[data-theme=\"hermes\"] .tos-check-no {\n  color: var(--tos-red);\n}\n\n.tos-pane[data-theme=\"hermes\"] .tos-check-unknown {\n  color: var(--tos-hermes-marble);\n}\n\n@media (max-width: 900px) {\n  .tos-body {\n    grid-template-columns: 1fr;\n  }\n  .tos-chip {\n    margin-left: 0;\n  }\n}\n\n/* Terry companion dock (fan tribute). The stage row is a contents wrapper:\n   the guest screen and the Agent Log share the left grid cell, and Terry\n   fills the right cell from top to bottom. The log never covers the screen. */\n.tos-stage-row {\n  display: contents;\n}\n\n.tos-companion-dock {\n  grid-column: 2;\n  grid-row: 1;\n  align-self: end;\n  justify-self: stretch;\n  position: relative;\n  z-index: 5;\n  width: 100%;\n  min-width: 0;\n  height: var(--tos-companion-h, 750px);\n  min-height: 0;\n  display: flex;\n  flex-direction: column;\n  justify-content: flex-end;\n  align-items: stretch;\n  box-sizing: border-box;\n  overflow: visible;\n}\n\n.tos-companion-bubble {\n  position: absolute;\n  top: 0;\n  left: 0;\n  z-index: 7;\n  max-width: min(100%, 340px);\n  min-width: 140px;\n  padding: 10px 14px;\n  border: 1px solid color-mix(in srgb, var(--tos-yellow) 55%, var(--tos-dkgray));\n  border-radius: 12px 12px 2px 12px;\n  background: color-mix(in srgb, var(--tos-navy) 70%, var(--tos-black));\n  color: var(--tos-yellow);\n  font-size: 15px;\n  line-height: 1.35;\n  letter-spacing: 0.01em;\n  overflow-wrap: anywhere;\n  word-break: break-word;\n  pointer-events: none;\n}\n\n.tos-companion-bubble-slot {\n  /* The bubble is positioned over the transparent crown of the sprite box,\n     so it needs no flow space in the dock. */\n  position: absolute;\n  inset: 0 0 auto 0;\n  height: 0;\n  pointer-events: none;\n}\n\n.tos-companion {\n  position: relative;\n  align-self: stretch;\n  z-index: 6;\n  width: 100%;\n  height: var(--tos-companion-h, 750px);\n  pointer-events: auto;\n  cursor: pointer;\n  image-rendering: auto;\n  filter: drop-shadow(0 6px 10px rgba(0, 0, 0, 0.55));\n}\n\n/* Static sprite sheet used by the screenshot harness and docs render.\n   atlas.png is 1536x1872 (8x9 cells); 800%/900% makes one 192x208 cell\n   fill the sprite box exactly, so the existing art scales enormously\n   without generating or redrawing anything. */\n.tos-companion-static {\n  background-repeat: no-repeat;\n  background-size: 800% 900%;\n  background-position: 0 0;\n}\n\n.tos-companion-canvas {\n  width: 100%;\n  height: 100%;\n  display: block;\n  image-rendering: auto;\n}\n\n.tos-companion-loading {\n  position: absolute;\n  inset: 0;\n  display: flex;\n  align-items: flex-end;\n  justify-content: center;\n  padding: 12px;\n  color: var(--tos-ltgray);\n  font-size: 14px;\n  pointer-events: none;\n}\n\n.tos-companion-controls {\n  display: inline-flex;\n  gap: 6px;\n  align-items: center;\n  margin-left: auto;\n}\n\n.tos-companion-costume select {\n  font: inherit;\n  color: var(--tos-yellow);\n  background: var(--tos-black);\n  border: 1px solid color-mix(in srgb, var(--tos-yellow) 55%, var(--tos-dkgray));\n  border-radius: 2px;\n  padding: 2px 6px;\n}\n\n.tos-sr-only {\n  position: absolute;\n  width: 1px;\n  height: 1px;\n  padding: 0;\n  margin: -1px;\n  overflow: hidden;\n  clip: rect(0, 0, 0, 0);\n  white-space: nowrap;\n  border: 0;\n}\n\n.tos-pane[data-theme=\"hermes\"] {\n  --tos-companion-width: 100%;\n  --tos-companion-h: 750px;\n}\n\n/* Terry fills the right-hand cell. The 750px variable above stays the\n   fallback; the cell size wins so a short pane still shows the figure. */\n.tos-pane .tos-companion-dock {\n  align-self: stretch;\n  height: 100%;\n  max-height: 100%;\n  min-height: 0;\n}\n\n.tos-pane .tos-companion {\n  height: 100%;\n  max-height: 100%;\n  min-height: 0;\n}\n\n.tos-pane[data-theme=\"hermes\"] .tos-companion-dock {\n  padding: 6px 6px 4px;\n  border: 1px solid rgba(85, 255, 255, 0.28);\n  background:\n    linear-gradient(180deg, rgba(0, 0, 170, 0.22), rgba(0, 0, 0, 0.62));\n  box-shadow: inset 0 0 18px rgba(0, 0, 170, 0.35);\n}\n\n.tos-pane[data-theme=\"hermes\"] .tos-companion-bubble {\n  border-color: rgba(85, 255, 255, 0.62);\n  background:\n    linear-gradient(180deg, rgba(85, 85, 255, 0.34), rgba(0, 0, 170, 0.4));\n  color: var(--tos-hermes-gold);\n  box-shadow:\n    0 0 0 1px rgba(0, 0, 0, 0.55),\n    0 0 12px rgba(85, 255, 255, 0.16);\n}\n\n.tos-pane[data-theme=\"hermes\"] .tos-companion-hide {\n  color: var(--tos-hermes-violet);\n  border-color: rgba(255, 85, 255, 0.55);\n}\n\n.tos-pane[data-theme=\"hermes\"] .tos-companion-costume select {\n  color: var(--tos-hermes-gold);\n  border-color: rgba(85, 255, 255, 0.55);\n  background: rgba(0, 0, 0, 0.78);\n}\n\n@media (max-width: 900px) {\n  .tos-stage,\n  .tos-log,\n  .tos-companion-dock {\n    grid-column: 1;\n    grid-row: auto;\n    justify-self: stretch;\n  }\n\n  .tos-stage {\n    align-self: start;\n  }\n\n  .tos-log {\n    order: 2;\n  }\n\n  .tos-companion-dock {\n    order: 3;\n    align-self: end;\n  }\n}\n";
+const TEMPLEOS_STYLES = "/* TempleOS pane. 16-color accents on Hermes chrome variables. */\n\n.tos-pane {\n  height: 100%;\n  min-height: 0;\n  color-scheme: dark;\n  --tos-black: #000000;\n  --tos-navy: #0000aa;\n  --tos-yellow: #ffff55;\n  --tos-white: #ffffff;\n  --tos-ltgray: #aaaaaa;\n  --tos-dkgray: #555555;\n  --tos-cyan: #55ffff;\n  --tos-green: #55ff55;\n  --tos-red: #ff5555;\n  --tos-blue: #5555ff;\n  --tos-brown: #aa5500;\n  display: flex;\n  flex-direction: column;\n  gap: 10px;\n  padding: 12px 14px 16px;\n  color: var(--tos-yellow);\n  background:\n    linear-gradient(180deg, color-mix(in srgb, var(--tos-navy) 35%, var(--tos-black)) 0 52px, var(--tos-black) 52px);\n  font-family: \"IBM Plex Mono\", \"Lucida Console\", ui-monospace, monospace;\n  min-height: 100%;\n  box-sizing: border-box;\n}\n\n.tos-top,\n.tos-bar {\n  display: flex;\n  flex-wrap: wrap;\n  gap: 8px;\n  align-items: center;\n}\n\n.tos-brand {\n  display: flex;\n  gap: 8px;\n  align-items: center;\n  margin-right: 6px;\n}\n\n.tos-brand strong {\n  display: block;\n  font-size: 14px;\n  letter-spacing: 0.08em;\n  text-transform: uppercase;\n  color: var(--tos-yellow);\n}\n\n.tos-brand em {\n  display: block;\n  font-style: normal;\n  font-size: 10px;\n  letter-spacing: 0.16em;\n  text-transform: uppercase;\n  color: var(--tos-ltgray);\n}\n\n.tos-mark {\n  width: 22px;\n  height: 22px;\n  background:\n    linear-gradient(180deg, var(--tos-navy), #000055);\n  box-shadow: inset 0 0 0 1px var(--tos-yellow);\n}\n\n.tos-badge,\n.tos-chip,\n.tos-btn {\n  font: inherit;\n  color: var(--tos-yellow);\n  background: transparent;\n  border: 1px solid color-mix(in srgb, var(--tos-yellow) 55%, var(--tos-dkgray));\n  border-radius: 2px;\n  padding: 3px 9px;\n  letter-spacing: 0.02em;\n}\n\n.tos-badge,\n.tos-chip {\n  font-size: 11px;\n  text-transform: uppercase;\n}\n\n.tos-badge-accel {\n  color: var(--tos-cyan);\n  border-color: color-mix(in srgb, var(--tos-cyan) 50%, var(--tos-dkgray));\n}\n\n.tos-chip {\n  margin-left: auto;\n  border-radius: 999px;\n  color: var(--tos-ltgray);\n  text-transform: none;\n}\n\n.tos-btn {\n  cursor: pointer;\n  background: color-mix(in srgb, var(--tos-navy) 40%, transparent);\n}\n\n.tos-btn:hover:not(:disabled) {\n  background: color-mix(in srgb, var(--tos-navy) 80%, var(--tos-black));\n  border-color: var(--tos-yellow);\n}\n\n.tos-btn:disabled {\n  opacity: 0.4;\n  cursor: default;\n  color: var(--tos-ltgray);\n  border-color: var(--tos-dkgray);\n  background: transparent;\n}\n\n.tos-btn.is-on,\n.tos-primary {\n  background: color-mix(in srgb, var(--tos-navy) 85%, var(--tos-black));\n  border-color: var(--tos-yellow);\n  color: var(--tos-yellow);\n  font-weight: 650;\n}\n\n.tos-modes {\n  display: flex;\n  gap: 0;\n  margin-left: 4px;\n}\n\n.tos-modes .tos-btn {\n  border-radius: 0;\n}\n\n.tos-modes .tos-btn:first-child {\n  border-top-left-radius: 2px;\n  border-bottom-left-radius: 2px;\n}\n\n.tos-modes .tos-btn:last-child {\n  border-top-right-radius: 2px;\n  border-bottom-right-radius: 2px;\n}\n\n.tos-drive {\n  align-self: flex-start;\n  padding: 4px 12px;\n  border: 1px solid var(--tos-yellow);\n  background: color-mix(in srgb, var(--tos-navy) 70%, var(--tos-black));\n  color: var(--tos-yellow);\n  font-size: 12px;\n  letter-spacing: 0.04em;\n  text-transform: uppercase;\n}\n\n.tos-drive-agent {\n  border-color: var(--tos-cyan);\n  color: var(--tos-cyan);\n}\n\n.tos-drive-user {\n  border-color: var(--tos-green);\n  color: var(--tos-green);\n}\n\n.tos-onboard {\n  padding: 12px 14px;\n  border: 1px solid color-mix(in srgb, var(--tos-yellow) 50%, var(--tos-dkgray));\n  background: color-mix(in srgb, var(--tos-navy) 22%, var(--tos-black));\n}\n\n.tos-onboard h2,\n.tos-log h2 {\n  margin: 0 0 8px;\n  font-size: 13px;\n  font-weight: 650;\n  letter-spacing: 0.08em;\n  text-transform: uppercase;\n  color: var(--tos-yellow);\n}\n\n.tos-onboard p,\n.tos-hint,\n.tos-hatch,\n.tos-error,\n.tos-info,\n.tos-log,\n.tos-placeholder {\n  font-size: 13px;\n  line-height: 1.45;\n}\n\n.tos-onboard p,\n.tos-hint {\n  margin: 0 0 10px;\n  color: var(--tos-ltgray);\n  max-width: 62ch;\n}\n\n.tos-checks {\n  display: flex;\n  flex-wrap: wrap;\n  gap: 8px 18px;\n  margin: 0 0 12px;\n  padding: 0;\n  list-style: none;\n}\n\n.tos-check-ok { color: var(--tos-green); }\n.tos-check-no { color: var(--tos-red); }\n.tos-check-unknown { color: var(--tos-ltgray); }\n\n.tos-body {\n  display: grid;\n  /* Left column is the guest with the Agent Log under it. Terry keeps the\n     right column at full pane height, so the screen can use the leftover width. */\n  grid-template-columns: minmax(0, 1fr) minmax(300px, 40%);\n  grid-template-rows: minmax(0, 1fr);\n  gap: 12px;\n  align-items: stretch;\n  flex: 1 1 auto;\n  min-height: 0;\n  min-width: 0;\n}\n\n.tos-stage {\n  grid-column: 1;\n  grid-row: 1;\n  align-self: stretch;\n  display: flex;\n  flex-direction: column;\n  align-items: flex-start;\n  min-width: 0;\n  min-height: 0;\n  width: 100%;\n  height: 100%;\n  overflow: hidden;\n}\n\n.tos-screen-stack {\n  display: flex;\n  flex-direction: column;\n  align-items: stretch;\n  max-width: 100%;\n  min-width: 0;\n  min-height: 0;\n}\n\n.tos-screen {\n  position: relative;\n  box-sizing: border-box;\n  max-width: 100%;\n  background: var(--tos-black);\n  border: 1px solid var(--tos-dkgray);\n  image-rendering: pixelated;\n  overflow: hidden;\n  outline: none;\n  cursor: crosshair;\n  box-shadow: 0 0 0 1px var(--tos-black);\n}\n\n.tos-screen img {\n  display: block;\n  width: 100%;\n  height: 100%;\n  image-rendering: pixelated;\n  image-rendering: crisp-edges;\n}\n\n.tos-resize-handle {\n  position: absolute;\n  right: 0;\n  bottom: 0;\n  width: 16px;\n  height: 16px;\n  padding: 0;\n  border: 0;\n  z-index: 3;\n  cursor: nwse-resize;\n  touch-action: none;\n  background: linear-gradient(135deg, transparent 0 46%, var(--tos-cyan) 46% 62%, transparent 62% 70%, var(--tos-yellow) 70%);\n}\n\n.tos-screen.is-focused {\n  border-color: var(--tos-cyan);\n  box-shadow: 0 0 0 2px var(--tos-cyan);\n}\n\n.tos-placeholder {\n  display: flex;\n  align-items: center;\n  justify-content: center;\n  width: 100%;\n  height: 100%;\n  color: var(--tos-yellow);\n  text-align: center;\n  padding: 16px;\n  box-sizing: border-box;\n}\n\n.tos-hatch {\n  margin: 6px 0 0;\n  color: var(--tos-cyan);\n  font-size: 11px;\n  letter-spacing: 0.04em;\n}\n\n.tos-hatch-idle {\n  color: var(--tos-ltgray);\n}\n\n.tos-log {\n  box-sizing: border-box;\n  width: 100%;\n  height: 210px;\n  max-height: 240px;\n  flex: 0 0 auto;\n  margin: 8px 0 0;\n  overflow: auto;\n  padding: 10px 12px;\n  border: 1px solid color-mix(in srgb, var(--tos-yellow) 35%, var(--tos-dkgray));\n  background: color-mix(in srgb, var(--tos-navy) 18%, var(--tos-black));\n}\n\n.tos-log-line,\n.tos-log p {\n  margin: 0 0 6px;\n  color: var(--tos-ltgray);\n  white-space: nowrap;\n  overflow: hidden;\n  text-overflow: ellipsis;\n}\n\n.tos-log-agent { color: var(--tos-cyan); }\n.tos-log-user { color: var(--tos-yellow); }\n.tos-log-line.is-failed { color: var(--tos-red); }\n.tos-log-empty { color: var(--ui-text-tertiary, var(--tos-dkgray)); }\n\n.tos-error { color: var(--tos-red); }\n.tos-info { color: var(--tos-cyan); }\n\n/* Temple of Hermes theme.\n   Palette: art/palette.json (TempleOS gr32_palette_std), branch hermes/art\n   @ 97d7ad2. Header strip, wallpaper and icons come from the same branch. */\n\n.tos-pane[data-theme=\"hermes\"] {\n  --tos-hermes-gold: #ffff55;\n  --tos-hermes-cyan: #55ffff;\n  --tos-hermes-azure: #5555ff;\n  --tos-hermes-violet: #ff55ff;\n  --tos-hermes-teal: #00aaaa;\n  --tos-hermes-marble: #aaaaaa;\n  --tos-hermes-ink: #000000;\n  --tos-hermes-deep: #0000aa;\n  color: var(--tos-hermes-gold);\n  background:\n    radial-gradient(120% 72% at 50% 0%, rgba(85, 85, 255, 0.22), rgba(0, 0, 0, 0) 62%),\n    linear-gradient(180deg, rgba(0, 0, 0, 0.74) 0 62px, rgba(0, 0, 0, 0.9) 62px),\n    var(--tos-hermes-wallpaper) center / cover no-repeat,\n    var(--tos-hermes-ink);\n}\n\n.tos-pane[data-theme=\"hermes\"] .tos-top {\n  position: relative;\n  padding: 10px 12px 13px;\n  border: 1px solid rgba(85, 255, 255, 0.42);\n  background:\n    linear-gradient(90deg, rgba(0, 0, 0, 0.88), rgba(0, 0, 0, 0.58) 60%, rgba(0, 0, 0, 0.88)),\n    var(--tos-hermes-header) center / cover no-repeat;\n  box-shadow:\n    inset 0 0 26px rgba(0, 0, 170, 0.5),\n    0 0 20px rgba(85, 255, 255, 0.14);\n}\n\n.tos-pane[data-theme=\"hermes\"] .tos-top::after {\n  content: \"\";\n  position: absolute;\n  left: 8px;\n  right: 8px;\n  bottom: 4px;\n  height: 3px;\n  background: repeating-linear-gradient(\n    90deg,\n    var(--tos-hermes-cyan) 0 2px,\n    transparent 2px 7px\n  );\n  opacity: 0.55;\n  pointer-events: none;\n}\n\n.tos-pane[data-theme=\"hermes\"] .tos-mark {\n  width: 30px;\n  height: 30px;\n  background: var(--tos-hermes-mark) center / contain no-repeat;\n  image-rendering: pixelated;\n  box-shadow:\n    0 0 0 1px rgba(255, 255, 85, 0.7),\n    0 0 12px rgba(85, 255, 255, 0.35);\n}\n\n.tos-pane[data-theme=\"hermes\"] .tos-brand strong {\n  color: var(--tos-hermes-gold);\n  text-shadow: 0 0 10px rgba(255, 255, 85, 0.28);\n}\n\n.tos-pane[data-theme=\"hermes\"] .tos-brand em {\n  color: var(--tos-hermes-cyan);\n}\n\n.tos-pane[data-theme=\"hermes\"] .tos-badge {\n  color: var(--tos-hermes-cyan);\n  border-color: rgba(85, 255, 255, 0.55);\n  background: rgba(0, 0, 170, 0.18);\n}\n\n.tos-pane[data-theme=\"hermes\"] .tos-badge-accel {\n  color: var(--tos-hermes-gold);\n  border-color: rgba(255, 255, 85, 0.6);\n}\n\n.tos-pane[data-theme=\"hermes\"] .tos-chip {\n  color: var(--tos-hermes-violet);\n  border-color: rgba(255, 85, 255, 0.5);\n  background: rgba(255, 85, 255, 0.16);\n}\n\n.tos-pane[data-theme=\"hermes\"] .tos-btn {\n  color: var(--tos-hermes-gold);\n  border-color: rgba(255, 255, 85, 0.5);\n  background: linear-gradient(180deg, rgba(0, 0, 170, 0.35), rgba(0, 0, 0, 0.45));\n}\n\n.tos-pane[data-theme=\"hermes\"] .tos-btn:hover:not(:disabled) {\n  color: var(--tos-white);\n  border-color: var(--tos-hermes-cyan);\n  background: linear-gradient(180deg, rgba(85, 85, 255, 0.42), rgba(0, 0, 170, 0.6));\n}\n\n.tos-pane[data-theme=\"hermes\"] .tos-btn.is-on,\n.tos-pane[data-theme=\"hermes\"] .tos-primary {\n  color: var(--tos-white);\n  border-color: var(--tos-hermes-cyan);\n  background: linear-gradient(180deg, rgba(85, 85, 255, 0.48), rgba(0, 0, 170, 0.62));\n  box-shadow: 0 0 10px rgba(85, 255, 255, 0.2);\n}\n\n.tos-pane[data-theme=\"hermes\"] .tos-theme {\n  color: var(--tos-hermes-violet);\n  border-color: rgba(255, 85, 255, 0.55);\n}\n\n.tos-pane[data-theme=\"hermes\"] .tos-theme::before {\n  content: \"\";\n  display: inline-block;\n  width: 12px;\n  height: 12px;\n  margin-right: 5px;\n  vertical-align: -2px;\n  background: var(--tos-hermes-nous) center / contain no-repeat;\n  image-rendering: pixelated;\n}\n\n.tos-pane[data-theme=\"hermes\"] .tos-drive {\n  color: var(--tos-hermes-cyan);\n  border-color: var(--tos-hermes-cyan);\n  background: linear-gradient(90deg, rgba(0, 0, 170, 0.58), rgba(0, 0, 0, 0.72));\n  box-shadow: 0 0 12px rgba(85, 255, 255, 0.12);\n}\n\n.tos-pane[data-theme=\"hermes\"] .tos-drive-user {\n  color: var(--tos-green);\n  border-color: var(--tos-green);\n}\n\n.tos-pane[data-theme=\"hermes\"] .tos-onboard {\n  border-color: rgba(85, 255, 255, 0.42);\n  background:\n    linear-gradient(180deg, rgba(0, 0, 170, 0.3), rgba(0, 0, 0, 0.62));\n  box-shadow: inset 0 0 22px rgba(0, 0, 170, 0.38);\n}\n\n.tos-pane[data-theme=\"hermes\"] .tos-onboard h2,\n.tos-pane[data-theme=\"hermes\"] .tos-log h2 {\n  color: var(--tos-hermes-gold);\n}\n\n.tos-pane[data-theme=\"hermes\"] .tos-log h2::before {\n  content: \"\";\n  display: inline-block;\n  width: 16px;\n  height: 16px;\n  margin-right: 6px;\n  vertical-align: -3px;\n  background: var(--tos-hermes-chat) center / contain no-repeat;\n  image-rendering: pixelated;\n}\n\n.tos-pane[data-theme=\"hermes\"] .tos-hint::before {\n  content: \"\";\n  display: inline-block;\n  width: 16px;\n  height: 16px;\n  margin-right: 6px;\n  vertical-align: -3px;\n  background: var(--tos-hermes-capy) center / contain no-repeat;\n  image-rendering: pixelated;\n}\n\n.tos-pane[data-theme=\"hermes\"] .tos-screen {\n  border-color: rgba(85, 255, 255, 0.45);\n  box-shadow:\n    0 0 0 1px var(--tos-hermes-ink),\n    0 0 26px rgba(0, 0, 170, 0.5);\n}\n\n.tos-pane[data-theme=\"hermes\"] .tos-screen.is-focused {\n  border-color: var(--tos-hermes-cyan);\n  box-shadow:\n    0 0 0 2px var(--tos-hermes-cyan),\n    0 0 30px rgba(85, 255, 255, 0.3);\n}\n\n.tos-pane[data-theme=\"hermes\"] .tos-log {\n  border-color: rgba(255, 255, 85, 0.32);\n  background:\n    linear-gradient(180deg, rgba(0, 0, 170, 0.22), rgba(0, 0, 0, 0.7));\n  box-shadow: inset 0 0 18px rgba(0, 0, 170, 0.32);\n}\n\n.tos-pane[data-theme=\"hermes\"] .tos-log-agent {\n  color: var(--tos-hermes-cyan);\n}\n\n.tos-pane[data-theme=\"hermes\"] .tos-log-user {\n  color: var(--tos-hermes-gold);\n}\n\n.tos-pane[data-theme=\"hermes\"] .tos-log-line.is-failed,\n.tos-pane[data-theme=\"hermes\"] .tos-error {\n  color: var(--tos-red);\n}\n\n.tos-pane[data-theme=\"hermes\"] .tos-info,\n.tos-pane[data-theme=\"hermes\"] .tos-hatch {\n  color: var(--tos-hermes-cyan);\n}\n\n.tos-pane[data-theme=\"hermes\"] .tos-check-ok {\n  color: var(--tos-green);\n}\n\n.tos-pane[data-theme=\"hermes\"] .tos-check-no {\n  color: var(--tos-red);\n}\n\n.tos-pane[data-theme=\"hermes\"] .tos-check-unknown {\n  color: var(--tos-hermes-marble);\n}\n\n@media (max-width: 900px) {\n  .tos-body {\n    grid-template-columns: 1fr;\n  }\n  .tos-chip {\n    margin-left: 0;\n  }\n}\n\n/* Terry companion dock (fan tribute). The stage row is a contents wrapper:\n   the guest screen and the Agent Log share the left grid cell, and Terry\n   fills the right cell from top to bottom. The log never covers the screen. */\n.tos-stage-row {\n  display: contents;\n}\n\n.tos-companion-dock {\n  grid-column: 2;\n  grid-row: 1;\n  align-self: end;\n  justify-self: stretch;\n  position: relative;\n  z-index: 5;\n  width: 100%;\n  min-width: 0;\n  height: var(--tos-companion-h, 750px);\n  min-height: 0;\n  display: flex;\n  flex-direction: column;\n  justify-content: flex-end;\n  align-items: stretch;\n  box-sizing: border-box;\n  overflow: visible;\n}\n\n.tos-companion-bubble {\n  position: absolute;\n  top: 0;\n  left: 0;\n  z-index: 7;\n  max-width: min(100%, 340px);\n  min-width: 140px;\n  padding: 10px 14px;\n  border: 1px solid color-mix(in srgb, var(--tos-yellow) 55%, var(--tos-dkgray));\n  border-radius: 12px 12px 2px 12px;\n  background: color-mix(in srgb, var(--tos-navy) 70%, var(--tos-black));\n  color: var(--tos-yellow);\n  font-size: 15px;\n  line-height: 1.35;\n  letter-spacing: 0.01em;\n  overflow-wrap: anywhere;\n  word-break: break-word;\n  pointer-events: none;\n}\n\n.tos-companion-bubble-slot {\n  /* The bubble is positioned over the transparent crown of the sprite box,\n     so it needs no flow space in the dock. */\n  position: absolute;\n  inset: 0 0 auto 0;\n  height: 0;\n  pointer-events: none;\n}\n\n.tos-companion {\n  position: relative;\n  align-self: stretch;\n  z-index: 6;\n  width: 100%;\n  height: var(--tos-companion-h, 750px);\n  pointer-events: auto;\n  cursor: pointer;\n  image-rendering: auto;\n  filter: drop-shadow(0 6px 10px rgba(0, 0, 0, 0.55));\n}\n\n/* Static sprite sheet used by the screenshot harness and docs render.\n   atlas.png is 1536x1872 (8x9 cells); 800%/900% makes one 192x208 cell\n   fill the sprite box exactly, so the existing art scales enormously\n   without generating or redrawing anything. */\n.tos-companion-static {\n  background-repeat: no-repeat;\n  background-size: 800% 900%;\n  background-position: 0 0;\n}\n\n.tos-companion-canvas {\n  width: 100%;\n  height: 100%;\n  display: block;\n  image-rendering: auto;\n}\n\n.tos-companion-loading {\n  position: absolute;\n  inset: 0;\n  display: flex;\n  align-items: flex-end;\n  justify-content: center;\n  padding: 12px;\n  color: var(--tos-ltgray);\n  font-size: 14px;\n  pointer-events: none;\n}\n\n.tos-companion-controls {\n  display: inline-flex;\n  gap: 6px;\n  align-items: center;\n  margin-left: auto;\n}\n\n.tos-companion-costume select {\n  font: inherit;\n  color: var(--tos-yellow);\n  background: var(--tos-black);\n  border: 1px solid color-mix(in srgb, var(--tos-yellow) 55%, var(--tos-dkgray));\n  border-radius: 2px;\n  padding: 2px 6px;\n}\n\n.tos-sr-only {\n  position: absolute;\n  width: 1px;\n  height: 1px;\n  padding: 0;\n  margin: -1px;\n  overflow: hidden;\n  clip: rect(0, 0, 0, 0);\n  white-space: nowrap;\n  border: 0;\n}\n\n.tos-pane[data-theme=\"hermes\"] {\n  --tos-companion-width: 100%;\n  --tos-companion-h: 750px;\n}\n\n/* Terry fills the right-hand cell. The 750px variable above stays the\n   fallback; the cell size wins so a short pane still shows the figure. */\n.tos-pane .tos-companion-dock {\n  align-self: stretch;\n  height: 100%;\n  max-height: 100%;\n  min-height: 0;\n}\n\n.tos-pane .tos-companion {\n  height: 100%;\n  max-height: 100%;\n  min-height: 0;\n}\n\n.tos-pane[data-theme=\"hermes\"] .tos-companion-dock {\n  padding: 6px 6px 4px;\n  border: 1px solid rgba(85, 255, 255, 0.28);\n  background:\n    linear-gradient(180deg, rgba(0, 0, 170, 0.22), rgba(0, 0, 0, 0.62));\n  box-shadow: inset 0 0 18px rgba(0, 0, 170, 0.35);\n}\n\n.tos-pane[data-theme=\"hermes\"] .tos-companion-bubble {\n  border-color: rgba(85, 255, 255, 0.62);\n  background:\n    linear-gradient(180deg, rgba(85, 85, 255, 0.34), rgba(0, 0, 170, 0.4));\n  color: var(--tos-hermes-gold);\n  box-shadow:\n    0 0 0 1px rgba(0, 0, 0, 0.55),\n    0 0 12px rgba(85, 255, 255, 0.16);\n}\n\n.tos-pane[data-theme=\"hermes\"] .tos-companion-hide {\n  color: var(--tos-hermes-violet);\n  border-color: rgba(255, 85, 255, 0.55);\n}\n\n.tos-pane[data-theme=\"hermes\"] .tos-companion-costume select {\n  color: var(--tos-hermes-gold);\n  border-color: rgba(85, 255, 255, 0.55);\n  background: rgba(0, 0, 0, 0.78);\n}\n\n@media (max-width: 900px) {\n  .tos-stage,\n  .tos-log,\n  .tos-companion-dock {\n    grid-column: 1;\n    grid-row: auto;\n    justify-self: stretch;\n  }\n\n  .tos-stage {\n    align-self: start;\n  }\n\n  .tos-log {\n    order: 2;\n  }\n\n  .tos-companion-dock {\n    order: 3;\n    align-self: end;\n  }\n}\n\n/* ==========================================================================\n   Pane world-class pass: dense dark dashboard, grouped toolbar, status chips,\n   filterable Agent Log, and a dedicated Terry column that never covers the\n   guest. Wide layout keeps Terry beside screen+log. At <=900px (the documented\n   narrow breakpoint) the screen and log stay in row 1 and Terry collapses to\n   a short dock in row 2, so the screen is never overlapped or covered.\n   ========================================================================== */\n\n.tos-pane {\n  height: 100%;\n  max-height: 100%;\n  overflow: hidden;\n  gap: 8px;\n  padding: 10px 12px 12px;\n}\n\n.tos-top {\n  gap: 8px;\n  padding: 8px 10px;\n  border-radius: 8px;\n}\n\n.tos-chips {\n  display: flex;\n  flex: 1 1 auto;\n  flex-wrap: wrap;\n  align-items: center;\n  gap: 6px;\n  min-width: 0;\n}\n\n.tos-chips .tos-chip {\n  margin-left: 0;\n}\n\n.tos-badge,\n.tos-status-chip,\n.tos-chip {\n  display: inline-flex;\n  align-items: center;\n  gap: 5px;\n  padding: 2px 8px;\n  border-radius: 999px;\n  font-size: 10px;\n  letter-spacing: 0.045em;\n  line-height: 1.5;\n  white-space: nowrap;\n}\n\n.tos-status-chip {\n  border: 1px solid color-mix(in srgb, var(--tos-ltgray) 42%, var(--tos-dkgray));\n  background: color-mix(in srgb, var(--tos-navy) 20%, var(--tos-black));\n  color: var(--tos-ltgray);\n}\n\n.tos-status-dot {\n  width: 6px;\n  height: 6px;\n  border-radius: 50%;\n  flex: 0 0 auto;\n  background: currentColor;\n  box-shadow: 0 0 6px currentColor;\n}\n\n.tos-status-ok { color: var(--tos-green); border-color: color-mix(in srgb, var(--tos-green) 55%, var(--tos-dkgray)); }\n.tos-status-idle { color: var(--tos-ltgray); }\n.tos-status-warn { color: var(--tos-yellow); border-color: color-mix(in srgb, var(--tos-yellow) 55%, var(--tos-dkgray)); }\n.tos-status-error { color: var(--tos-red); border-color: color-mix(in srgb, var(--tos-red) 60%, var(--tos-dkgray)); }\n.tos-status-loading { color: var(--tos-cyan); border-color: color-mix(in srgb, var(--tos-cyan) 55%, var(--tos-dkgray)); }\n.tos-status-loading .tos-status-dot { animation: tos-pulse 1.2s ease-in-out infinite; }\n.tos-status-empty { color: var(--tos-dkgray); }\n\n@keyframes tos-pulse {\n  0%, 100% { opacity: 0.35; }\n  50% { opacity: 1; }\n}\n\n.tos-toolbar {\n  display: flex;\n  min-width: 0;\n}\n\n.tos-bar {\n  display: flex;\n  flex: 1 1 auto;\n  flex-wrap: wrap;\n  align-items: stretch;\n  gap: 6px;\n  min-width: 0;\n}\n\n.tos-group {\n  display: inline-flex;\n  align-items: center;\n  gap: 3px;\n  min-width: 0;\n  padding: 3px 5px;\n  border: 1px solid rgba(85, 255, 255, 0.16);\n  border-radius: 7px;\n  background: linear-gradient(180deg, rgba(0, 0, 170, 0.2), rgba(0, 0, 0, 0.34));\n}\n\n.tos-group-label {\n  padding: 0 3px;\n  color: var(--tos-ltgray);\n  font-size: 9px;\n  letter-spacing: 0.12em;\n  text-transform: uppercase;\n  opacity: 0.72;\n  user-select: none;\n}\n\n.tos-btn {\n  display: inline-flex;\n  align-items: center;\n  gap: 5px;\n  padding: 3px 8px;\n  border-radius: 4px;\n  font-size: 11px;\n  line-height: 1.5;\n  white-space: nowrap;\n}\n\n.tos-icon {\n  flex: 0 0 auto;\n  opacity: 0.9;\n}\n\n.tos-btn:focus-visible,\n.tos-log-filter:focus-visible,\n.tos-log-follow:focus-visible,\n.tos-companion-costume select:focus-visible,\n.tos-log-scroll:focus-visible,\n.tos-theme:focus-visible {\n  outline: 2px solid var(--tos-cyan);\n  outline-offset: 2px;\n  box-shadow: 0 0 0 3px rgba(85, 255, 255, 0.18);\n}\n\n.tos-modes {\n  display: inline-flex;\n  margin: 0 2px 0 0;\n}\n\n.tos-modes .tos-btn {\n  border-radius: 0;\n  border-left-width: 0;\n}\n\n.tos-modes .tos-btn:first-child {\n  border-left-width: 1px;\n  border-top-left-radius: 4px;\n  border-bottom-left-radius: 4px;\n}\n\n.tos-modes .tos-btn:last-child {\n  border-top-right-radius: 4px;\n  border-bottom-right-radius: 4px;\n}\n\n.tos-theme {\n  margin-left: auto;\n}\n\n.tos-drive {\n  padding: 3px 10px;\n  border-radius: 999px;\n  font-size: 10px;\n  letter-spacing: 0.06em;\n}\n\n.tos-body {\n  grid-template-columns: minmax(0, 1fr) clamp(300px, 34%, 520px);\n  grid-template-rows: minmax(0, 1fr);\n  gap: 10px;\n  min-height: 0;\n}\n\n.tos-stage {\n  gap: 0;\n}\n\n.tos-screen {\n  flex: 0 0 auto;\n  border-radius: 4px;\n}\n\n.tos-screen-stack {\n  width: auto;\n  flex: 0 0 auto;\n}\n\n.tos-log {\n  display: flex;\n  flex-direction: column;\n  margin-top: 6px;\n  padding: 0;\n  height: 210px;\n  max-height: 240px;\n  min-height: 0;\n  overflow: hidden;\n  border-radius: 6px;\n  background: linear-gradient(180deg, rgba(0, 0, 40, 0.72), rgba(0, 0, 0, 0.82));\n}\n\n.tos-log-head {\n  display: flex;\n  flex: 0 0 auto;\n  flex-wrap: wrap;\n  align-items: center;\n  gap: 6px;\n  padding: 5px 8px;\n  border-bottom: 1px solid rgba(255, 255, 85, 0.18);\n  background: rgba(0, 0, 30, 0.48);\n}\n\n.tos-log h2 {\n  display: inline-flex;\n  align-items: center;\n  gap: 5px;\n  margin: 0;\n  font-size: 11px;\n  letter-spacing: 0.08em;\n}\n\n.tos-log-filters {\n  display: inline-flex;\n  gap: 2px;\n  margin-left: auto;\n}\n\n.tos-log-filter,\n.tos-log-follow {\n  display: inline-flex;\n  align-items: center;\n  gap: 3px;\n  padding: 2px 7px;\n  border: 1px solid rgba(170, 170, 170, 0.22);\n  border-radius: 999px;\n  background: transparent;\n  color: var(--tos-ltgray);\n  font: inherit;\n  font-size: 10px;\n  letter-spacing: 0.03em;\n  cursor: pointer;\n}\n\n.tos-log-filter:hover,\n.tos-log-follow:hover {\n  border-color: rgba(85, 255, 255, 0.5);\n  color: var(--tos-cyan);\n}\n\n.tos-log-filter.is-on,\n.tos-log-follow.is-on {\n  border-color: rgba(85, 255, 255, 0.62);\n  background: rgba(85, 255, 255, 0.12);\n  color: var(--tos-cyan);\n}\n\n.tos-log-scroll {\n  flex: 1 1 auto;\n  min-height: 0;\n  overflow: auto;\n  padding: 5px 8px 7px;\n  scrollbar-color: var(--tos-dkgray) transparent;\n  scrollbar-width: thin;\n}\n\n.tos-log-line {\n  display: grid;\n  grid-template-columns: 56px 15px minmax(0, 1fr);\n  gap: 6px;\n  align-items: start;\n  margin: 0;\n  padding: 3px 0;\n  border-bottom: 1px dotted rgba(170, 170, 170, 0.14);\n  white-space: normal;\n  overflow: visible;\n  text-overflow: clip;\n}\n\n.tos-log-time {\n  color: var(--tos-dkgray);\n  font-size: 10px;\n  line-height: 1.5;\n  font-variant-numeric: tabular-nums;\n}\n\n.tos-log-icon {\n  display: inline-flex;\n  align-items: center;\n  justify-content: center;\n  width: 15px;\n  height: 15px;\n  color: var(--tos-cyan);\n  font-size: 10px;\n  line-height: 1;\n}\n\n.tos-log-icon::after { content: \"·\"; }\n.tos-log-icon-vm::after { content: \"▣\"; }\n.tos-log-icon-screen::after { content: \"◉\"; }\n.tos-log-icon-input::after { content: \"⌨\"; }\n.tos-log-icon-files::after { content: \"▤\"; }\n.tos-log-icon-bbs::after { content: \"▥\"; }\n.tos-log-icon-user::after { content: \"●\"; color: var(--tos-yellow); }\n.tos-log-icon-chat::after { content: \"✦\"; }\n\n.tos-log-body {\n  display: flex;\n  flex-direction: column;\n  min-width: 0;\n}\n\n.tos-log-summary {\n  color: var(--tos-ltgray);\n  font-size: 11px;\n  line-height: 1.45;\n  overflow-wrap: anywhere;\n}\n\n.tos-log-meta {\n  color: var(--tos-dkgray);\n  font-size: 9px;\n  letter-spacing: 0.03em;\n}\n\n.tos-log-agent .tos-log-summary { color: var(--tos-cyan); }\n.tos-log-user .tos-log-summary { color: var(--tos-yellow); }\n.tos-log-line.is-failed .tos-log-summary,\n.tos-log-line.is-failed .tos-log-icon { color: var(--tos-red); }\n.tos-log-empty {\n  margin: 4px 0;\n  color: var(--tos-dkgray);\n  font-size: 11px;\n}\n\n.tos-error,\n.tos-info {\n  padding: 5px 9px;\n  border-radius: 5px;\n  font-size: 11px;\n  line-height: 1.4;\n}\n\n.tos-error {\n  border: 1px solid rgba(255, 85, 85, 0.5);\n  background: rgba(85, 0, 0, 0.38);\n}\n\n.tos-info {\n  border: 1px solid rgba(85, 255, 255, 0.4);\n  background: rgba(0, 0, 85, 0.35);\n}\n\n.tos-onboard {\n  border-radius: 8px;\n}\n\n.tos-companion-controls {\n  gap: 4px;\n  margin-left: 0;\n}\n\n.tos-companion-controls .tos-btn {\n  font-size: 10px;\n}\n\n.tos-companion-costume select {\n  max-width: 92px;\n  padding: 2px 4px;\n  font-size: 10px;\n}\n\n/* Dedicated Terry column: clipped to its own cell so the bubble can never\n   spill over the guest screen or outside the pane. */\n.tos-pane .tos-companion-dock {\n  overflow: hidden;\n  padding: 6px;\n  border-radius: 8px;\n  min-width: 0;\n  min-height: 0;\n}\n\n.tos-companion-bubble {\n  position: absolute;\n  top: 7px;\n  left: 7px;\n  right: 7px;\n  max-width: min(100%, 340px);\n  max-height: 42%;\n  overflow: auto;\n  padding: 8px 11px;\n  border-radius: 10px 10px 2px 10px;\n  font-size: 13px;\n  line-height: 1.35;\n  overflow-wrap: anywhere;\n  word-break: break-word;\n  scrollbar-width: thin;\n}\n\n.tos-pane[data-theme=\"hermes\"] .tos-status-chip {\n  background: rgba(0, 0, 60, 0.4);\n  border-color: rgba(85, 255, 255, 0.3);\n}\n\n.tos-pane[data-theme=\"hermes\"] .tos-group {\n  border-color: rgba(85, 255, 255, 0.2);\n  background: linear-gradient(180deg, rgba(0, 0, 170, 0.22), rgba(0, 0, 0, 0.4));\n}\n\n.tos-pane[data-theme=\"hermes\"] .tos-log {\n  border-color: rgba(255, 255, 85, 0.32);\n  background: linear-gradient(180deg, rgba(0, 0, 170, 0.24), rgba(0, 0, 0, 0.8));\n}\n\n.tos-pane[data-theme=\"hermes\"] .tos-log-head {\n  border-bottom-color: rgba(85, 255, 255, 0.22);\n  background: rgba(0, 0, 40, 0.52);\n}\n\n@media (max-height: 900px) {\n  .tos-log {\n    height: 140px;\n    max-height: 155px;\n  }\n}\n\n/* Documented narrow breakpoint. Screen+log stay in row 1; Terry becomes a\n   compact 168px dock in row 2. Nothing stacks under the log as a 750px\n   figure, and the guest screen keeps its full clickable rectangle. */\n@media (max-width: 900px) {\n  .tos-pane {\n    padding: 8px;\n  }\n\n  .tos-top {\n    padding: 7px 8px;\n  }\n\n  .tos-chips {\n    order: 3;\n    flex-basis: 100%;\n  }\n\n  .tos-theme {\n    margin-left: auto;\n  }\n\n  .tos-body {\n    grid-template-columns: minmax(0, 1fr);\n    grid-template-rows: minmax(0, 1fr) 168px;\n    gap: 8px;\n  }\n\n  .tos-stage {\n    grid-column: 1;\n    grid-row: 1;\n    align-self: stretch;\n    width: 100%;\n    height: 100%;\n  }\n\n  .tos-pane .tos-companion-dock {\n    grid-column: 1;\n    grid-row: 2;\n    align-self: stretch;\n    justify-self: stretch;\n    order: 0;\n    width: 100%;\n    height: 100%;\n    max-height: 100%;\n    min-height: 0;\n    padding: 4px 8px;\n  }\n\n  .tos-pane .tos-companion {\n    height: 100%;\n    max-height: 100%;\n  }\n\n  .tos-log {\n    height: 150px;\n    max-height: 170px;\n  }\n\n  .tos-log-line {\n    grid-template-columns: 46px 14px minmax(0, 1fr);\n  }\n\n  .tos-companion-bubble {\n    top: 2px;\n    left: 4px;\n    right: 4px;\n    max-height: 76px;\n    padding: 6px 9px;\n    font-size: 12px;\n  }\n}\n";
 
 function injectTempleOSStyles() {
   if (typeof document === "undefined") return false;
@@ -2062,8 +3114,8 @@ function injectTempleOSStyles() {
   return true;
 }
 
-const __tosCreatePlugin = __m8["createDesktopPlugin"];
-const __tosRegisterPane = __m8["registerTempleOSPane"];
+const __tosCreatePlugin = __m10["createDesktopPlugin"];
+const __tosRegisterPane = __m10["registerTempleOSPane"];
 const __tosPlugin = typeof __tosCreatePlugin === "function"
   ? __tosCreatePlugin()
   : { id: "templeos", name: "TempleOS", defaultEnabled: true, register: __tosRegisterPane };
@@ -2081,37 +3133,55 @@ export function register(ctx) {
 
 __tosPlugin.register = register;
 
-export const CONTROL_MODES = __m8["CONTROL_MODES"];
-export const CompanionControls = __m8["CompanionControls"];
-export const DEFAULT_HEIGHT = __m8["DEFAULT_HEIGHT"];
-export const DEFAULT_WIDTH = __m8["DEFAULT_WIDTH"];
-export const GOLDEN_SNAPSHOT = __m8["GOLDEN_SNAPSHOT"];
-export const PANE_ID = __m8["PANE_ID"];
-export const PANE_TITLE = __m8["PANE_TITLE"];
-export const TempleOSPane = __m8["TempleOSPane"];
-export const TerryCompanion = __m8["TerryCompanion"];
-export const TerryCompanionOverlay = __m8["TerryCompanionOverlay"];
-export const accelLabel = __m8["accelLabel"];
-export const checkState = __m8["checkState"];
-export const createDesktopPlugin = __m8["createDesktopPlugin"];
-export const createPaneContribution = __m8["createPaneContribution"];
-export const drivingChip = __m8["drivingChip"];
-export const firstCheck = __m8["firstCheck"];
-export const flavorLabel = __m8["flavorLabel"];
-export const guestSize = __m8["guestSize"];
-export const integerScale = __m8["integerScale"];
-export const isReleaseHatch = __m8["isReleaseHatch"];
-export const keyEventToPayload = __m8["keyEventToPayload"];
-export const logLine = __m8["logLine"];
-export const mapPointerToGuest = __m8["mapPointerToGuest"];
-export const modeLabel = __m8["modeLabel"];
-export const needsOnboarding = __m8["needsOnboarding"];
-export const nextMode = __m8["nextMode"];
-export const pollIntervalMs = __m8["pollIntervalMs"];
-export const qcodeFor = __m8["qcodeFor"];
-export const registerTempleOSPane = __m8["registerTempleOSPane"];
-export const statusSummary = __m8["statusSummary"];
-export const userMayInput = __m8["userMayInput"];
+export const COMPACT_BREAKPOINT_PX = __m10["COMPACT_BREAKPOINT_PX"];
+export const CONTROL_MODES = __m10["CONTROL_MODES"];
+export const CompanionControls = __m10["CompanionControls"];
+export const DEFAULT_HEIGHT = __m10["DEFAULT_HEIGHT"];
+export const DEFAULT_WIDTH = __m10["DEFAULT_WIDTH"];
+export const GOLDEN_SNAPSHOT = __m10["GOLDEN_SNAPSHOT"];
+export const LOG_FILTERS = __m10["LOG_FILTERS"];
+export const PANE_ID = __m10["PANE_ID"];
+export const PANE_TITLE = __m10["PANE_TITLE"];
+export const QUOTE_EVENT_KINDS = __m10["QUOTE_EVENT_KINDS"];
+export const TERRY_IDLE_INTERVAL_MS = __m10["TERRY_IDLE_INTERVAL_MS"];
+export const TempleOSPane = __m10["TempleOSPane"];
+export const TerryCompanion = __m10["TerryCompanion"];
+export const TerryCompanionOverlay = __m10["TerryCompanionOverlay"];
+export const accelLabel = __m10["accelLabel"];
+export const bbsChip = __m10["bbsChip"];
+export const checkState = __m10["checkState"];
+export const createDesktopPlugin = __m10["createDesktopPlugin"];
+export const createPaneContribution = __m10["createPaneContribution"];
+export const createQuotePicker = __m10["createQuotePicker"];
+export const drivingChip = __m10["drivingChip"];
+export const filterLogEvents = __m10["filterLogEvents"];
+export const firstCheck = __m10["firstCheck"];
+export const flavorLabel = __m10["flavorLabel"];
+export const guestSize = __m10["guestSize"];
+export const guestVersionChip = __m10["guestVersionChip"];
+export const integerScale = __m10["integerScale"];
+export const isReleaseHatch = __m10["isReleaseHatch"];
+export const keyEventToPayload = __m10["keyEventToPayload"];
+export const layoutRegions = __m10["layoutRegions"];
+export const loadQuotes = __m10["loadQuotes"];
+export const logLine = __m10["logLine"];
+export const logToolKey = __m10["logToolKey"];
+export const mapPointerToGuest = __m10["mapPointerToGuest"];
+export const modeLabel = __m10["modeLabel"];
+export const needsOnboarding = __m10["needsOnboarding"];
+export const nextMode = __m10["nextMode"];
+export const normalizeQuote = __m10["normalizeQuote"];
+export const paneLayoutMode = __m10["paneLayoutMode"];
+export const pickQuote = __m10["pickQuote"];
+export const pollIntervalMs = __m10["pollIntervalMs"];
+export const qcodeFor = __m10["qcodeFor"];
+export const quoteKindForBoot = __m10["quoteKindForBoot"];
+export const quoteKindForLogEvent = __m10["quoteKindForLogEvent"];
+export const rectsOverlap = __m10["rectsOverlap"];
+export const registerTempleOSPane = __m10["registerTempleOSPane"];
+export const statusSummary = __m10["statusSummary"];
+export const userMayInput = __m10["userMayInput"];
+export const vmStateChip = __m10["vmStateChip"];
 
 export { injectTempleOSStyles as injectStyles };
 export default __tosPlugin;

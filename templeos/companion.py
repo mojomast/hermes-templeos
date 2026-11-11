@@ -80,7 +80,7 @@ ONESHOT_S = {
 
 ONESHOT_ANIMS = frozenset(ONESHOT_S)
 
-SAY_MAX_CHARS = 240
+SAY_MAX_CHARS = 600
 SAY_DEFAULT_S = 6.0
 
 # Hooks we register. Every name is in Hermes VALID_HOOKS (v0.23.0).

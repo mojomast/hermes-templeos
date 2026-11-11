@@ -2,21 +2,28 @@ import { jsx, jsxs } from "react/jsx-runtime";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createApi, blobUrlFromBase64, revokeUrl, errorText, isAbortError } from "./api.js";
 import { getHostTransport } from "./host.js";
-import { CompanionControls, TerryCompanionOverlay } from "./companion.js";
+import { CompanionControls, TerryCompanion, TerryCompanionOverlay } from "./companion.js";
 import { HERMES_ASSETS, nextTheme } from "./theme.js";
+import { createQuotePicker, quoteKindForBoot, quoteKindForLogEvent, TERRY_IDLE_INTERVAL_MS } from "./quotes.js";
+import TERRY_QUOTES from "../../terry-quotes.json" with { type: "json" };
 import {
   GOLDEN_SNAPSHOT,
   accelLabel,
+  bbsChip,
   drivingChip,
   clampScreenWidth,
+  filterLogEvents,
   fitGuestDisplay,
   flavorLabel,
+  formatLogTime,
   guestSize,
+  guestVersionChip,
   keyEventToPayload,
-  logLine,
+  logToolKey,
   mapPointerToGuest,
   maxScreenWidth,
   measureScreenSpace,
+  paneLayoutMode,
   checkState,
   firstCheck,
   needsOnboarding,
@@ -25,6 +32,7 @@ import {
   screenDisplay,
   statusSummary,
   userMayInput,
+  vmStateChip,
   writeStoredScreenPref,
 } from "./logic.js";
 
@@ -88,6 +96,136 @@ function measurePane(stage) {
   });
 }
 
+function eventKey(event, index) {
+  if (typeof event === "string") return "text:" + index + ":" + event;
+  if (event && event.id != null) return "id:" + String(event.id);
+  if (!event || typeof event !== "object") return "missing:" + index;
+  return [
+    event.at || event.ts || "",
+    event.source || "",
+    event.tool || "",
+    event.op || "",
+    event.summary || "",
+  ].join("|");
+}
+
+const ICON_PATHS = {
+  power: ["M12 3v9", "M6.6 6.6a8 8 0 1 0 10.8 0"],
+  stop: ["M5 5h14v14H5z"],
+  reset: ["M4 10a8 8 0 1 1 2.3 6.7", "M4 4v6h6"],
+  save: ["M5 4h11l3 3v13H5z", "M8 4v6h7V4", "M8 20v-6h8v6"],
+  restore: ["M20 10a8 8 0 1 0-2.3 6.7", "M20 4v6h-6"],
+  eye: ["M2 12s3.6-6 10-6 10 6 10 6-3.6 6-10 6S2 12 2 12z", "M12 9a3 3 0 1 0 0 6 3 3 0 0 0 0-6z"],
+  users: ["M8 11a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7z", "M2 21v-2a5 5 0 0 1 5-5h2a5 5 0 0 1 5 5v2", "M16 4.4a3.5 3.5 0 0 1 0 6.9", "M17.5 14a5 5 0 0 1 4.5 5v2"],
+  keyboard: ["M3 6h18v12H3z", "M7 10h.01", "M11 10h.01", "M15 10h.01", "M19 10h.01", "M7 14h10"],
+  hand: ["M8 12V5.5a1.5 1.5 0 0 1 3 0V11", "M11 11V4.5a1.5 1.5 0 0 1 3 0V11", "M14 11V5.5a1.5 1.5 0 0 1 3 0V13", "M8 11V9a1.5 1.5 0 0 0-3 0v5a7 7 0 0 0 7 7h2a5 5 0 0 0 5-5v-3"],
+  fit: ["M4 9V4h5", "M15 4h5v5", "M20 15v5h-5", "M9 20H4v-5"],
+  gear: ["M12 8.5a3.5 3.5 0 1 0 0 7 3.5 3.5 0 0 0 0-7z", "M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1-2.8 2.8-.1-.1a1.7 1.7 0 0 0-1.9-.3 1.7 1.7 0 0 0-1 1.6v.2h-4v-.2a1.7 1.7 0 0 0-1-1.6 1.7 1.7 0 0 0-1.9.3l-.1.1L4.2 17l.1-.1a1.7 1.7 0 0 0 .3-1.9A1.7 1.7 0 0 0 3 14H2.8v-4H3a1.7 1.7 0 0 0 1.6-1 1.7 1.7 0 0 0-.3-1.9L4.2 7 7 4.2l.1.1A1.7 1.7 0 0 0 9 4.6a1.7 1.7 0 0 0 1-1.6v-.2h4V3a1.7 1.7 0 0 0 1 1.6 1.7 1.7 0 0 0 1.9-.3l.1-.1L19.8 7l-.1.1a1.7 1.7 0 0 0-.3 1.9 1.7 1.7 0 0 0 1.6 1h.2v4H21a1.7 1.7 0 0 0-1.6 1z"],
+  mute: ["M11 5 6 9H3v6h3l5 4z", "M16 9a4 4 0 0 1 0 6", "M19 6a8 8 0 0 1 0 12"],
+  sound: ["M11 5 6 9H3v6h3l5 4z", "M15.5 8.5a5 5 0 0 1 0 7"],
+  follow: ["M6 3v12", "M6 15a4 4 0 0 0 4 4h8", "M15 16l3 3-3 3", "M6 3l4 4-4 4"],
+  lock: ["M6 11h12v10H6z", "M8 11V7a4 4 0 0 1 8 0v4"],
+  unlock: ["M6 11h12v10H6z", "M8 11V7a4 4 0 0 1 7.5-2"],
+  filter: ["M3 5h18l-7 8v6l-4 2v-8z"],
+  terminal: ["M4 4h16v16H4z", "M7 9l3 3-3 3", "M12 15h5"],
+};
+
+function Icon({ name, size }) {
+  const paths = ICON_PATHS[name] || ICON_PATHS.terminal;
+  return jsx("svg", {
+    className: "tos-icon",
+    viewBox: "0 0 24 24",
+    width: size || 14,
+    height: size || 14,
+    fill: "none",
+    stroke: "currentColor",
+    strokeWidth: "1.8",
+    strokeLinecap: "round",
+    strokeLinejoin: "round",
+    "aria-hidden": "true",
+    focusable: "false",
+    children: paths.map((d, index) => jsx("path", { d: d }, String(index))),
+  });
+}
+
+function actionButton(props) {
+  const label = props.label;
+  const className =
+    "tos-btn" +
+    (props.primary ? " tos-primary" : "") +
+    (props.pressed ? " is-on" : "") +
+    (props.className ? " " + props.className : "");
+  return jsxs("button", {
+    type: "button",
+    className: className,
+    "data-testid": props.testid,
+    disabled: props.disabled,
+    title: props.title || label,
+    "aria-pressed": props.pressed == null ? undefined : String(!!props.pressed),
+    onClick: props.onClick,
+    children: [
+      props.icon ? jsx(Icon, { name: props.icon }) : null,
+      jsx("span", { className: "tos-btn-label", children: label }),
+    ],
+  });
+}
+
+function logRow(event, index) {
+  if (typeof event === "string") {
+    return jsx("div", { className: "tos-log-line", children: [
+      jsx("time", { className: "tos-log-time", children: "--:--:--" }),
+      jsx("span", { className: "tos-log-icon tos-log-icon-chat", "aria-hidden": "true" }),
+      jsx("span", { className: "tos-log-summary", children: event }),
+    ] }, "text-" + index);
+  }
+  const toolKey = logToolKey(event);
+  const summary = (event && (event.summary || [event.tool, event.op].filter(Boolean).join(" "))) || "event";
+  const meta = [
+    event && event.source === "user" ? "You" : "Agent",
+    event && event.tool ? event.tool : "",
+    event && event.op ? event.op : "",
+  ].filter(Boolean).join(" · ");
+  return jsxs(
+    "div",
+    {
+      className:
+        "tos-log-line tos-log-" +
+        ((event && event.source) || "agent") +
+        (event && event.ok === false ? " is-failed" : ""),
+      "data-tool": toolKey,
+      children: [
+        jsx("time", {
+          className: "tos-log-time",
+          dateTime: event && (event.at || event.ts) ? String(event.at || event.ts) : undefined,
+          children: formatLogTime(event) || "--:--:--",
+        }),
+        jsx("span", { className: "tos-log-icon tos-log-icon-" + toolKey, "aria-hidden": "true" }),
+        jsxs("span", {
+          className: "tos-log-body",
+          children: [
+            jsx("span", { className: "tos-log-summary", children: summary }),
+            jsx("span", { className: "tos-log-meta", children: meta }),
+          ],
+        }),
+      ],
+    },
+    String((event && event.id) || index)
+  );
+}
+
+function stateChip(testid, chip) {
+  return jsx("span", {
+    className: "tos-status-chip tos-status-" + chip.state,
+    "data-testid": testid,
+    "data-state": chip.state,
+    title: chip.title,
+    children: [
+      jsx("span", { className: "tos-status-dot", "aria-hidden": "true" }),
+      jsx("span", { children: chip.label }),
+    ],
+  });
+}
+
 function defaultStatus(initial) {
   return {
     running: false,
@@ -135,6 +273,10 @@ export function TempleOSPane({ transport, initial } = {}) {
   );
   const [theme, setTheme] = useState((initial && initial.theme) || "hermes");
   const [unchanged, setUnchanged] = useState(!!(initial && initial.unchanged));
+  const [logFilter, setLogFilter] = useState("all");
+  const [logFollow, setLogFollow] = useState(true);
+  const [quotesMuted, setQuotesMuted] = useState(!!(initial && initial.quotesMuted));
+  const [statusLoaded, setStatusLoaded] = useState(skip || !!(initial && initial.status));
   const [screenPref, setScreenPref] = useState(() => {
     if (initial && initial.screenPref) return { mode: initial.screenPref.mode === "manual" ? "manual" : "fit", width: Number(initial.screenPref.width) || 0 };
     return readStoredScreenPref();
@@ -152,6 +294,14 @@ export function TempleOSPane({ transport, initial } = {}) {
   const prevUrl = useRef((initial && initial.frameUrl) || "");
   const shaRef = useRef((initial && initial.sha256) || "");
   const statusRef = useRef(status);
+  const runningRef = useRef(!!(initial && initial.status && initial.status.running));
+  const logScrollRef = useRef(null);
+  const logSeenRef = useRef(new Set());
+  const logHydratedRef = useRef(false);
+  const pickerRef = useRef(null);
+  if (!pickerRef.current) {
+    pickerRef.current = createQuotePicker(TERRY_QUOTES, { muted: !!quotesMuted });
+  }
   const focusedRef = useRef(focused);
   const unchangedRef = useRef(unchanged);
   const hiddenRef = useRef(hidden);
@@ -197,6 +347,7 @@ export function TempleOSPane({ transport, initial } = {}) {
         .then((body) => {
           if (!cancelled) {
             applyStatus(body, setStatus);
+            setStatusLoaded(true);
             if (body && body.companion) {
               if (typeof body.companion.hidden === "boolean") setCompanionHidden(!!body.companion.hidden);
               if (body.companion.costume) setCompanionCostume(body.companion.costume);
@@ -267,6 +418,65 @@ export function TempleOSPane({ transport, initial } = {}) {
   useEffect(() => {
     writeStoredScreenPref(screenPref);
   }, [screenPref.mode, screenPref.width]);
+
+  function sayQuote(text, opts) {
+    Promise.resolve(TerryCompanion.say(text, opts)).catch(() => {});
+  }
+
+  function toggleQuotesMuted() {
+    const next = !quotesMuted;
+    setQuotesMuted(next);
+    pickerRef.current.setMuted(next);
+    if (next) sayQuote("");
+  }
+
+  function onLogScroll(event) {
+    const node = event && event.currentTarget;
+    if (!node) return;
+    const distance = (Number(node.scrollHeight) || 0) - (Number(node.scrollTop) || 0) - (Number(node.clientHeight) || 0);
+    setLogFollow(distance <= 24);
+  }
+
+  useEffect(() => {
+    const picker = pickerRef.current;
+    picker.setMuted(quotesMuted);
+    if (quotesMuted || picker.size === 0) {
+      picker.stopIdle();
+      return undefined;
+    }
+    picker.startIdle(sayQuote, { intervalMs: TERRY_IDLE_INTERVAL_MS });
+    return () => picker.stopIdle();
+  }, [quotesMuted]);
+
+  useEffect(() => {
+    const kind = quoteKindForBoot(runningRef.current, !!status.running);
+    runningRef.current = !!status.running;
+    if (!kind || quotesMuted) return;
+    pickerRef.current.say(sayQuote, kind);
+  }, [status.running, quotesMuted]);
+
+  useEffect(() => {
+    const events = Array.isArray(log) ? log : [];
+    if (!logHydratedRef.current) {
+      logHydratedRef.current = true;
+      events.forEach((event, index) => logSeenRef.current.add(eventKey(event, index)));
+      return;
+    }
+    events.forEach((event, index) => {
+      const key = eventKey(event, index);
+      if (logSeenRef.current.has(key)) return;
+      logSeenRef.current.add(key);
+      if (quotesMuted) return;
+      const kind = quoteKindForLogEvent(event);
+      if (kind) pickerRef.current.say(sayQuote, kind);
+    });
+  }, [log, quotesMuted]);
+
+  useEffect(() => {
+    if (!logFollow) return;
+    const node = logScrollRef.current;
+    if (node && typeof node === "object") node.scrollTop = node.scrollHeight;
+  }, [log, logFilter, logFollow]);
 
   useEffect(() => {
     const stage = stageRef.current;
@@ -350,6 +560,7 @@ export function TempleOSPane({ transport, initial } = {}) {
     return work()
       .then((body) => {
         applyStatus(body, setStatus);
+        if (body && typeof body === "object") setStatusLoaded(true);
         setBusy("");
         if (body && Array.isArray(body.events)) refreshLog(body);
         return body;
@@ -429,6 +640,13 @@ export function TempleOSPane({ transport, initial } = {}) {
   spaceRef.current = box;
   const chip = statusSummary(status);
   const drive = drivingChip(status);
+  const vmChip = vmStateChip(status, statusLoaded);
+  const bbs = bbsChip(status, statusLoaded);
+  const guest = guestVersionChip(status, statusLoaded);
+  const filteredLog = filterLogEvents(log, logFilter);
+  const layoutMode = paneLayoutMode(
+    (box && box.width) || (initial && initial.viewport && initial.viewport.width) || 0
+  );
   const onboarding = needsOnboarding(status);
   const flavor = flavorLabel(status.flavor, status.flavor_name);
   const accel = accelLabel(status.accel, status.kvm);
@@ -441,6 +659,7 @@ export function TempleOSPane({ transport, initial } = {}) {
     "data-mode": status.mode,
     "data-running": running ? "1" : "0",
     "data-theme": theme,
+    "data-layout": layoutMode,
     style: themeStyle(theme),
     children: [
       jsxs("header", {
@@ -458,15 +677,26 @@ export function TempleOSPane({ transport, initial } = {}) {
               }),
             ],
           }),
-          jsx("span", { className: "tos-badge", "data-testid": "flavor-badge", children: flavor }),
-          jsx("span", { className: "tos-badge tos-badge-accel", "data-testid": "accel-badge", children: accel }),
-          jsx("span", { className: "tos-badge", "data-testid": "snapshot-badge", children: status.snapshot || "no snapshot" }),
-          jsx("span", {
-            className: "tos-chip",
-            "data-testid": "status-chip",
-            "data-mode": status.mode,
-            "data-paused": status.agent_paused ? "1" : "0",
-            children: chip,
+          jsxs("div", {
+            className: "tos-chips",
+            role: "group",
+            "aria-label": "Guest status",
+            children: [
+              jsx("span", { className: "tos-badge", "data-testid": "flavor-badge", title: "Guest flavour", children: flavor }),
+              jsx("span", { className: "tos-badge tos-badge-accel", "data-testid": "accel-badge", title: "Hardware acceleration", children: accel }),
+              jsx("span", { className: "tos-badge", "data-testid": "snapshot-badge", title: "Active snapshot", children: status.snapshot || "no snapshot" }),
+              stateChip("vm-state-chip", vmChip),
+              stateChip("bbs-status-chip", bbs),
+              stateChip("guest-version-chip", guest),
+              jsx("span", {
+                className: "tos-chip",
+                "data-testid": "status-chip",
+                "data-mode": status.mode,
+                "data-paused": status.agent_paused ? "1" : "0",
+                "data-state": vmChip.state,
+                children: chip,
+              }),
+            ],
           }),
           jsx("button", {
             type: "button",
@@ -475,55 +705,99 @@ export function TempleOSPane({ transport, initial } = {}) {
             "aria-label": "Switch pane theme",
             title: theme === "hermes" ? "Switch to VGA chrome" : "Switch to Temple of Hermes theme",
             onClick: () => setTheme(nextTheme(theme)),
-            children: theme === "hermes" ? "Temple" : "VGA",
+            children: [
+              jsx(Icon, { name: "gear" }),
+              jsx("span", { className: "tos-btn-label", children: theme === "hermes" ? "Temple" : "VGA" }),
+            ],
           }),
         ],
       }),
       jsxs("div", {
-        className: "tos-bar",
+        className: "tos-toolbar",
         children: [
-          jsx("button", { type: "button", className: "tos-btn tos-primary", "data-testid": "start", disabled: disabled || running, onClick: onStart, children: busy === "start" ? "Starting…" : "Start" }),
-          jsx("button", { type: "button", className: "tos-btn", "data-testid": "stop", disabled: disabled || !running, onClick: onStop, children: "Stop" }),
-          jsx("button", { type: "button", className: "tos-btn", "data-testid": "reset", disabled: disabled || !running, onClick: onReset, children: "Reset" }),
-          jsx("button", { type: "button", className: "tos-btn", "data-testid": "snapshot-save", disabled: disabled || !running, onClick: onSave, children: "Snapshot golden" }),
-          jsx("button", { type: "button", className: "tos-btn", "data-testid": "snapshot-restore", disabled: disabled, onClick: onRestore, children: "Restore golden" }),
           jsxs("div", {
-            className: "tos-modes",
-            role: "group",
-            "aria-label": "Control mode",
+            className: "tos-bar",
+            role: "toolbar",
+            "aria-label": "TempleOS controls",
             children: [
-              modeButton("watch", "Watch", status.mode, disabled, setMode),
-              modeButton("shared", "Shared", status.mode, disabled, setMode),
-              modeButton("user", "You drive", status.mode, disabled, setMode),
+              jsxs("div", {
+                className: "tos-group",
+                role: "group",
+                "aria-label": "VM power",
+                children: [
+                  jsx("span", { className: "tos-group-label", children: "Power" }),
+                  actionButton({ testid: "start", label: busy === "start" ? "Starting…" : "Start", icon: "power", primary: true, disabled: disabled || running, onClick: onStart, title: "Start the guest" }),
+                  actionButton({ testid: "stop", label: "Stop", icon: "stop", disabled: disabled || !running, onClick: onStop, title: "Stop the guest" }),
+                  actionButton({ testid: "reset", label: "Reset", icon: "reset", disabled: disabled || !running, onClick: onReset, title: "Reset the guest" }),
+                ],
+              }),
+              jsxs("div", {
+                className: "tos-group",
+                role: "group",
+                "aria-label": "Snapshots",
+                children: [
+                  jsx("span", { className: "tos-group-label", children: "Snapshots" }),
+                  actionButton({ testid: "snapshot-save", label: busy === "save" ? "Saving…" : "Save", icon: "save", disabled: disabled || !running, onClick: onSave, title: "Save the golden snapshot" }),
+                  actionButton({ testid: "snapshot-restore", label: busy === "restore" ? "Restoring…" : "Restore", icon: "restore", disabled: disabled, onClick: onRestore, title: "Restore the golden snapshot" }),
+                ],
+              }),
+              jsxs("div", {
+                className: "tos-group",
+                role: "group",
+                "aria-label": "Input mode",
+                children: [
+                  jsx("span", { className: "tos-group-label", children: "Input" }),
+                  jsxs("div", {
+                    className: "tos-modes",
+                    role: "group",
+                    "aria-label": "Control mode",
+                    children: [
+                      modeButton("watch", "Watch", status.mode, disabled, setMode),
+                      modeButton("shared", "Shared", status.mode, disabled, setMode),
+                      modeButton("user", "You drive", status.mode, disabled, setMode),
+                    ],
+                  }),
+                  actionButton({ testid: "take-control", label: "Take control", icon: "hand", primary: true, disabled: disabled || status.mode === "user", onClick: () => setMode("take"), title: "Take the keyboard from the agent" }),
+                  actionButton({ testid: "hand-back", label: "Hand back", icon: "users", disabled: disabled || status.mode === "shared", onClick: () => setMode("handback"), title: "Hand the keyboard back to the agent" }),
+                ],
+              }),
+              jsxs("div", {
+                className: "tos-group",
+                role: "group",
+                "aria-label": "View",
+                children: [
+                  jsx("span", { className: "tos-group-label", children: "View" }),
+                  actionButton({ testid: "screen-fit", label: "Fit", icon: "fit", pressed: screenPref.mode === "fit", onClick: chooseFit, title: "Fit the guest to the pane (double-click the corner handle too)" }),
+                ],
+              }),
+              jsxs("div", {
+                className: "tos-group tos-group-terry",
+                role: "group",
+                "aria-label": "Terry companion",
+                children: [
+                  jsx("span", { className: "tos-group-label", children: "Terry" }),
+                  jsx(CompanionControls, {
+                    hidden: companionHidden,
+                    enabled: !(status.companion && status.companion.enabled === false),
+                    costume: companionCostume,
+                    costumes: (status.companion && status.companion.costumes) || ["base", "cowboy", "wizard", "chef"],
+                    muted: quotesMuted,
+                    onToggleMuted: toggleQuotesMuted,
+                    onToggleHidden: () => {
+                      setCompanionHidden((prev) => {
+                        const next = !prev;
+                        api.companionSet({ hidden: next }).catch(() => {});
+                        return next;
+                      });
+                    },
+                    onCostume: (name) => {
+                      setCompanionCostume(name);
+                      api.companionSet({ costume: name }).catch(() => {});
+                    },
+                  }),
+                ],
+              }),
             ],
-          }),
-          jsx("button", { type: "button", className: "tos-btn tos-primary", "data-testid": "take-control", disabled: disabled || status.mode === "user", onClick: () => setMode("take"), children: "Take control" }),
-          jsx("button", { type: "button", className: "tos-btn", "data-testid": "hand-back", disabled: disabled || status.mode === "shared", onClick: () => setMode("handback"), children: "Hand back" }),
-          jsx("button", {
-            type: "button",
-            className: "tos-btn" + (screenPref.mode === "fit" ? " is-on" : ""),
-            "data-testid": "screen-fit",
-            "aria-pressed": screenPref.mode === "fit" ? "true" : "false",
-            title: "Fit the guest to the pane",
-            onClick: chooseFit,
-            children: "Fit",
-          }),
-          jsx(CompanionControls, {
-            hidden: companionHidden,
-            enabled: !(status.companion && status.companion.enabled === false),
-            costume: companionCostume,
-            costumes: (status.companion && status.companion.costumes) || ["base", "cowboy", "wizard", "chef"],
-            onToggleHidden: () => {
-              setCompanionHidden((prev) => {
-                const next = !prev;
-                api.companionSet({ hidden: next }).catch(() => {});
-                return next;
-              });
-            },
-            onCostume: (name) => {
-              setCompanionCostume(name);
-              api.companionSet({ costume: name }).catch(() => {});
-            },
           }),
         ],
       }),
@@ -624,20 +898,73 @@ export function TempleOSPane({ transport, initial } = {}) {
               jsxs("section", {
                 className: "tos-log",
                 "data-testid": "agent-log",
+                "data-filter": logFilter,
+                "data-follow": logFollow ? "1" : "0",
                 children: [
-                  jsx("h2", { children: "Agent log" }),
-                  log.length
-                    ? log.map((event, i) =>
-                        jsx(
-                          "p",
-                          {
-                            className: "tos-log-line tos-log-" + (event.source || "agent") + (event.ok === false ? " is-failed" : ""),
-                            children: typeof event === "string" ? event : logLine(event),
-                          },
-                          String((event && event.id) || i)
-                        )
-                      )
-                    : jsx("p", { className: "tos-log-empty", children: "The agent has not injected input yet." }),
+                  jsxs("div", {
+                    className: "tos-log-head",
+                    children: [
+                      jsxs("h2", {
+                        children: [
+                          jsx(Icon, { name: "terminal", size: 13 }),
+                          jsx("span", { children: "Agent log" }),
+                        ],
+                      }),
+                      jsxs("div", {
+                        className: "tos-log-filters",
+                        role: "group",
+                        "aria-label": "Filter the Agent Log",
+                        children: ["all", "tools", "user", "errors"].map((name) =>
+                          jsx(
+                            "button",
+                            {
+                              type: "button",
+                              className: "tos-log-filter" + (logFilter === name ? " is-on" : ""),
+                              "data-testid": "log-filter-" + name,
+                              "aria-pressed": logFilter === name ? "true" : "false",
+                              title: "Show " + name,
+                              onClick: () => setLogFilter(name),
+                              children: name === "user" ? "You" : name.charAt(0).toUpperCase() + name.slice(1),
+                            },
+                            name
+                          )
+                        ),
+                      }),
+                      jsx("button", {
+                        type: "button",
+                        className: "tos-log-follow" + (logFollow ? " is-on" : ""),
+                        "data-testid": "log-follow",
+                        "aria-pressed": logFollow ? "true" : "false",
+                        title: logFollow ? "Auto-follow is locked on. Click to stop following." : "Follow new Agent Log events again.",
+                        onClick: () => setLogFollow((prev) => !prev),
+                        children: [
+                          jsx(Icon, { name: logFollow ? "lock" : "unlock", size: 13 }),
+                          jsx("span", { children: logFollow ? "Following" : "Follow" }),
+                        ],
+                      }),
+                    ],
+                  }),
+                  jsx("div", {
+                    className: "tos-log-scroll",
+                    ref: logScrollRef,
+                    onScroll: onLogScroll,
+                    tabIndex: 0,
+                    "aria-live": "polite",
+                    "aria-label": "Agent Log events",
+                    children: filteredLog.length
+                      ? filteredLog.map((event, i) => logRow(event, i))
+                      : jsx("p", {
+                          className: "tos-log-empty",
+                          children:
+                            logFilter === "tools"
+                              ? "No tool calls yet."
+                              : logFilter === "user"
+                                ? "No user actions yet."
+                                : logFilter === "errors"
+                                  ? "No errors. Quiet and healthy."
+                                  : "The agent has not injected input yet.",
+                        }),
+                  }),
                 ],
               }),
                 ],
@@ -668,15 +995,20 @@ const POLL_TICK = 100;
 
 function modeButton(mode, label, current, disabled, setMode) {
   const op = mode === "user" ? "take" : mode === "shared" ? "handback" : "watch";
+  const icon = mode === "watch" ? "eye" : mode === "user" ? "keyboard" : "users";
   return jsx("button", {
     type: "button",
     className: "tos-btn" + (current === mode ? " is-on" : ""),
     "data-testid": "mode-" + mode,
     "aria-pressed": current === mode ? "true" : "false",
+    title: "Set control mode to " + label,
     disabled: disabled,
     onClick: () => setMode(op),
-    children: label,
-  });
+    children: [
+      jsx(Icon, { name: icon }),
+      jsx("span", { className: "tos-btn-label", children: label }),
+    ],
+  }, mode);
 }
 
 function checkRow(label, value) {

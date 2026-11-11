@@ -447,3 +447,140 @@ export function logLine(event) {
   const suffix = event.ok === false ? " (failed)" : "";
   return (time ? time + "  " : "") + who + "  " + summary + suffix;
 }
+
+/* ---- World-class pane helpers: chips, log filters, layout ---- */
+
+export const COMPACT_BREAKPOINT_PX = 900;
+
+export const LOG_FILTERS = Object.freeze(["all", "tools", "user", "errors"]);
+
+export function filterLogEvents(events, filter) {
+  const list = Array.isArray(events) ? events : [];
+  switch (filter) {
+    case "tools":
+      return list.filter((event) => !!(event && event.tool));
+    case "user":
+      return list.filter((event) => !!event && event.source === "user");
+    case "errors":
+      return list.filter((event) => !!event && event.ok === false);
+    default:
+      return list.slice();
+  }
+}
+
+export function logToolKey(event) {
+  if (!event) return "chat";
+  const tool = String(event.tool || event.source || "").toLowerCase();
+  if (tool.includes("vm")) return "vm";
+  if (tool.includes("screen") || tool.includes("frame")) return "screen";
+  if (tool.includes("input") || tool.includes("keyboard")) return "input";
+  if (tool.includes("file") || tool.includes("serial")) return "files";
+  if (tool.includes("bbs")) return "bbs";
+  return event.source === "user" ? "user" : "chat";
+}
+
+export function vmStateChip(status, loaded = true) {
+  const body = status || {};
+  if (body.vm_error || body.code === "vm_error") {
+    return { state: "error", label: "VM error", title: "The guest reported an error. Open the Agent Log for details." };
+  }
+  if (!loaded) {
+    return { state: "loading", label: "VM checking", title: "Waiting for the first status reply." };
+  }
+  if (body.starting || body.state === "starting" || body.transition === "starting") {
+    return { state: "loading", label: "VM starting", title: "QEMU is starting the guest." };
+  }
+  if (body.running) {
+    return { state: "ok", label: "VM running", title: "The guest is running." };
+  }
+  if (body.setup_needed) {
+    return { state: "warn", label: "VM not set up", title: "QEMU or the pinned ISO is missing." };
+  }
+  return { state: "idle", label: "VM stopped", title: "The guest is stopped. Press Start." };
+}
+
+export function bbsChip(status, loaded = true) {
+  const body = status || {};
+  const raw = body.bbs;
+  if (!loaded) {
+    return { state: "loading", label: "BBS checking", title: "Waiting for the first status reply." };
+  }
+  if (raw && typeof raw === "object") {
+    if (raw.error) {
+      return { state: "error", label: "BBS error", title: "The BBS link reported an error. The guest still runs locally." };
+    }
+    if (raw.connected === true || raw.online === true || raw.ok === true) {
+      return { state: "ok", label: "BBS online", title: "The local BBS link is online." };
+    }
+    return { state: "idle", label: "BBS offline", title: "No BBS session is open." };
+  }
+  if (typeof raw === "string" && raw.trim()) {
+    const value = raw.trim();
+    const lower = value.toLowerCase();
+    const state = lower.includes("error") ? "error" : lower.includes("on") || lower.includes("ready") ? "ok" : "idle";
+    return { state: state, label: "BBS " + value, title: "BBS status from the guest." };
+  }
+  return { state: "empty", label: "BBS idle", title: "The BBS has not reported a session yet." };
+}
+
+export function guestVersionChip(status, loaded = true) {
+  const body = status || {};
+  const raw = body.guest_version || body.version || body.flavor_name || body.flavor;
+  if (typeof raw === "string" && raw.trim()) {
+    const value = raw.trim();
+    const label = value.toLowerCase().startsWith("guest") ? value : "Guest " + value;
+    return { state: "ok", label: label, title: "Guest flavour reported by the host." };
+  }
+  if (!loaded) {
+    return { state: "loading", label: "Guest checking", title: "Waiting for the first status reply." };
+  }
+  return { state: "empty", label: "Guest unknown", title: "The host did not report a guest version." };
+}
+
+export function paneLayoutMode(width) {
+  const value = Number(width);
+  if (!Number.isFinite(value) || value <= 0) return "wide";
+  return value <= COMPACT_BREAKPOINT_PX ? "compact" : "wide";
+}
+
+/** Deterministic model of the CSS grid: adjacent boxes never overlap. */
+export function layoutRegions(metrics = {}) {
+  const width = Math.max(0, Number(metrics.width) || 0);
+  const height = Math.max(0, Number(metrics.height) || 0);
+  const gap = Math.max(0, Number(metrics.gap) || 10);
+  const logHeight = Math.max(0, Number(metrics.logHeight) || 0);
+  const mode = paneLayoutMode(width);
+  const dockWidth = Math.max(0, Math.min(520, Math.max(300, width * 0.34)));
+  if (mode === "compact") {
+    const dockHeight = Math.max(0, Math.min(180, Math.max(120, height * 0.22)));
+    const stageHeight = Math.max(0, height - dockHeight - gap);
+    const screenHeight = Math.max(0, stageHeight - logHeight - gap);
+    return {
+      mode: mode,
+      gap: gap,
+      screen: { x: 0, y: 0, width: width, height: screenHeight },
+      log: { x: 0, y: screenHeight + gap, width: width, height: logHeight },
+      terry: { x: 0, y: stageHeight + gap, width: width, height: dockHeight },
+    };
+  }
+  const leftWidth = Math.max(0, width - dockWidth - gap);
+  const screenHeight = Math.max(0, height - logHeight - gap);
+  return {
+    mode: mode,
+    gap: gap,
+    screen: { x: 0, y: 0, width: leftWidth, height: screenHeight },
+    log: { x: 0, y: screenHeight + gap, width: leftWidth, height: logHeight },
+    terry: { x: leftWidth + gap, y: 0, width: dockWidth, height: height },
+  };
+}
+
+export function rectsOverlap(a, b, epsilon = 0) {
+  if (!a || !b) return false;
+  const pad = Math.max(0, Number(epsilon) || 0);
+  return (
+    a.x < b.x + b.width - pad &&
+    b.x < a.x + a.width - pad &&
+    a.y < b.y + b.height - pad &&
+    b.y < a.y + a.height - pad
+  );
+}

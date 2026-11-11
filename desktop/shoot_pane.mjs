@@ -47,6 +47,12 @@ function loadV4() {
 }
 
 const V4 = loadV4();
+const QUOTES = JSON.parse(readFileSync(path.join(ROOT, "desktop", "terry-quotes.json"), "utf8"));
+const LONG_QUOTE =
+  Array.isArray(QUOTES) && QUOTES.length
+    ? QUOTES.reduce((best, entry) => (String(entry.text || "").length > String(best.text || "").length ? entry : best), QUOTES[0])
+    : null;
+const SPEECH_TEXT = LONG_QUOTE ? String(LONG_QUOTE.text) : "TEST_FIXTURE_ONLY";
 
 function v4Script(options) {
   const clips = {};
@@ -159,12 +165,39 @@ function page(body, script = "") {
     --ui-stroke-secondary: rgba(255, 255, 85, 0.25);
     --ui-accent: #55ffff;
   }
-  html, body { margin: 0; height: 100%; background: #000010; color: var(--ui-text-primary); }
-  #root { min-height: 100vh; }
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #000010; color: var(--ui-text-primary); }
+  #root { height: 100vh; overflow: hidden; }
   ${CSS}
 </style>
 </head>
-<body><div id="root">${body}</div>${script}</body>
+<body><div id="root">${body}</div>${script}
+<script>
+window.addEventListener("load", function () {
+  setTimeout(function () {
+    var map = {
+      screen: '[data-testid="screen"]',
+      log: '[data-testid="agent-log"]',
+      terry: '[data-testid="companion-dock"]',
+      bubble: '[data-testid="companion-bubble"]'
+    };
+    var out = {};
+    Object.keys(map).forEach(function (key) {
+      var el = document.querySelector(map[key]);
+      if (!el) return;
+      var r = el.getBoundingClientRect();
+      out[key] = { x: r.x, y: r.y, width: r.width, height: r.height };
+    });
+    var pre = document.createElement("pre");
+    pre.id = "__layout_rects";
+    pre.textContent = JSON.stringify(out);
+    pre.style.position = "fixed";
+    pre.style.left = "-9999px";
+    pre.style.top = "0";
+    document.body.appendChild(pre);
+  }, 1200);
+});
+</script>
+</body>
 </html>`;
 }
 
@@ -240,7 +273,61 @@ const log = [
   },
 ];
 
+const worldReady = {
+  ...ready,
+  companion: {
+    enabled: true,
+    hidden: false,
+    character: "terry",
+    animation: "talking",
+    costume: "base",
+    speech: { active: true, text: SPEECH_TEXT },
+  },
+};
+
 const shots = {
+  "pane-1920x1240.png": {
+    size: "1920,1240",
+    html: render(
+      {
+        theme: "hermes",
+        scale: 1.5,
+        viewport: { width: 1920, height: 1240 },
+        frameUrl: tinkeros,
+        log,
+        status: worldReady,
+      },
+      { animation: "idle", costume: "base", time: 420, clips: ["idle", "greet"] }
+    ),
+  },
+  "pane-1280x800.png": {
+    size: "1280,800",
+    html: render(
+      {
+        theme: "hermes",
+        scale: 0.72,
+        viewport: { width: 1280, height: 800 },
+        frameUrl: prompt,
+        log,
+        status: worldReady,
+      },
+      { animation: "idle", costume: "base", time: 420, clips: ["idle", "greet"] }
+    ),
+  },
+  "pane-narrow.png": {
+    size: "820,1080",
+    html: render(
+      {
+        theme: "hermes",
+        scale: 0.7,
+        viewport: { width: 820, height: 1080 },
+        frameUrl: tinkeros,
+        log,
+        status: worldReady,
+      },
+      { animation: "idle", costume: "base", time: 420, clips: ["idle", "greet"] }
+    ),
+  },
   "pane-onboarding.png": {
     size: "1280,1100",
     html: render({
@@ -644,4 +731,49 @@ for (const [name, shot] of Object.entries(shots)) {
     process.exit(1);
   }
   console.log("wrote", path.relative(ROOT, dest));
+}
+
+const MEASURE_NAMES = new Set(["pane-1920x1240.png", "pane-1280x800.png", "pane-narrow.png"]);
+const rects = {};
+for (const [name, shot] of Object.entries(shots)) {
+  if (!MEASURE_NAMES.has(name)) continue;
+  if (ONLY.length && !ONLY.includes(name)) continue;
+  const file = path.join("/tmp", name.replace(".png", ".html"));
+  // Chrome's --dump-dom viewport is 88px shorter than the --screenshot
+  // viewport for the same --window-size in this headless build. Add that
+  // chrome allowance here so the measured boxes match the saved PNG.
+  const [width, height] = shot.size.split(",").map(Number);
+  const measureSize = `${width},${height + 88}`;
+  const result = spawnSync(
+    chrome,
+    [
+      "--headless=new",
+      "--no-sandbox",
+      "--disable-gpu",
+      "--disable-dev-shm-usage",
+      "--hide-scrollbars",
+      "--force-device-scale-factor=1",
+      "--virtual-time-budget=3200",
+      "--timeout=5000",
+      `--window-size=${measureSize}`,
+      "--dump-dom",
+      `file://${file}`,
+    ],
+    { encoding: "utf8", timeout: 20000, maxBuffer: 32 * 1024 * 1024 }
+  );
+  const match = result.stdout && result.stdout.match(/<pre id="__layout_rects"[^>]*>([\s\S]*?)<\/pre>/);
+  if (result.status !== 0 || !match) {
+    console.error("could not measure", name, result.stderr || "");
+    continue;
+  }
+  try {
+    rects[name] = JSON.parse(match[1]);
+    console.log("measured", name, JSON.stringify(rects[name]));
+  } catch (err) {
+    console.error("bad rect JSON for", name, err.message);
+  }
+}
+if (Object.keys(rects).length) {
+  writeFileSync(path.join(OUT, "PANE-RECTS.json"), JSON.stringify(rects, null, 2) + "\n");
+  console.log("wrote", path.relative(ROOT, path.join(OUT, "PANE-RECTS.json")));
 }

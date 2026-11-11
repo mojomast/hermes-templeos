@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+import json
 from pathlib import Path
 
 import yaml
@@ -17,6 +18,21 @@ ROOT = Path(__file__).resolve().parents[1]
 
 def setup_function(_fn=None):
     companion.reset_state()
+
+
+def test_production_quotes_are_complete_and_sourced():
+    path = ROOT / "desktop" / "terry-quotes.json"
+    data = json.loads(path.read_text(encoding="utf-8"))
+    assert isinstance(data, list)
+    assert len(data) == 69
+    for entry in data:
+        assert isinstance(entry, dict)
+        assert isinstance(entry.get("text"), str) and entry["text"].strip()
+        assert isinstance(entry.get("source_title"), str) and entry["source_title"].strip()
+        assert isinstance(entry.get("source_url"), str)
+        assert entry["source_url"].startswith(("http://", "https://"))
+        if "date" in entry:
+            assert isinstance(entry["date"], str)
 
 
 def test_hooks_declared_match_registration():
