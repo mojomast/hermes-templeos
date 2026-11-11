@@ -1,0 +1,166 @@
+{
+  "version": 2,
+  "cell": [
+    192,
+    208
+  ],
+  "foot_y": 198,
+  "costume_coverage": "base",
+  "note": "Rich v2 clips shipped as pre-baked base-costume strips (already rendered in the art pack). Costume atlases still apply to the nine Hermes rows. Costume-specific rich strips were not baked here to keep asset growth reasonable (~6 MB vs ~24 MB).",
+  "clips": [
+    {
+      "name": "vm_booting",
+      "image": "vm_booting.png",
+      "cell": [
+        192,
+        208
+      ],
+      "duration_ms": 3600,
+      "loop": true,
+      "count": 72,
+      "frame_ms": 50.0,
+      "bytes": 633420,
+      "costume": "base"
+    },
+    {
+      "name": "celebrate_short",
+      "image": "celebrate_short.png",
+      "cell": [
+        192,
+        208
+      ],
+      "duration_ms": 1800,
+      "loop": false,
+      "count": 55,
+      "frame_ms": 33.333333333333336,
+      "bytes": 780878,
+      "costume": "base"
+    },
+    {
+      "name": "greet",
+      "image": "greet.png",
+      "cell": [
+        192,
+        208
+      ],
+      "duration_ms": 2400,
+      "loop": false,
+      "count": 73,
+      "frame_ms": 33.333333333333336,
+      "bytes": 469475,
+      "costume": "base"
+    },
+    {
+      "name": "nod",
+      "image": "nod.png",
+      "cell": [
+        192,
+        208
+      ],
+      "duration_ms": 1200,
+      "loop": false,
+      "count": 37,
+      "frame_ms": 33.333333333333336,
+      "bytes": 244005,
+      "costume": "base"
+    },
+    {
+      "name": "stretch",
+      "image": "stretch.png",
+      "cell": [
+        192,
+        208
+      ],
+      "duration_ms": 3400,
+      "loop": false,
+      "count": 103,
+      "frame_ms": 33.333333333333336,
+      "bytes": 1050344,
+      "costume": "base"
+    },
+    {
+      "name": "relieved",
+      "image": "relieved.png",
+      "cell": [
+        192,
+        208
+      ],
+      "duration_ms": 2400,
+      "loop": false,
+      "count": 73,
+      "frame_ms": 33.333333333333336,
+      "bytes": 787468,
+      "costume": "base"
+    },
+    {
+      "name": "typing",
+      "image": "typing.png",
+      "cell": [
+        192,
+        208
+      ],
+      "duration_ms": 1600,
+      "loop": true,
+      "count": 12,
+      "frame_ms": 133.33333333333334,
+      "bytes": 51912,
+      "costume": "base"
+    },
+    {
+      "name": "talking",
+      "image": "talking.png",
+      "cell": [
+        192,
+        208
+      ],
+      "duration_ms": 2600,
+      "loop": true,
+      "count": 24,
+      "frame_ms": 108.33333333333333,
+      "bytes": 109877,
+      "costume": "base"
+    },
+    {
+      "name": "smoking",
+      "image": "smoking.png",
+      "cell": [
+        192,
+        208
+      ],
+      "duration_ms": 5600,
+      "loop": true,
+      "count": 112,
+      "frame_ms": 50.0,
+      "bytes": 393449,
+      "costume": "base"
+    },
+    {
+      "name": "exhaling",
+      "image": "exhaling.png",
+      "cell": [
+        192,
+        208
+      ],
+      "duration_ms": 3200,
+      "loop": false,
+      "count": 65,
+      "frame_ms": 50.0,
+      "bytes": 328308,
+      "costume": "base"
+    },
+    {
+      "name": "dance",
+      "image": "dance.png",
+      "cell": [
+        192,
+        208
+      ],
+      "duration_ms": 7200,
+      "loop": true,
+      "count": 72,
+      "frame_ms": 100.0,
+      "bytes": 1160096,
+      "costume": "base"
+    }
+  ]
+}

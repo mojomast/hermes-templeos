@@ -1,0 +1,22 @@
+{
+  "display_scale": 3.5,
+  "atlas_cell_px": [
+    192,
+    208
+  ],
+  "standing_sole_y": 198,
+  "target_figure_height_px_at_1920x1240": [
+    650,
+    700
+  ],
+  "slot_parts_are_slot_size_times_scale": true,
+  "smoke_asset_px": 448,
+  "render": "Use runtime/companion.js (or equivalent) with the high-res parts at this scale. Smooth canvas scaling: imageSmoothingEnabled=true, imageSmoothingQuality='high', devicePixelRatio-aware backing store. Do NOT upscale the 192x208 atlas with image-rendering:pixelated. Whole-head plates live in parts/head_base/; do not draw the tiny ear/eye/mouth/brow/hair/nose stubs (they were not rebuilt from masters). Cigarette grip_front/grip_back have no high-res master; prefer cigarette/default.png.",
+  "omitted": [
+    "runtime/data.js (9.7MB low-res atlas embed; wrong render path)",
+    "modular/out/atlas.png and costume atlases (192x208 cells)",
+    "modular/out/masters/ full-res sources (downsampled parts shipped instead)",
+    "contact sheets, proof jpg/gif, smoke-preview.gif, dance-sheet.png, preview/summary images",
+    "face-part stubs without masters (ear, eye, brow, mouth, hair, nose)"
+  ]
+}

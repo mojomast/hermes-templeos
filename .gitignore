@@ -1,0 +1,24 @@
+.venv/
+__pycache__/
+*.egg-info/
+.env
+.env.*
+*.token
+*token*.json
+.pytest_cache/
+.mypy_cache/
+build/
+dist/
+*.qcow2
+*.iso
+*.ISO
+*.sock
+*.pid
+# Guest images and runtime state never belong in git
+isos/
+disks/
+sockets/
+# Runtime framebuffer dumps only. Keep tests/fixtures/frames tracked.
+frames/
+!tests/fixtures/frames/
+!tests/fixtures/frames/**

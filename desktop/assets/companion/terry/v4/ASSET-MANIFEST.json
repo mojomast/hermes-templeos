@@ -1,0 +1,849 @@
+{
+  "scale": 3.5,
+  "file_count": 68,
+  "total_bytes": 13193850,
+  "total_mb": 12.583,
+  "budget_mb": 25,
+  "under_budget": true,
+  "by_top_level": {
+    "CHANGES.md": {
+      "bytes": 4108,
+      "mb": 0.004
+    },
+    "INTEGRATION-V2.md": {
+      "bytes": 6492,
+      "mb": 0.006
+    },
+    "INTEGRATION.md": {
+      "bytes": 12478,
+      "mb": 0.012
+    },
+    "README.txt": {
+      "bytes": 5593,
+      "mb": 0.005
+    },
+    "SCALE.json": {
+      "bytes": 1145,
+      "mb": 0.001
+    },
+    "atlas.json": {
+      "bytes": 7718,
+      "mb": 0.007
+    },
+    "baked-presets.json": {
+      "bytes": 10064152,
+      "mb": 9.598
+    },
+    "parts": {
+      "bytes": 2410166,
+      "mb": 2.299
+    },
+    "parts.json": {
+      "bytes": 17399,
+      "mb": 0.017
+    },
+    "presets": {
+      "bytes": 8086,
+      "mb": 0.008
+    },
+    "rig.json": {
+      "bytes": 1607,
+      "mb": 0.002
+    },
+    "runtime": {
+      "bytes": 5761,
+      "mb": 0.005
+    },
+    "smoke": {
+      "bytes": 647485,
+      "mb": 0.617
+    },
+    "speech.json": {
+      "bytes": 1660,
+      "mb": 0.002
+    }
+  },
+  "files": [
+    {
+      "master": "arm_upper_default.png",
+      "dest": "parts/arm_upper/default.png",
+      "slot": "arm_upper",
+      "master_px": [
+        1322,
+        1190
+      ],
+      "out_px": [
+        112,
+        126
+      ],
+      "bytes": 9901
+    },
+    {
+      "master": "back_arm_default.png",
+      "dest": "parts/back_arm/default.png",
+      "slot": "back_arm",
+      "master_px": [
+        1060,
+        1484
+      ],
+      "out_px": [
+        140,
+        196
+      ],
+      "bytes": 12513
+    },
+    {
+      "master": "back_leg_default.png",
+      "dest": "parts/back_leg/default.png",
+      "slot": "back_leg",
+      "master_px": [
+        971,
+        1619
+      ],
+      "out_px": [
+        126,
+        210
+      ],
+      "bytes": 13447
+    },
+    {
+      "master": "front_arm_default.png",
+      "dest": "parts/front_arm/default.png",
+      "slot": "front_arm",
+      "master_px": [
+        1060,
+        1484
+      ],
+      "out_px": [
+        140,
+        196
+      ],
+      "bytes": 12707
+    },
+    {
+      "master": "front_leg_default.png",
+      "dest": "parts/front_leg/default.png",
+      "slot": "front_leg",
+      "master_px": [
+        971,
+        1619
+      ],
+      "out_px": [
+        126,
+        210
+      ],
+      "bytes": 13927
+    },
+    {
+      "master": "torso_default.png",
+      "dest": "parts/torso/default.png",
+      "slot": "torso",
+      "master_px": [
+        1122,
+        1402
+      ],
+      "out_px": [
+        196,
+        245
+      ],
+      "bytes": 62708
+    },
+    {
+      "master": "torso_overlay_chef_apron.png",
+      "dest": "parts/torso_overlay/chef_apron.png",
+      "slot": "torso_overlay",
+      "master_px": [
+        1122,
+        1402
+      ],
+      "out_px": [
+        196,
+        245
+      ],
+      "bytes": 38401
+    },
+    {
+      "master": "torso_overlay_cowboy_vest.png",
+      "dest": "parts/torso_overlay/cowboy_vest.png",
+      "slot": "torso_overlay",
+      "master_px": [
+        1122,
+        1402
+      ],
+      "out_px": [
+        196,
+        245
+      ],
+      "bytes": 54749
+    },
+    {
+      "master": "torso_overlay_wizard_robe.png",
+      "dest": "parts/torso_overlay/wizard_robe.png",
+      "slot": "torso_overlay",
+      "master_px": [
+        1122,
+        1402
+      ],
+      "out_px": [
+        196,
+        245
+      ],
+      "bytes": 37518
+    },
+    {
+      "master": "keyboard_default.png",
+      "dest": "parts/keyboard/default.png",
+      "slot": "keyboard",
+      "master_px": [
+        1651,
+        953
+      ],
+      "out_px": [
+        182,
+        105
+      ],
+      "bytes": 19094
+    },
+    {
+      "master": "neck_default.png",
+      "dest": "parts/neck/default.png",
+      "slot": "neck",
+      "master_px": [
+        1196,
+        1315
+      ],
+      "out_px": [
+        70,
+        77
+      ],
+      "bytes": 5163
+    },
+    {
+      "master": "shadow_default.png",
+      "dest": "parts/shadow/default.png",
+      "slot": "shadow",
+      "master_px": [
+        2172,
+        724
+      ],
+      "out_px": [
+        315,
+        77
+      ],
+      "bytes": 11904
+    },
+    {
+      "master": "forearm_default.png",
+      "dest": "parts/forearm/default.png",
+      "slot": "forearm",
+      "master_px": [
+        1312,
+        1199
+      ],
+      "out_px": [
+        98,
+        112
+      ],
+      "bytes": 6358
+    },
+    {
+      "master": "thigh_default.png",
+      "dest": "parts/thigh/default.png",
+      "slot": "thigh",
+      "master_px": [
+        1217,
+        1293
+      ],
+      "out_px": [
+        112,
+        119
+      ],
+      "bytes": 11557
+    },
+    {
+      "master": "shin_default.png",
+      "dest": "parts/shin/default.png",
+      "slot": "shin",
+      "master_px": [
+        1212,
+        1298
+      ],
+      "out_px": [
+        98,
+        105
+      ],
+      "bytes": 6058
+    },
+    {
+      "master": "foot_default.png",
+      "dest": "parts/foot/default.png",
+      "slot": "foot",
+      "master_px": [
+        1586,
+        992
+      ],
+      "out_px": [
+        112,
+        70
+      ],
+      "bytes": 7034
+    },
+    {
+      "master": "stubble_v2.png",
+      "dest": "parts/stubble/default.png",
+      "slot": "stubble",
+      "master_px": [
+        1470,
+        1070
+      ],
+      "out_px": [
+        154,
+        112
+      ],
+      "bytes": 7764
+    },
+    {
+      "master": "cigarette_default.png",
+      "dest": "parts/cigarette/default.png",
+      "slot": "cigarette",
+      "master_px": [
+        1881,
+        836
+      ],
+      "out_px": [
+        63,
+        28
+      ],
+      "bytes": 667
+    },
+    {
+      "master": "cap_default.png",
+      "dest": "parts/cap/default.png",
+      "slot": "cap",
+      "master_px": [
+        1672,
+        941
+      ],
+      "out_px": [
+        273,
+        154
+      ],
+      "bytes": 34984
+    },
+    {
+      "master": "cap_cowboy.png",
+      "dest": "parts/cap/cowboy.png",
+      "slot": "cap",
+      "master_px": [
+        1672,
+        941
+      ],
+      "out_px": [
+        273,
+        154
+      ],
+      "bytes": 48161
+    },
+    {
+      "master": "cap_wizard.png",
+      "dest": "parts/cap/wizard.png",
+      "slot": "cap",
+      "master_px": [
+        1672,
+        941
+      ],
+      "out_px": [
+        273,
+        154
+      ],
+      "bytes": 21489
+    },
+    {
+      "master": "cap_chef.png",
+      "dest": "parts/cap/chef.png",
+      "slot": "cap",
+      "master_px": [
+        1672,
+        941
+      ],
+      "out_px": [
+        273,
+        154
+      ],
+      "bytes": 31747
+    },
+    {
+      "master": "hand_grip.png",
+      "dest": "parts/hand/grip.png",
+      "slot": "hand",
+      "master_px": [
+        1254,
+        1254
+      ],
+      "out_px": [
+        84,
+        84
+      ],
+      "bytes": 6980
+    },
+    {
+      "master": "hand_open.png",
+      "dest": "parts/hand/open.png",
+      "slot": "hand",
+      "master_px": [
+        1254,
+        1254
+      ],
+      "out_px": [
+        84,
+        84
+      ],
+      "bytes": 5518
+    },
+    {
+      "master": "hand_pinch.png",
+      "dest": "parts/hand/pinch.png",
+      "slot": "hand",
+      "master_px": [
+        1254,
+        1254
+      ],
+      "out_px": [
+        84,
+        84
+      ],
+      "bytes": 6426
+    },
+    {
+      "master": "hand_relaxed.png",
+      "dest": "parts/hand/relaxed.png",
+      "slot": "hand",
+      "master_px": [
+        1254,
+        1254
+      ],
+      "out_px": [
+        84,
+        84
+      ],
+      "bytes": 5898
+    },
+    {
+      "master": "hand_typing.png",
+      "dest": "parts/hand/typing.png",
+      "slot": "hand",
+      "master_px": [
+        1254,
+        1254
+      ],
+      "out_px": [
+        84,
+        84
+      ],
+      "bytes": 7924
+    },
+    {
+      "master": "smoke_default.png",
+      "dest": "parts/smoke/default.png",
+      "slot": "smoke",
+      "master_px": [
+        1106,
+        1422
+      ],
+      "out_px": [
+        98,
+        126
+      ],
+      "bytes": 3634
+    },
+    {
+      "master": "head_base_neutral.png",
+      "dest": "parts/head_base/neutral.png",
+      "slot": "head_base",
+      "master_px": [
+        1095,
+        1437
+      ],
+      "out_px": [
+        224,
+        294
+      ],
+      "bytes": 102060
+    },
+    {
+      "master": "head_base_blink.png",
+      "dest": "parts/head_base/blink.png",
+      "slot": "head_base",
+      "master_px": [
+        1094,
+        1437
+      ],
+      "out_px": [
+        224,
+        294
+      ],
+      "bytes": 98789
+    },
+    {
+      "master": "head_base_concern.png",
+      "dest": "parts/head_base/concern.png",
+      "slot": "head_base",
+      "master_px": [
+        1094,
+        1437
+      ],
+      "out_px": [
+        224,
+        294
+      ],
+      "bytes": 101591
+    },
+    {
+      "master": "head_base_fail.png",
+      "dest": "parts/head_base/fail.png",
+      "slot": "head_base",
+      "master_px": [
+        1095,
+        1437
+      ],
+      "out_px": [
+        224,
+        294
+      ],
+      "bytes": 100864
+    },
+    {
+      "master": "head_base_half.png",
+      "dest": "parts/head_base/half.png",
+      "slot": "head_base",
+      "master_px": [
+        1094,
+        1437
+      ],
+      "out_px": [
+        224,
+        294
+      ],
+      "bytes": 100832
+    },
+    {
+      "master": "head_base_smirk.png",
+      "dest": "parts/head_base/smirk.png",
+      "slot": "head_base",
+      "master_px": [
+        1094,
+        1437
+      ],
+      "out_px": [
+        224,
+        294
+      ],
+      "bytes": 102518
+    },
+    {
+      "master": "head_base_think.png",
+      "dest": "parts/head_base/think.png",
+      "slot": "head_base",
+      "master_px": [
+        1094,
+        1437
+      ],
+      "out_px": [
+        224,
+        294
+      ],
+      "bytes": 99855
+    },
+    {
+      "master": "head_base_talk_a.png",
+      "dest": "parts/head_base/talk_a.png",
+      "slot": "head_base",
+      "master_px": [
+        1094,
+        1437
+      ],
+      "out_px": [
+        224,
+        294
+      ],
+      "bytes": 101618
+    },
+    {
+      "master": "head_base_talk_blink.png",
+      "dest": "parts/head_base/talk_blink.png",
+      "slot": "head_base",
+      "master_px": [
+        1095,
+        1437
+      ],
+      "out_px": [
+        224,
+        294
+      ],
+      "bytes": 98462
+    },
+    {
+      "master": "head_base_talk_ch.png",
+      "dest": "parts/head_base/talk_ch.png",
+      "slot": "head_base",
+      "master_px": [
+        1094,
+        1437
+      ],
+      "out_px": [
+        224,
+        294
+      ],
+      "bytes": 99286
+    },
+    {
+      "master": "head_base_talk_e.png",
+      "dest": "parts/head_base/talk_e.png",
+      "slot": "head_base",
+      "master_px": [
+        1094,
+        1437
+      ],
+      "out_px": [
+        224,
+        294
+      ],
+      "bytes": 99493
+    },
+    {
+      "master": "head_base_talk_ee.png",
+      "dest": "parts/head_base/talk_ee.png",
+      "slot": "head_base",
+      "master_px": [
+        1094,
+        1437
+      ],
+      "out_px": [
+        224,
+        294
+      ],
+      "bytes": 98703
+    },
+    {
+      "master": "head_base_talk_f.png",
+      "dest": "parts/head_base/talk_f.png",
+      "slot": "head_base",
+      "master_px": [
+        1094,
+        1437
+      ],
+      "out_px": [
+        224,
+        294
+      ],
+      "bytes": 99168
+    },
+    {
+      "master": "head_base_talk_l.png",
+      "dest": "parts/head_base/talk_l.png",
+      "slot": "head_base",
+      "master_px": [
+        1094,
+        1437
+      ],
+      "out_px": [
+        224,
+        294
+      ],
+      "bytes": 100036
+    },
+    {
+      "master": "head_base_talk_m.png",
+      "dest": "parts/head_base/talk_m.png",
+      "slot": "head_base",
+      "master_px": [
+        1094,
+        1437
+      ],
+      "out_px": [
+        224,
+        294
+      ],
+      "bytes": 100431
+    },
+    {
+      "master": "head_base_talk_o.png",
+      "dest": "parts/head_base/talk_o.png",
+      "slot": "head_base",
+      "master_px": [
+        1094,
+        1437
+      ],
+      "out_px": [
+        224,
+        294
+      ],
+      "bytes": 100293
+    },
+    {
+      "master": "head_base_talk_s.png",
+      "dest": "parts/head_base/talk_s.png",
+      "slot": "head_base",
+      "master_px": [
+        1094,
+        1437
+      ],
+      "out_px": [
+        224,
+        294
+      ],
+      "bytes": 100384
+    },
+    {
+      "master": "head_base_talk_u.png",
+      "dest": "parts/head_base/talk_u.png",
+      "slot": "head_base",
+      "master_px": [
+        1094,
+        1437
+      ],
+      "out_px": [
+        224,
+        294
+      ],
+      "bytes": 99492
+    },
+    {
+      "dest": "parts/head_base/default.png",
+      "alias_of": "parts/head_base/neutral.png",
+      "bytes": 102060
+    },
+    {
+      "master": "smoke_curl_left.png",
+      "dest": "smoke/assets/curl_left.png",
+      "out_px": [
+        448,
+        448
+      ],
+      "bytes": 86612
+    },
+    {
+      "master": "smoke_curl_right.png",
+      "dest": "smoke/assets/curl_right.png",
+      "out_px": [
+        448,
+        448
+      ],
+      "bytes": 81466
+    },
+    {
+      "master": "smoke_dissipating_cloud.png",
+      "dest": "smoke/assets/dissipating_cloud.png",
+      "out_px": [
+        448,
+        448
+      ],
+      "bytes": 165234
+    },
+    {
+      "master": "smoke_exhale_jet.png",
+      "dest": "smoke/assets/exhale_jet.png",
+      "out_px": [
+        448,
+        448
+      ],
+      "bytes": 51580
+    },
+    {
+      "master": "smoke_exhale_puff.png",
+      "dest": "smoke/assets/exhale_puff.png",
+      "out_px": [
+        448,
+        448
+      ],
+      "bytes": 63249
+    },
+    {
+      "master": "smoke_exhale_ribbon.png",
+      "dest": "smoke/assets/exhale_ribbon.png",
+      "out_px": [
+        448,
+        448
+      ],
+      "bytes": 43604
+    },
+    {
+      "master": "smoke_s_curve.png",
+      "dest": "smoke/assets/s_curve.png",
+      "out_px": [
+        448,
+        448
+      ],
+      "bytes": 69676
+    },
+    {
+      "master": "smoke_source_thread.png",
+      "dest": "smoke/assets/source_thread.png",
+      "out_px": [
+        448,
+        448
+      ],
+      "bytes": 82383
+    },
+    {
+      "dest": "README.txt",
+      "bytes": 5593,
+      "copied": true
+    },
+    {
+      "dest": "INTEGRATION.md",
+      "bytes": 12478,
+      "copied": true
+    },
+    {
+      "dest": "INTEGRATION-V2.md",
+      "bytes": 6492,
+      "copied": true
+    },
+    {
+      "dest": "CHANGES.md",
+      "bytes": 4108,
+      "copied": true
+    },
+    {
+      "dest": "runtime/companion.js",
+      "bytes": 5761,
+      "copied": true
+    },
+    {
+      "dest": "parts.json",
+      "bytes": 17399,
+      "copied": true
+    },
+    {
+      "dest": "rig.json",
+      "bytes": 1607,
+      "copied": true
+    },
+    {
+      "dest": "speech.json",
+      "bytes": 1660,
+      "copied": true
+    },
+    {
+      "dest": "baked-presets.json",
+      "bytes": 10064152,
+      "copied": true
+    },
+    {
+      "dest": "smoke/smoke.json",
+      "bytes": 3681,
+      "copied": true
+    },
+    {
+      "dest": "presets/dance-sheet.json",
+      "bytes": 8086,
+      "copied": true
+    },
+    {
+      "dest": "atlas.json",
+      "bytes": 7718,
+      "copied": true
+    }
+  ]
+}

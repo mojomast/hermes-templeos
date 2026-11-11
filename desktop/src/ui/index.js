@@ -1,0 +1,55 @@
+export { TempleOSPane } from "./pane.js";
+export {
+  PANE_ID,
+  PANE_TITLE,
+  createPaneContribution,
+  registerTempleOSPane,
+  createDesktopPlugin,
+} from "./register.js";
+export {
+  DEFAULT_WIDTH,
+  DEFAULT_HEIGHT,
+  CONTROL_MODES,
+  GOLDEN_SNAPSHOT,
+  guestSize,
+  integerScale,
+  mapPointerToGuest,
+  modeLabel,
+  accelLabel,
+  statusSummary,
+  drivingChip,
+  needsOnboarding,
+  firstCheck,
+  checkState,
+  pollIntervalMs,
+  isReleaseHatch,
+  qcodeFor,
+  keyEventToPayload,
+  nextMode,
+  userMayInput,
+  logLine,
+  flavorLabel,
+  filterLogEvents,
+  logToolKey,
+  vmStateChip,
+  bbsChip,
+  guestVersionChip,
+  paneLayoutMode,
+  layoutRegions,
+  rectsOverlap,
+  COMPACT_BREAKPOINT_PX,
+  LOG_FILTERS,
+} from "./logic.js";
+
+export {
+  normalizeQuote,
+  loadQuotes,
+  pickQuote,
+  createQuotePicker,
+  quoteKindForLogEvent,
+  quoteKindForBoot,
+  TERRY_IDLE_INTERVAL_MS,
+  QUOTE_EVENT_KINDS,
+} from "./quotes.js";
+
+export { TerryCompanionOverlay, CompanionControls, TerryCompanion } from "./companion.js";

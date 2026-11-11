@@ -1,0 +1,131 @@
+{
+  "pane-1920x1240.png": {
+    "screen": {
+      "x": 12,
+      "y": 140.5,
+      "width": 960,
+      "height": 720
+    },
+    "log": {
+      "x": 12,
+      "y": 888.4375,
+      "width": 960,
+      "height": 210
+    },
+    "terry": {
+      "x": 1388,
+      "y": 140.5,
+      "width": 520,
+      "height": 1088.5
+    },
+    "bubble": {
+      "x": 1396,
+      "y": 148.5,
+      "width": 340,
+      "height": 140.828125
+    },
+    "loading": {
+      "present": false,
+      "visible": false
+    },
+    "bubbleText": {
+      "scrollHeight": 139,
+      "clientHeight": 139,
+      "overflowY": "auto"
+    }
+  },
+  "pane-1280x800.png": {
+    "screen": {
+      "x": 12,
+      "y": 177.5,
+      "width": 460.796875,
+      "height": 345.59375
+    },
+    "log": {
+      "x": 12,
+      "y": 551.03125,
+      "width": 460.796875,
+      "height": 140
+    },
+    "terry": {
+      "x": 840.96875,
+      "y": 177.5,
+      "width": 427.03125,
+      "height": 611.5
+    },
+    "bubble": {
+      "x": 848.96875,
+      "y": 185.5,
+      "width": 340,
+      "height": 140.828125
+    },
+    "loading": {
+      "present": false,
+      "visible": false
+    },
+    "bubbleText": {
+      "scrollHeight": 139,
+      "clientHeight": 139,
+      "overflowY": "auto"
+    }
+  },
+  "pane-narrow.png": {
+    "screen": {
+      "x": 8,
+      "y": 270,
+      "width": 576,
+      "height": 432
+    },
+    "log": {
+      "x": 8,
+      "y": 729.9375,
+      "width": 576,
+      "height": 150
+    },
+    "terry": {
+      "x": 592,
+      "y": 270,
+      "width": 180,
+      "height": 623
+    },
+    "bubble": {
+      "x": 597,
+      "y": 273,
+      "width": 170,
+      "height": 240.625
+    },
+    "loading": {
+      "present": false,
+      "visible": false
+    },
+    "bubbleText": {
+      "scrollHeight": 239,
+      "clientHeight": 239,
+      "overflowY": "auto"
+    }
+  },
+  "pane-typing.png": {
+    "screen": {
+      "x": 12,
+      "y": 140.5,
+      "width": 960,
+      "height": 720
+    },
+    "log": {
+      "x": 12,
+      "y": 888.4375,
+      "width": 960,
+      "height": 210
+    },
+    "terry": {
+      "x": 1388,
+      "y": 140.5,
+      "width": 520,
+      "height": 1088.5
+    },
+    "loading": {
+      "present": false,
+      "visible": false
+    }
+  }
+}

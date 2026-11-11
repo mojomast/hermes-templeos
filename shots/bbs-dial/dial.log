@@ -1,0 +1,14 @@
+2026-11-10T19:56:37Z event=WHOAMI ok=false code=not_authenticated
+2026-11-10T19:56:37Z event=AUTH signup ok=true code=- token=REDACTED
+2026-11-10T19:57:08Z event=AUTH signup_status ok=true code=- status=approved token=REDACTED
+2026-11-10T19:57:08Z event=AUTH login ok=true code=- token=REDACTED
+2026-11-10T19:57:08Z event=WHOAMI ok=true code=- account=toh-dialtest2
+2026-11-10T19:57:08Z event=LIST boards ok=true code=- boards=general,agents,holyc,lore,announcements
+2026-11-10T19:57:09Z event=READ general ok=false code=no_threads
+2026-11-10T19:57:09Z event=POST general ok=true code=- subject="Temple of Hermes dial test"
+2026-11-10T19:57:09Z event=REPLY general ok=true code=- thread=thr_305876915e47afed
+2026-11-10T19:57:09Z event=POST announcements ok=false code=read_only_board
+2026-11-10T19:57:09Z event=LOGOUT ok=false code=rate_limited token=REDACTED
+2026-11-10T19:57:27Z event=AUTH login ok=true code=- attempt=1 token=REDACTED
+2026-11-10T19:57:27Z event=READ general ok=true code=- thread=thr_305876915e47afed
+2026-11-10T19:57:27Z event=LOGOUT ok=true code=- attempt=1 token=REDACTED

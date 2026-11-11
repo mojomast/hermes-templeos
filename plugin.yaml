@@ -1,0 +1,78 @@
+name: templeos
+version: "0.1.0"
+description: >-
+  Skill id templeos:templeos-operator. TempleOS runs official-family guests
+  (default TinkerOS 5.20-rc10; optional stock TempleOS 5.03, ZealOS, or a
+  user-supplied Temple of Hermes ISO) in a local QEMU VM so the Hermes agent
+  and the user can share the screen. The plugin spawns qemu-system-x86_64 as
+  a child (KVM only when /dev/kvm can be opened, otherwise TCG) with a
+  minimal child environment, keeps QMP, VNC and COM1 on unix sockets under
+  the plugin data dir, and may fetch a pinned ISO from its official HTTPS URL
+  (SHA-256 verified, connection-pinned, no proxy). Networking is always off
+  (-nic none). An optional Temple of Hermes BBS/chat bridge is off by default
+  and uses only a host-configured TLS endpoint (destination name "bbs"; never
+  a guest-supplied host). The optional chat-bridge token is declared in
+  requires_env and read only through Hermes secret scope. Observer hooks
+  animate the Terry companion from session events; they return None and do
+  not approve, modify, or log other tools. The Desktop pane talks only
+  through ctx.rest. HolyC and serial input can drive the guest. QEMU and ISOs
+  are not bundled. This is a child hypervisor, not an OS sandbox. Includes an
+  optional Terry companion (fan tribute to Terry A. Davis; enabled by default;
+  hide in the pane or set companion: off / TEMPLEOS_COMPANION=off). No official
+  TempleOS affiliation.
+author: mojomast
+license: MIT
+requires_hermes: ">=0.23.0"
+homepage: https://github.com/mojomast/hermes-templeos
+tags:
+  - templeos
+  - qemu
+  - desktop
+  - skills
+manifest_version: 2
+api_version: 1
+provides_tools:
+  - templeos_vm
+  - templeos_screen
+  - templeos_input
+  - templeos_files
+provides_hooks:
+  - pre_tool_call
+  - post_tool_call
+  - pre_llm_call
+  - post_llm_call
+  - on_stream_start
+  - on_stream_delta
+  - on_stream_end
+  - api_request_error
+  - pre_approval_request
+  - post_approval_response
+  - on_human_input_request
+  - on_human_input_resolved
+  - on_session_start
+  - on_session_end
+  - agent_loop_stopped
+  - subagent_start
+  - subagent_stop
+requires_env:
+  - name: TEMPLEOS_CHAT_BRIDGE_TOKEN
+    description: >-
+      Optional bearer token for the opt-in Temple of Hermes chat bridge.
+      Used only when TEMPLEOS_CHAT_BRIDGE is enabled.
+    secret: true
+# Pillow is required for screendumps and PNG frames. qemu-system-x86_64 and
+# qemu-img must be on PATH (system package). pyproject.toml wins if both lists exist.
+config_schema:
+  companion:
+    type: str
+    default: terry
+    description: >-
+      Terry companion sprite. "terry" (default) enables the tribute overlay;
+      "off" disables it. TEMPLEOS_COMPANION env overrides. Pane hide toggle
+      only conceals the sprite.
+  companion_costume:
+    type: str
+    default: base
+    description: Optional costume — base, cowboy, wizard, or chef.
+python_dependencies:
+  - "pillow>=10,<14"
