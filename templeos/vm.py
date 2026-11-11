@@ -19,6 +19,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable
 
+from templeos import diskimage
 from templeos import doctor as doctor_mod
 from templeos.envsafe import child_env
 from templeos.flavors import DEFAULT, DISK_SIZE, FlavorError, get_flavor
@@ -61,6 +62,7 @@ class Runtime:
     iso: Path
     disk: Path
     sockets: dict[str, Path] = field(default_factory=dict)
+    boot_from_disk: bool = False
 
 
 _runtime: Runtime | None = None
@@ -200,23 +202,38 @@ def _start(*, flavor: str | None, snapshot: str, skip_prompts: bool = True) -> d
             str(qemu.get("fix") or "Install qemu-system-x86_64 and qemu-img with your package manager."),
         )
 
-    iso_info = doctor_mod.ensure_iso(rec["id"], fetch=False)
-    if not iso_info.get("ok"):
-        return _fail(
-            str(iso_info.get("error") or "Pinned ISO is not in the cache."),
-            str(iso_info.get("code") or "iso_missing"),
-            str(iso_info.get("fix") or "Run templeos_vm op=doctor to fetch and pin the official ISO."),
-        )
-    iso = Path(iso_info["path"])
-    disk = disks_dir(root) / f"{rec['id']}.qcow2"
-    try:
-        create_disk(disk, DISK_SIZE)
-    except Exception as exc:
-        return _fail(
-            f"Could not create the qcow2 disk: {exc}",
-            "qemu_missing",
-            "Install qemu-img (qemu-utils) and retry start.",
-        )
+    plan = diskimage.boot_plan(rec["id"])
+    boot_from_disk = plan.get("mode") == "disk"
+    if boot_from_disk:
+        # The verified base image stays untouched; boot a per-user overlay.
+        iso = isos_dir(root) / str(rec["iso_filename"])
+        disk = Path(str(plan["overlay"]))
+        try:
+            diskimage.ensure_overlay(Path(str(plan["base"])), disk)
+        except Exception as exc:
+            return _fail(
+                f"Could not create the preinstalled-disk overlay: {exc}",
+                "disk_image_overlay_failed",
+                "Check qemu-img, or set disk_image off to boot the live ISO.",
+            )
+    else:
+        iso_info = doctor_mod.ensure_iso(rec["id"], fetch=False)
+        if not iso_info.get("ok"):
+            return _fail(
+                str(iso_info.get("error") or "Pinned ISO is not in the cache."),
+                str(iso_info.get("code") or "iso_missing"),
+                str(iso_info.get("fix") or "Run templeos_vm op=doctor to fetch and pin the official ISO."),
+            )
+        iso = Path(iso_info["path"])
+        disk = disks_dir(root) / f"{rec['id']}.qcow2"
+        try:
+            create_disk(disk, DISK_SIZE)
+        except Exception as exc:
+            return _fail(
+                f"Could not create the qcow2 disk: {exc}",
+                "qemu_missing",
+                "Install qemu-img (qemu-utils) and retry start.",
+            )
 
     socks = socket_paths(root)
     for path in socks.values():
@@ -237,6 +254,7 @@ def _start(*, flavor: str | None, snapshot: str, skip_prompts: bool = True) -> d
         com1=socks["com1"],
         accel=accel,
         name=vm_name,
+        boot_from_disk=boot_from_disk,
     )
     log_path = root / LOG_NAME
     try:
@@ -276,6 +294,7 @@ def _start(*, flavor: str | None, snapshot: str, skip_prompts: bool = True) -> d
         iso=iso,
         disk=disk,
         sockets=socks,
+        boot_from_disk=boot_from_disk,
     )
     _write_state(root, _runtime)
     _bind_screen(_runtime)
@@ -301,7 +320,7 @@ def _start(*, flavor: str | None, snapshot: str, skip_prompts: bool = True) -> d
         pass
 
     # First-boot ISO prompts steal focus into AutoComplete unless Esc'd first.
-    if skip_prompts and not restored:
+    if skip_prompts and not restored and not boot_from_disk:
         _schedule_first_boot_dismiss()
 
     return _status()
@@ -461,6 +480,7 @@ def _attach_existing(root: Path) -> dict[str, Any]:
     disk = Path(disk_s) if disk_s else default_disk
     accel = str(state.get("accel") or ("kvm" if doctor_mod.kvm_usable() else "tcg"))
     snapshot = state.get("snapshot")
+    boot_from_disk = bool(state.get("disk_image"))
 
     qmp = qmp_factory()
     serial = serial_factory()
@@ -488,6 +508,7 @@ def _attach_existing(root: Path) -> dict[str, Any]:
         iso=iso,
         disk=disk,
         sockets=socks,
+        boot_from_disk=boot_from_disk,
     )
     _write_state(root, _runtime)
     _bind_screen(_runtime)
@@ -670,6 +691,7 @@ def _write_state(root: Path, rt: Runtime) -> None:
         "running": True,
         "disk": str(rt.disk),
         "iso": str(rt.iso.name),
+        "disk_image": bool(rt.boot_from_disk),
     }
     try:
         (root / STATE_NAME).write_text(json.dumps(payload, indent=2) + "\n")

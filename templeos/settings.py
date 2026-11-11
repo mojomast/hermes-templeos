@@ -13,7 +13,102 @@ from templeos.paths import home, isos_dir
 
 SETTINGS_NAME = "settings.json"
 ENV_FLAVOR = "TEMPLEOS_FLAVOR"
+ENV_NUDGE = "TEMPLEOS_NUDGE"
+DEFAULT_NUDGE = True
+DEFAULT_CADENCE = 2
 _MODE = 0o600
+_OFF = frozenset({"", "0", "false", "no", "off", "disabled"})
+
+
+def _read_settings() -> dict[str, Any]:
+    path = _path()
+    if not path.is_file():
+        return {}
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError, UnicodeError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def _write_settings(data: dict[str, Any]) -> None:
+    path = _path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(data, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    try:
+        path.chmod(_MODE)
+    except OSError:
+        pass
+
+
+def _ctx_value(ctx: Any, key: str) -> Any:
+    if ctx is None:
+        return None
+    for attr in ("config", "settings", "plugin_config"):
+        try:
+            value = getattr(ctx, attr, None)
+        except Exception:
+            continue
+        if callable(value):
+            try:
+                value = value()
+            except Exception:
+                continue
+        if isinstance(value, dict):
+            if key in value:
+                return value.get(key)
+            nested = value.get("templeos")
+            if isinstance(nested, dict) and key in nested:
+                return nested.get(key)
+    for meth in ("get_config", "config_get"):
+        fn = getattr(ctx, meth, None)
+        if not callable(fn):
+            continue
+        for name in (key, f"templeos.{key}"):
+            try:
+                value = fn(name)
+            except Exception:
+                continue
+            if value is not None:
+                return value
+    return None
+
+
+def _as_bool(value: Any, default: bool) -> bool:
+    if isinstance(value, bool):
+        return value
+    if value is None:
+        return default
+    return str(value).strip().lower() not in _OFF
+
+
+def nudge_enabled(ctx: Any = None) -> bool:
+    raw = (os.environ.get(ENV_NUDGE) or "").strip()
+    if raw:
+        return _as_bool(raw, DEFAULT_NUDGE)
+    configured = _ctx_value(ctx, "nudge")
+    if configured is not None and configured != "":
+        return _as_bool(configured, DEFAULT_NUDGE)
+    saved = _read_settings().get("nudge")
+    if saved is not None and saved != "":
+        return _as_bool(saved, DEFAULT_NUDGE)
+    return DEFAULT_NUDGE
+
+
+def cadence_per_day(ctx: Any = None) -> int:
+    raw = _ctx_value(ctx, "cadence")
+    if raw is None or raw == "":
+        raw = _read_settings().get("cadence")
+    if raw is None or raw == "":
+        return DEFAULT_CADENCE
+    match = __import__("re").search(r"\d+", str(raw))
+    if not match:
+        return DEFAULT_CADENCE
+    try:
+        value = int(match.group(0))
+    except ValueError:
+        return DEFAULT_CADENCE
+    return max(1, min(8, value))
 
 
 def _path() -> Path:
@@ -47,20 +142,9 @@ def save_preferred(flavor_id: str) -> dict[str, Any]:
     rec = get_flavor(flavor_id)
     path = _path()
     path.parent.mkdir(parents=True, exist_ok=True)
-    existing: dict[str, Any] = {}
-    if path.is_file():
-        try:
-            raw = json.loads(path.read_text(encoding="utf-8"))
-            if isinstance(raw, dict):
-                existing = raw
-        except (OSError, json.JSONDecodeError, UnicodeError):
-            existing = {}
+    existing = _read_settings()
     existing["flavor"] = rec["id"]
-    path.write_text(json.dumps(existing, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-    try:
-        path.chmod(_MODE)
-    except OSError:
-        pass
+    _write_settings(existing)
     return rec
 
 
@@ -182,6 +266,12 @@ def apply_config(ctx: Any) -> str | None:
     """Honor a plugin config/settings ``flavor`` value at register time."""
     if ctx is None:
         return None
+    try:
+        from templeos import register_nudge_hooks
+
+        register_nudge_hooks(ctx)
+    except Exception:
+        pass
     raw = None
     for attr in ("config", "settings", "plugin_config"):
         try:
@@ -221,5 +311,5 @@ def apply_config(ctx: Any) -> str | None:
     try:
         rec = save_preferred(str(raw))
     except FlavorError:
-        return None
-    return rec["id"]
+        rec = None
+    return rec["id"] if rec is not None else None

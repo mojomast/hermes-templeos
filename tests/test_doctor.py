@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from templeos import doctor, flavors
+from templeos import diskimage, doctor, flavors
 from templeos.envsafe import child_env
 from templeos.flavors import get_flavor
 from templeos.qemu import find_binary
@@ -52,6 +52,37 @@ def test_doctor_reports_missing_iso_without_fetching(tos_home, monkeypatch):
     ids = {c["id"] for c in report["checks"]}
     assert {"qemu", "kvm", "iso", "disk"}.issubset(ids)
     assert report["accel_recommended"] in {"tcg", "kvm"}
+
+
+def test_doctor_reports_disk_image_states_without_fetching(tos_home, monkeypatch):
+    calls = []
+    monkeypatch.setattr(doctor, "download_official", lambda *a, **k: calls.append((a, k)))
+    report = doctor.doctor()
+    assert calls == []
+    assert report["disk_image"]["state"] == "not_downloaded"
+    assert report["disk_image"]["url"].startswith("https://github.com/mojomast/temple-of-hermes/releases/download/")
+    assert report["disk_image"]["enabled"] is True
+    assert any(c["id"] == "disk-image" for c in report["checks"])
+
+    payload = b"tiny-verified-disk"
+    digest = hashlib.sha256(payload).hexdigest()
+    monkeypatch.setattr(diskimage, "DISK_SHA256", digest)
+    monkeypatch.setattr(diskimage, "DISK_BYTES", len(payload))
+    image = tos_home / diskimage.DISK_FILENAME
+    image.write_bytes(payload)
+    diskimage.save_config(disk_image="on", disk_image_path=str(image))
+    ready = doctor.doctor()
+    assert ready["disk_image"]["state"] == "ok"
+    assert ready["disk_image"]["verified"] is True
+    assert ready["ok"] is True  # Disk boot does not require the live ISO.
+    assert calls == []
+
+    bad = tos_home / "bad.qcow2"
+    bad.write_bytes(b"wrong")
+    diskimage.save_config(disk_image="on", disk_image_path=str(bad))
+    report = doctor.doctor()
+    assert report["disk_image"]["state"] == "unverified"
+    assert report["disk_image"]["verified"] is False
 
 
 def test_ensure_iso_deletes_hash_mismatch(tos_home, monkeypatch):
@@ -150,3 +181,21 @@ def test_find_binary_consistent_with_doctor():
     info = doctor.qemu_version()
     assert path is not None
     assert str(path) == info["path"]
+
+
+def test_doctor_setup_fetches_disk_image_when_enabled(tos_home, monkeypatch):
+    calls = []
+    monkeypatch.setattr(doctor, "ensure_iso", lambda *a, **k: {"ok": False, "state": "missing"}, raising=False)
+    monkeypatch.setattr(diskimage, "ensure_image", lambda fetch=True: calls.append(fetch) or {"ok": False})
+    try:
+        doctor.doctor(setup=True)
+    except Exception:
+        pass
+    assert calls == [True]
+    calls.clear()
+    diskimage.save_config(disk_image="off")
+    try:
+        doctor.doctor(setup=True)
+    except Exception:
+        pass
+    assert calls == []

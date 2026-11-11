@@ -131,3 +131,48 @@ def test_status_payload_includes_picker_fields(tos_home):
     assert status["sha_state"] == "missing"
     assert status["flavors"][0]["id"] == "templeoh"
     assert "sha256" in status["flavors"][0]
+
+
+def test_nudge_and_cadence_defaults_and_overrides(tos_home, monkeypatch):
+    from templeos.settings import (
+        DEFAULT_CADENCE,
+        DEFAULT_NUDGE,
+        cadence_per_day,
+        nudge_enabled,
+    )
+
+    monkeypatch.delenv("TEMPLEOS_NUDGE", raising=False)
+    assert DEFAULT_NUDGE is True
+    assert nudge_enabled() is True
+    assert cadence_per_day() == DEFAULT_CADENCE == 2
+
+    monkeypatch.setenv("TEMPLEOS_NUDGE", "off")
+    assert nudge_enabled() is False
+    monkeypatch.setenv("TEMPLEOS_NUDGE", "on")
+    assert nudge_enabled() is True
+    monkeypatch.delenv("TEMPLEOS_NUDGE", raising=False)
+
+    (tos_home / "settings.json").write_text(
+        json.dumps({"nudge": "off", "cadence": "4/day"}), encoding="utf-8"
+    )
+    assert nudge_enabled() is False
+    assert cadence_per_day() == 4
+
+    class Ctx:
+        config = {"nudge": "on", "cadence": "1/day"}
+
+    assert nudge_enabled(Ctx()) is True
+    assert cadence_per_day(Ctx()) == 1
+
+
+def test_apply_config_registers_nudge_after_companion(tos_home, monkeypatch):
+    from templeos import nudge
+    from tests.fakes import FakeCtx
+
+    monkeypatch.delenv("TEMPLEOS_NUDGE", raising=False)
+    nudge.reset_state()
+    ctx = FakeCtx()
+    apply_config(ctx)
+    assert "pre_llm_call" in ctx.hooks
+    nudge.record_pending(next_step="land slice")
+    assert ctx.hooks["pre_llm_call"]() == "next step: land slice"

@@ -39,3 +39,14 @@ def tos_home(tmp_path, monkeypatch):
     except Exception:
         pass
     vm_mod._runtime = None
+
+
+@pytest.fixture(autouse=True)
+def _no_disk_image_download(monkeypatch):
+    """The disk option defaults on; tests must never reach the network."""
+    from templeos import diskimage
+
+    def _blocked(url, dest):
+        raise OSError("network disabled in tests")
+
+    monkeypatch.setattr(diskimage, "download_image", _blocked)

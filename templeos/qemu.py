@@ -68,11 +68,14 @@ def build_argv(
     com1: Path,
     accel: str = "tcg",
     name: str = "templeos",
+    boot_from_disk: bool = False,
 ) -> list[str]:
     """Build the qemu-system-x86_64 argv (no shell). Must include -nic none.
 
     Attach a writable qcow2 even in live-CD mode so savevm has a target.
-    Do not add usb-tablet or virtio input. Do not enable networking.
+    ``boot_from_disk`` boots the verified Temple of Hermes disk overlay with no
+    CD; the default live-ISO path is unchanged. Do not add usb-tablet or virtio
+    input. Do not enable networking.
     """
     binary = find_binary(QEMU_BINARY)
     exe = str(binary) if binary is not None else QEMU_BINARY
@@ -83,7 +86,7 @@ def build_argv(
         safe_name,
         *machine_args(accel=accel),
         *socket_args(qmp=Path(qmp), vnc=Path(vnc), com1=Path(com1)),
-        *disk_args(flavor, Path(iso), Path(disk)),
+        *disk_args(flavor, Path(iso), Path(disk), boot_from_disk=boot_from_disk),
     ]
     assert_airgap(argv)
     return argv

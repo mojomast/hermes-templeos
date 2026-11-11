@@ -42,6 +42,27 @@ def test_build_argv_tinkeros_and_templeos_are_ide_and_airgapped(tmp_path):
         assert_airgap(argv)
 
 
+def test_build_argv_disk_boot_attaches_overlay_and_no_cdrom(tmp_path):
+    iso = tmp_path / "TempleOfHermes-0.1.2.ISO"
+    overlay = tmp_path / "templeoh-disk-overlay.qcow2"
+    overlay.write_bytes(b"qcow2")
+    argv = qemu.build_argv(
+        flavor="templeoh",
+        iso=iso,
+        disk=overlay,
+        qmp=tmp_path / "qmp.sock",
+        vnc=tmp_path / "vnc.sock",
+        com1=tmp_path / "com1.sock",
+        accel="tcg",
+        name="templeos-templeoh",
+        boot_from_disk=True,
+    )
+    assert "-cdrom" not in argv
+    assert argv[argv.index("-boot") + 1].startswith("order=c")
+    assert any("if=ide" in part and "qcow2" in part and str(overlay) in part for part in argv)
+    assert_airgap(argv)
+
+
 def test_build_argv_zealos_uses_ahci_not_cdrom(tmp_path):
     iso = tmp_path / get_flavor("zealos")["iso_filename"]
     disk = tmp_path / "zealos.qcow2"
