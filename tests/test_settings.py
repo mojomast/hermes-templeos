@@ -176,3 +176,19 @@ def test_apply_config_registers_nudge_after_companion(tos_home, monkeypatch):
     assert "pre_llm_call" in ctx.hooks
     nudge.record_pending(next_step="land slice")
     assert ctx.hooks["pre_llm_call"]() == "next step: land slice"
+
+
+def test_bbs_enabled_setting_writes_opt_out_and_status_reflects_it(tos_home, monkeypatch):
+    from templeos import bbs
+    from templeos.session import bbs_status
+
+    monkeypatch.delenv(bbs.ENV_ENABLED, raising=False)
+    monkeypatch.delenv(bbs.ENV_ENDPOINT, raising=False)
+    assert bbs_status()["enabled"] is True
+    body = settings_payload({"bbs_enabled": False})
+    assert body["ok"] is True
+    assert body["bbs"]["enabled"] is False
+    assert json.loads((tos_home / bbs.CONFIG_FILE).read_text())["enabled"] is False
+    assert bbs.load_config(environ={}).enabled is False
+    back = settings_payload({"bbs_enabled": True})
+    assert back["bbs"]["enabled"] is True

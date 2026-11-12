@@ -20,12 +20,15 @@ description: >-
   transfers files over a framed COM1 protocol; keeps a background QEMU
   process; and stores disks and ISOs under plugin data. Networking is always
   off (-nic none). QEMU and ISOs are not bundled. This is a child hypervisor,
-  not an OS sandbox. An optional Temple of Hermes HBBS/1 / chat bridge is
-  off by default; the destination is the allow-list name bbs and the TLS
-  endpoint comes from host config, never from guest text (loopback or
+  not an OS sandbox. The community Temple of Hermes HBBS/1 BBS is built in
+  at tls://toh.rizz.click:9443 and on by default (opt out with bbs.json
+  {"enabled": false} or TOH_BBS_ENABLED=0); the destination is the
+  allow-list name bbs and the TLS endpoint is the compiled default or a
+  human override from host config, never from guest text (loopback or
   private LAN allowed only because the operator set them; metadata and
-  link-local are refused). The optional TEMPLEOS_CHAT_BRIDGE_TOKEN is read
-  only through Hermes secret scope. Code fetched from the BBS holyc board
+  link-local are refused). The optional chat bridge remains off by default.
+  The optional TEMPLEOS_CHAT_BRIDGE_TOKEN is read only through Hermes
+  secret scope. Code fetched from the BBS holyc board
   runs only inside the VM (32 KiB / 15 s caps). One pre_llm_call nudge may add
   a single short context line (pending BBS replies/mail or a project next
   step; at most twice a day; the nudge setting or TEMPLEOS_NUDGE turns it
@@ -36,7 +39,7 @@ maintainer: mojomast
 tier: community
 category: desktop
 requires_hermes: ">=0.23.0"
-version: "0.2.0"
+version: "0.2.1"
 docs_url: https://github.com/mojomast/hermes-templeos#readme
 readme: true
 platforms: []

@@ -199,3 +199,59 @@ def test_doctor_setup_fetches_disk_image_when_enabled(tos_home, monkeypatch):
     except Exception:
         pass
     assert calls == []
+
+
+def test_qemu_wrapper_on_path_is_skipped_when_real_qemu_exists(tmp_path, monkeypatch):
+    wrapdir = tmp_path / "wrap"
+    realdir = tmp_path / "real"
+    wrapdir.mkdir()
+    realdir.mkdir()
+    wrapper = wrapdir / "qemu-system-x86_64"
+    wrapper.write_text("#!/bin/sh\necho wrapper\n")
+    wrapper.chmod(0o755)
+    real = realdir / "qemu-system-x86_64"
+    real.write_bytes(b"\x7fELF" + b"\x00" * 16)
+    real.chmod(0o755)
+    monkeypatch.setenv("PATH", str(wrapdir) + ":" + str(realdir))
+
+    def fake_run(argv, *args, **kwargs):
+        class Result:
+            returncode = 0
+            stdout = b"QEMU emulator version 8.2.0\n"
+            stderr = b""
+        return Result()
+
+    monkeypatch.setattr(doctor.subprocess, "run", fake_run)
+    info = doctor.qemu_version()
+    assert info["ok"] is True
+    assert info["path"] == str(real)
+    assert info.get("wrapper")
+    assert info.get("wrapper_skipped") is True
+    monkeypatch.setattr(doctor, "ensure_iso", lambda *a, **k: {"ok": True})
+    report = doctor.doctor()
+    checks = {check["id"]: check for check in report["checks"]}
+    assert checks["qemu-wrapper"]["ok"] is True
+    assert "start will use" in checks["qemu-wrapper"]["detail"]
+    assert report["code"] != "qemu_wrapper"
+
+
+
+def test_qemu_wrapper_is_a_doctor_failure_when_it_is_the_only_binary(tmp_path, monkeypatch):
+    bindir = tmp_path / "bin"
+    bindir.mkdir()
+    wrapper = bindir / "qemu-system-x86_64"
+    wrapper.write_text('#!/bin/sh\necho "QEMU emulator version 8.2.0"\n')
+    wrapper.chmod(0o755)
+    monkeypatch.setenv("PATH", str(bindir))
+    info = doctor.qemu_version()
+    assert info["path"] == str(wrapper)
+    assert info["wrapper"]
+    assert not info.get("wrapper_skipped")
+    monkeypatch.setattr(doctor, "ensure_iso", lambda *a, **k: {"ok": True})
+    report = doctor.doctor()
+    checks = {check["id"]: check for check in report["checks"]}
+    assert checks["qemu-wrapper"]["ok"] is False
+    assert "wrapper" in checks["qemu-wrapper"]["detail"].lower()
+    assert report["code"] == "qemu_wrapper"
+    assert "index=0" in report["fix"]
+

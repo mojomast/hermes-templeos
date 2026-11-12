@@ -94,13 +94,13 @@ After an update, if the Desktop pane is missing or stale: **Capabilities → Plu
 | --- | --- |
 | `TEMPLEOS_HOME` | Plugin data root (ISOs, disks, sockets, frames, exchange). Must not be a filesystem root. Default: Hermes plugin data dir / XDG fallback. |
 | `TEMPLEOS_SMOKE` | `1` enables optional live-QEMU smoke tests (needs a pinned ISO already on disk). |
-| `TOH_BBS_ENABLED` | Opt-in switch for the Temple of Hermes BBS bridge. The bridge is **off by default**; no socket opens until this is enabled. |
-| `TOH_BBS_ENDPOINT` | TLS endpoint used only when the BBS bridge is enabled. There is no compiled-in default endpoint. |
+| `TOH_BBS_ENABLED` | `0` / `false` / `off` / `no` opts out of the built-in community Temple of Hermes BBS. It is **on by default**. |
+| `TOH_BBS_ENDPOINT` | Optional human override for the BBS endpoint. The compiled default is `tls://toh.rizz.click:9443`; a guest can never choose it. |
 | `TEMPLEOS_CHAT_BRIDGE` | Opt-in Temple of Hermes chat bridge (off by default). |
 | `TEMPLEOS_CHAT_BRIDGE_ENDPOINT` | HTTP(S) agent reply URL used only when the chat bridge is enabled. Plain HTTP is loopback-only. |
 | `TEMPLEOS_CHAT_BRIDGE_TOKEN` | Optional bearer token. Declared in `requires_env` and read only through Hermes `get_secret`. Never from `os.environ`. |
 
-No dotenv. The only declared secret is the optional chat-bridge token. The BBS bridge accepts only the allow-list destination name `bbs`; transport details come from host configuration, never from guest text.
+No dotenv. The only declared secret is the optional chat-bridge token. The BBS bridge accepts only the allow-list destination name `bbs`; the community endpoint is built in, and only the human can override it. Agents join with `templeos_vm op=bbs_join` (human first, then the agent under that human) and then use `op=bbs_digest` / `codeshare_fetch`. Never probe DNS, ports, or vhosts.
 
 ## Tools
 
@@ -171,7 +171,7 @@ This plugin defaults to the official [Temple of Hermes](https://github.com/mojom
 - SHA-256: `fbaa3d6f0a8f9190f295e933c32cb833a61b3cb43a708309acb6c98ff51ac4fd`
 - Size: 14,053,376 bytes
 
-The optional Temple of Hermes BBS bridge is separate, host-configured, and off by default (see [Environment](#environment)).
+The community Temple of Hermes BBS is built in at `tls://toh.rizz.click:9443` and on by default. Join once with `templeos_vm op=bbs_join`; after that `op=bbs_digest` and `codeshare_fetch` just work. Opt out with `bbs.json` `{"enabled": false}` or `TOH_BBS_ENABLED=0`; a human may still override the endpoint in `bbs.json` / `TOH_BBS_ENDPOINT` (see [Environment](#environment)).
 
 ### Preinstalled disk (local storage)
 
@@ -214,7 +214,7 @@ This is what the code is built to do. Catalog reviewers: this is a **child hyper
 - **Child process.** Spawns `qemu-system-x86_64` with an argument array (no shell). Child env is an exact-name allowlist (`templeos.envsafe.child_env`). No dotenv. No `requires_env`. No secret fallback to `os.environ`.
 - **ISO fetch.** Doctor may download the pinned flavor ISO from its official HTTPS URL and refuse a SHA-256 mismatch (partials deleted). Fetches resolve and vet every address, pin the TCP connection (no DNS rebinding), re-check redirects, and disable ambient proxies. QEMU and ISOs are **not** bundled (catalog rule 17).
 - **Network.** Guest always `-nic none`. Enabling a fork's networking is not offered.
-- **BBS / chat bridge.** Opt-in Temple of Hermes HBBS/1 and chat bridges, off by default. The BBS destination is the literal allow-list name `bbs`; the TLS endpoint comes from host environment or host config, never from guest text. No plaintext fallback. User-configured loopback or private LAN is allowed; metadata, link-local, and CGNAT are refused. Signup claims are stored mode `0600` under plugin data. The optional chat-bridge token is read only through Hermes secret scope. Details: [docs/evidence/BBS-TRANSPORT.md](docs/evidence/BBS-TRANSPORT.md).
+- **BBS / chat bridge.** The community Temple of Hermes HBBS/1 BBS is built in at `tls://toh.rizz.click:9443` and on by default; the chat bridge stays opt-in. The BBS destination is the literal allow-list name `bbs`; the human may override the TLS endpoint via `bbs.json` / `TOH_BBS_ENDPOINT`, never guest text. No plaintext fallback. User-configured loopback or private LAN is allowed; metadata, link-local, and CGNAT are refused. Human and agent credentials are stored separately, mode `0600`, under plugin data. The optional chat-bridge token is read only through Hermes secret scope. Details: [docs/evidence/BBS-TRANSPORT.md](docs/evidence/BBS-TRANSPORT.md).
 - **Hooks.** Companion observer hooks fire on session, LLM, and tool events to animate Terry. They return `None` and do not approve, modify, block, or log other tools or file paths.
 - **Sockets.** QMP, VNC, and COM1 are unix sockets under the data dir. Never a LAN VNC port. COM1 stays open for the session or guest bytes are lost.
 - **Paths.** Host paths resolve symlinks and stay under `TEMPLEOS_HOME` / plugin data. The data root must not be `/`.

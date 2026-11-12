@@ -10,6 +10,7 @@ import {
   GOLDEN_SNAPSHOT,
   accelLabel,
   bbsChip,
+  bbsJoinVisible,
   drivingChip,
   clampScreenWidth,
   filterLogEvents,
@@ -344,6 +345,7 @@ function defaultStatus(initial) {
       filename: "TempleOfHermes-0.1.3-disk.qcow2",
       text: "Preinstalled disk: downloads on next start",
     },
+    bbs: { enabled: true, configured: true, joined: false, account: null, last_ok: null, error: null },
     kvm: false,
     setup_needed: false,
     ready: false,
@@ -718,6 +720,14 @@ export function TempleOSPane({ transport, initial } = {}) {
     return run("disk-image", () => api.settings({ disk_image: next ? "on" : "off" }));
   }
 
+  function onJoinBbs() {
+    return run("bbs-join", () => api.bbsJoin({}));
+  }
+
+  function onToggleBbs(next) {
+    return run("bbs-toggle", () => api.bbsEnabled(next));
+  }
+
   function onApplyFlavorNow() {
     const id = preferredFlavorId(status);
     return run("flavor-reboot", () => {
@@ -905,6 +915,20 @@ export function TempleOSPane({ transport, initial } = {}) {
                   }),
                   actionButton({ testid: "take-control", label: "Take control", icon: "hand", primary: true, disabled: disabled || status.mode === "user", onClick: () => setMode("take"), title: "Take the keyboard from the agent" }),
                   actionButton({ testid: "hand-back", label: "Hand back", icon: "users", disabled: disabled || status.mode === "shared", onClick: () => setMode("handback"), title: "Hand the keyboard back to the agent" }),
+                ],
+              }),
+              jsxs("div", {
+                className: "tos-group",
+                role: "group",
+                "aria-label": "Community BBS",
+                children: [
+                  jsx("span", { className: "tos-group-label", children: "BBS" }),
+                  bbsJoinVisible(status, statusLoaded)
+                    ? actionButton({ testid: "bbs-join", label: busy === "bbs-join" ? "Joining…" : "Join BBS", icon: "terminal", primary: true, disabled, onClick: onJoinBbs, title: "Join the built-in community BBS (human first, then the agent)" })
+                    : null,
+                  status.bbs && status.bbs.enabled === false
+                    ? actionButton({ testid: "bbs-on", label: "BBS on", icon: "unlock", disabled, onClick: () => onToggleBbs(true), title: "Turn the BBS back on" })
+                    : actionButton({ testid: "bbs-off", label: "BBS off", icon: "lock", disabled, onClick: () => onToggleBbs(false), title: "Turn the BBS off (writes enabled:false)" }),
                 ],
               }),
               jsxs("div", {

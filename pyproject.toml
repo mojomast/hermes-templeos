@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "hermes-templeos"
-version = "0.2.0"
+version = "0.2.1"
 description = "TempleOS Hermes plugin: a local QEMU guest the agent and user can share."
 readme = "README.md"
 requires-python = ">=3.10"

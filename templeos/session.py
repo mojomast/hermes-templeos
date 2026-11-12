@@ -7,9 +7,12 @@ and can run only through the guest input path. Nothing is executed on the host.
 
 from __future__ import annotations
 
+import getpass
 import os
 import re
 import tempfile
+import time
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Mapping
 
@@ -27,6 +30,7 @@ MAX_DIGEST_ITEMS = 10
 MAX_SUBJECT_CHARS = 60
 
 _HANDLE_RE = re.compile(r"^[A-Za-z0-9_.-]{1,32}$")
+_ACCOUNT_RE = re.compile(r"^[a-z0-9][a-z0-9_.-]{2,31}$")
 _POST_RE = re.compile(r"^[A-Za-z0-9._:-]{1,64}$")
 _FILENAME_RE = re.compile(r"[^A-Za-z0-9_.-]+")
 _COUNT_KEYS = ("replies", "unread", "unread_replies", "mail", "unread_mail", "threads", "posts")
@@ -221,17 +225,349 @@ def _normalize_digest(data: Mapping[str, Any]) -> dict[str, Any]:
 
 def _bbs_failure(exc: BaseException) -> OpsError:
     code = getattr(exc, "code", None) or "bbs_unavailable"
-    if code in ("bbs_disabled", "bbs_config_error"):
+    if code == "bbs_disabled":
         return OpsError(
-            "The BBS destination is not configured.",
+            "The BBS is turned off (bbs.json enabled:false or TOH_BBS_ENABLED=0).",
+            "bbs_disabled",
+            "Turn it on with bbs.json enabled:true (or unset TOH_BBS_ENABLED), then run templeos_vm op=bbs_join.",
+        )
+    if code == "bbs_config_error":
+        return OpsError(
+            "The BBS endpoint is invalid.",
             "bbs_not_configured",
-            "Ask the human to set the bbs endpoint in host env/config; there is no default host.",
+            "Fix the host bbs.json or TOH_BBS_ENDPOINT value; the built-in community BBS is already the default.",
+        )
+    if code in ("bbs_tls_error", "bbs_unreachable", "bbs_closed", "bbs_timeout"):
+        return OpsError(
+            "The community BBS is unreachable.",
+            str(code),
+            "Retry once; do not probe DNS, ports, vhosts, or other hosts.",
         )
     return OpsError(
         "The BBS request failed.",
         str(code),
-        "Check host connectivity and the configured bbs endpoint, then retry.",
+        "Retry once; if it persists, run templeos_vm op=bbs_join or check the plugin log.",
     )
+
+
+def _iso_utc(ts: float) -> str:
+    return datetime.fromtimestamp(ts, tz=timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def _safe_display(value: Any, fallback: str) -> str:
+    text = " ".join(str(value or "").split())
+    text = "".join(ch for ch in text if 0x20 <= ord(ch) <= 0x7E)[:32].strip()
+    return text or (fallback[:32] or "Temple human")
+
+
+def _sanitize_account(raw: Any) -> str:
+    text = re.sub(r"[^a-z0-9_.-]+", "", str(raw or "").lower())
+    text = text.lstrip("._-")
+    if len(text) < 3:
+        text = "toh-" + (text or "hermes")
+    elif not text.startswith("toh-"):
+        text = "toh-" + text
+    text = text[:32].rstrip("._-")
+    if not _ACCOUNT_RE.match(text):
+        text = "toh-hermes"
+    return text
+
+
+def _variant_account(base: str, index: int) -> str:
+    if index <= 0:
+        return base[:32]
+    suffix = str(index + 1)
+    return (base[: 32 - len(suffix)] + suffix).rstrip("._-")
+
+
+def _new_client(factory: Callable[..., Any] | None) -> Any:
+    client = _open_client(factory)
+    if hasattr(client, "connect"):
+        client.connect()
+    return client
+
+
+def _close_client(client: Any) -> None:
+    close = getattr(client, "close", None)
+    if callable(close):
+        try:
+            close()
+        except Exception:
+            pass
+
+
+def _rate_limit_wait(exc: BaseException) -> bool:
+    """Sleep once for a server ``rate_limited`` retry_after.  Cap at 60 s."""
+
+    if not isinstance(exc, bbs.BbsServerError) or exc.code != "rate_limited":
+        return False
+    raw = getattr(exc, "retry_after", None)
+    try:
+        wait = int(raw) if raw is not None else 24
+    except (TypeError, ValueError):
+        wait = 24
+    wait = min(max(wait, 1), 60)
+    time.sleep(wait)
+    return True
+
+
+def _call_with_rate_limit(fn: Callable[[], Any]) -> Any:
+    """Run *fn* and retry once after ``rate_limited`` / retry_after."""
+
+    try:
+        return fn()
+    except bbs.BbsServerError as exc:
+        if _rate_limit_wait(exc):
+            return fn()
+        raise
+
+
+def _refresh_creds(client: Any, creds: Mapping[str, str], path: Path) -> str | None:
+    token = creds.get("REFRESH_TOKEN")
+    if not token:
+        return None
+    data = _call_with_rate_limit(lambda: client.auth_refresh(token))
+    access, refresh, account = bbs.extract_tokens(data)
+    resolved = account or creds.get("ACCOUNT")
+    if not resolved:
+        raise bbs.BbsProtocolError("BBS refresh response has no account.", code="bbs_protocol_error")
+    bbs.persist_credentials(
+        path,
+        account=resolved,
+        access_token=access,
+        refresh_token=refresh,
+        status="approved",
+    )
+    return resolved
+
+
+def _signup_application(
+    *,
+    base: str,
+    display: str,
+    kind: str,
+    path: Path,
+    factory: Callable[..., Any] | None,
+    owner_account: str | None = None,
+) -> Any:
+    last = "account_exists"
+    for index in range(5):
+        account = _variant_account(base, index)
+        dest = bbs.new_credentials_path(kind, account)
+        client = None
+        try:
+            client = _new_client(factory)
+            app = _call_with_rate_limit(
+                lambda dest=dest, account=account: client.signup_and_persist(
+                    account,
+                    display,
+                    kind,
+                    owner_account=owner_account,
+                    path=dest,
+                )
+            )
+            return app
+        except bbs.BbsServerError as exc:
+            last = exc.code
+            if exc.code == "rate_limited":
+                # _call_with_rate_limit already retried once; surface the error.
+                raise _bbs_failure(exc) from None
+            if exc.code in ("account_exists", "account_pending"):
+                continue
+            if exc.code in ("owner_required", "owner_not_eligible"):
+                raise OpsError(
+                    "The agent owner is missing or not an active human.",
+                    exc.code,
+                    "Run templeos_vm op=bbs_join again; the human account must be approved first.",
+                ) from None
+            raise _bbs_failure(exc) from None
+        finally:
+            _close_client(client)
+    raise OpsError(
+        f"Could not find a free {kind} account name.",
+        last,
+        "Pass a different account argument to templeos_vm op=bbs_join.",
+    )
+
+
+def bbs_status(*, config_factory: Callable[..., Any] | None = None) -> dict[str, Any]:
+    """Secret-free BBS state for /status and the pane chip.  Never dials."""
+
+    body: dict[str, Any] = {
+        "enabled": False,
+        "configured": False,
+        "joined": False,
+        "account": None,
+        "last_ok": None,
+        "error": None,
+    }
+    try:
+        config = (config_factory or bbs.load_config)()
+    except bbs.BbsError as exc:
+        body["enabled"] = True
+        body["error"] = getattr(exc, "code", None) or "bbs_config_error"
+        return body
+    except Exception:
+        body["enabled"] = True
+        body["error"] = "bbs_config_error"
+        return body
+    enabled = bool(getattr(config, "enabled", False))
+    body["enabled"] = enabled
+    body["configured"] = bool(enabled and getattr(config, "host", None) and getattr(config, "port", 0))
+    if not enabled:
+        body["error"] = "bbs_disabled"
+        return body
+    path, creds = bbs.discover_credentials("agent")
+    account = creds.get("ACCOUNT")
+    joined = bool(account and (creds.get("ACCESS_TOKEN") or creds.get("REFRESH_TOKEN")))
+    body["joined"] = joined
+    body["account"] = account if joined else None
+    if joined:
+        try:
+            body["last_ok"] = _iso_utc(path.stat().st_mtime)
+        except OSError:
+            body["last_ok"] = True
+    return body
+
+
+def bbs_join(
+    *,
+    handle: str | None = None,
+    account: str | None = None,
+    display_name: str | None = None,
+    client_factory: Callable[..., Any] | None = None,
+    config_factory: Callable[..., Any] | None = None,
+) -> dict[str, Any]:
+    """Idempotent human-then-agent community BBS join.
+
+    Tokens are persisted before returning and never appear in the envelope.
+    The human is created/refreshed first, then the agent under that human.
+    """
+
+    try:
+        config = (config_factory or bbs.load_config)()
+    except bbs.BbsError as exc:
+        raise _bbs_failure(exc) from None
+    except Exception:
+        raise OpsError(
+            "The BBS endpoint is invalid.",
+            "bbs_not_configured",
+            "Fix the host bbs.json or TOH_BBS_ENDPOINT value.",
+        ) from None
+    if not getattr(config, "enabled", False):
+        raise _bbs_failure(bbs.BbsDisabledError("The BBS is turned off.", code="bbs_disabled"))
+
+    human_path, human_creds = bbs.discover_credentials("human")
+    agent_path, agent_creds = bbs.discover_credentials("agent")
+
+    # 1. A stored agent refresh token is the cheapest idempotent path.
+    if agent_creds.get("REFRESH_TOKEN"):
+        client = None
+        try:
+            client = _new_client(client_factory)
+            agent_account = _refresh_creds(client, agent_creds, agent_path)
+            return {
+                "ok": True,
+                "joined": True,
+                "human_account": human_creds.get("ACCOUNT") or None,
+                "agent_account": agent_account,
+                "status": "joined",
+            }
+        except bbs.BbsServerError:
+            pass  # token error: fall through to a fresh sign-up
+        except bbs.BbsError as exc:
+            raise _bbs_failure(exc) from None
+        finally:
+            _close_client(client)
+
+    # 2. Reuse or refresh a stored human; otherwise sign one up.
+    human_account = None
+    if human_creds.get("REFRESH_TOKEN"):
+        client = None
+        try:
+            client = _new_client(client_factory)
+            human_account = _refresh_creds(client, human_creds, human_path)
+        except bbs.BbsServerError:
+            human_account = None
+        except bbs.BbsError as exc:
+            raise _bbs_failure(exc) from None
+        finally:
+            _close_client(client)
+    elif human_creds.get("ACCOUNT") and human_creds.get("ACCESS_TOKEN"):
+        human_account = human_creds.get("ACCOUNT")
+
+    if not human_account:
+        base = _sanitize_account(account or handle or getpass.getuser())
+        display = _safe_display(display_name, base)
+        app = _signup_application(
+            base=base,
+            display=display,
+            kind="human",
+            path=human_path,
+            factory=client_factory,
+        )
+        human_account = app.account
+        if not app.approved:
+            return {
+                "ok": True,
+                "joined": False,
+                "human_account": human_account,
+                "agent_account": None,
+                "status": app.status,
+            }
+        human_display = app.display_name or display
+    else:
+        human_display = _safe_display(display_name, human_account)
+
+    # 3. A NEW connection signs the agent under the active human.
+    agent_base = (_variant_account(human_account, 0)[:26].rstrip("._-") + "-agent")[:32]
+    agent_app = _signup_application(
+        base=agent_base,
+        display=_safe_display(None, human_display)[:24] + " agent",
+        kind="agent",
+        path=agent_path,
+        factory=client_factory,
+        owner_account=human_account,
+    )
+    if not agent_app.approved:
+        return {
+            "ok": True,
+            "joined": False,
+            "human_account": human_account,
+            "agent_account": agent_app.account,
+            "status": agent_app.status,
+        }
+    return {
+        "ok": True,
+        "joined": True,
+        "human_account": human_account,
+        "agent_account": agent_app.account,
+        "status": "joined",
+    }
+
+
+def _connect_authenticated(factory: Callable[..., Any] | None) -> Any:
+    if factory is not None:
+        return _new_client(factory)
+    path, creds = bbs.discover_credentials("agent")
+    refresh = creds.get("REFRESH_TOKEN")
+    access = creds.get("ACCESS_TOKEN")
+    if not refresh and not access:
+        raise OpsError(
+            "The community BBS is not joined on this host.",
+            "bbs_not_joined",
+            "Run templeos_vm op=bbs_join (human first, then the agent under that human).",
+        )
+    client = _new_client(factory)
+    try:
+        if refresh:
+            _refresh_creds(client, creds, path)
+        else:
+            _call_with_rate_limit(lambda: client.auth_login(access))
+    except bbs.BbsError as exc:
+        _close_client(client)
+        raise _bbs_failure(exc) from None
+    return client
 
 
 def _open_client(factory: Callable[..., Any] | None) -> Any:
@@ -253,21 +589,15 @@ def bbs_digest(
             raise _bbs_failure(exc) from None
         except Exception:
             raise OpsError(
-                "The BBS destination is not configured.",
+                "The BBS endpoint is invalid.",
                 "bbs_not_configured",
-                "Ask the human to set the bbs endpoint in host env/config; there is no default host.",
+                "Fix the host bbs.json or TOH_BBS_ENDPOINT value.",
             ) from None
         if not getattr(config, "enabled", False):
-            raise OpsError(
-                "The BBS destination is not configured.",
-                "bbs_not_configured",
-                "Ask the human to set the bbs endpoint in host env/config; there is no default host.",
-            )
+            raise _bbs_failure(bbs.BbsDisabledError("The BBS is turned off.", code="bbs_disabled"))
     client = None
     try:
-        client = _open_client(client_factory)
-        if hasattr(client, "connect"):
-            client.connect()
+        client = _connect_authenticated(client_factory)
         data = client.digest(limit=max(1, min(20, int(limit))))
     except OpsError:
         raise
@@ -349,9 +679,7 @@ def codeshare_fetch(
         )
     client = None
     try:
-        client = _open_client(client_factory)
-        if hasattr(client, "connect"):
-            client.connect()
+        client = _connect_authenticated(client_factory)
         data = client.download(post, board="holyc")
     except OpsError:
         raise

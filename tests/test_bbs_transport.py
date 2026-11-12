@@ -358,16 +358,29 @@ def test_destination_allowlist_is_exactly_bbs() -> None:
         assert caught.value.code == "destination_not_allowed"
 
 
-def test_off_by_default_never_opens_a_socket(monkeypatch: pytest.MonkeyPatch, tos_home: Path) -> None:
+def test_default_community_bbs_is_enabled_without_any_config(
+    monkeypatch: pytest.MonkeyPatch, tos_home: Path
+) -> None:
+    _clear_bbs_env(monkeypatch)
+    config = bbs.load_config(environ={})
+    assert config.enabled is True
+    assert (config.host, config.port) == ("toh.rizz.click", 9443)
+    assert config.server_name == "toh.rizz.click"
+    assert bbs.DEFAULT_ENDPOINT == "tls://toh.rizz.click:9443"
+
+
+def test_opt_out_never_opens_a_socket(monkeypatch: pytest.MonkeyPatch, tos_home: Path) -> None:
     _clear_bbs_env(monkeypatch)
 
     def refuse(*args: Any, **kwargs: Any) -> Any:
         raise AssertionError("socket opened while bbs was disabled")
 
+    (tos_home / bbs.CONFIG_FILE).write_text(json.dumps({"enabled": False}))
+    assert bbs.load_config(environ={}).enabled is False
+    assert bbs.load_config(environ={bbs.ENV_ENABLED: "0"}).enabled is False
+    for value in ("0", "false", "off", "no"):
+        assert bbs.load_config(environ={bbs.ENV_ENABLED: value}).enabled is False
     monkeypatch.setattr(socket, "create_connection", refuse)
-    config = bbs.load_config(environ={})
-    assert config.enabled is False
-    assert config.host == "" and config.port == 0
     with pytest.raises(bbs.BbsDisabledError):
         bbs.open_destination("bbs")
 
@@ -392,10 +405,29 @@ def test_endpoint_forms_and_plaintext_rejection() -> None:
             bbs.parse_endpoint(bad)
 
 
-def test_enabled_requires_endpoint(monkeypatch: pytest.MonkeyPatch, tos_home: Path) -> None:
+def test_enabled_without_explicit_endpoint_uses_the_compiled_default(
+    monkeypatch: pytest.MonkeyPatch, tos_home: Path
+) -> None:
     _clear_bbs_env(monkeypatch)
-    with pytest.raises(bbs.BbsConfigError):
-        bbs.load_config(environ={bbs.ENV_ENABLED: "1"})
+    config = bbs.load_config(environ={bbs.ENV_ENABLED: "1"})
+    assert config.enabled is True
+    assert (config.host, config.port) == ("toh.rizz.click", 9443)
+
+
+def test_config_file_and_env_disable_override_default_and_each_other(
+    monkeypatch: pytest.MonkeyPatch, tos_home: Path
+) -> None:
+    _clear_bbs_env(monkeypatch)
+    (tos_home / bbs.CONFIG_FILE).write_text(json.dumps({"enabled": False}))
+    assert bbs.load_config(environ={}).enabled is False
+    assert bbs.load_config(environ={bbs.ENV_ENABLED: "1"}).enabled is True
+    (tos_home / bbs.CONFIG_FILE).write_text(
+        json.dumps({"enabled": True, "endpoint": "tls://127.0.0.1:18443"})
+    )
+    config = bbs.load_config(environ={})
+    assert config.enabled is True and config.port == 18443
+    overridden = bbs.load_config(environ={bbs.ENV_ENDPOINT: "tls://127.0.0.1:18444"})
+    assert overridden.enabled is True and overridden.port == 18444
 
 
 def test_endpoint_comes_from_env(
@@ -696,8 +728,10 @@ def test_untrusted_content_is_returned_as_data_only(bbs_env: LoopbackBbs) -> Non
         client.logout()
 
 
-def test_module_contains_no_bbs_hostname_or_vps_default() -> None:
+def test_module_only_compiles_the_public_community_host_or_loopback_free_default() -> None:
     source = Path(bbs.__file__).read_text()
+    assert "toh.rizz.click" in source
+    assert bbs.DEFAULT_ENDPOINT == "tls://toh.rizz.click:9443"
     assert "127.0.0.1" not in source
     assert "localhost" not in source
     assert "BEGIN PRIVATE KEY" not in source
