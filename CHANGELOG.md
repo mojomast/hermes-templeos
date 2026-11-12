@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.2.3
+
+- `templeos/files.py` now tries HRPC on COM1 before TXFR when the Hermes
+  daemon owns the port. The daemon already answers list/pull/push as HREQ
+  operations; running the TXFR helper alongside it made two readers race for
+  the same bytes. Guests with no Hermes daemon still fall back to TXFR.
+- `templeos/session.py` refreshes the access token immediately before a guest
+  token push. With a stored refresh credential the pair is rotated and
+  persisted first; without one the stored access token is verified with AUTH
+  login, so an expired token is never pushed into the guest. A failed refresh
+  still reports `bbs_not_joined` instead of writing a stale token.
+
 ## 0.2.2
 
 - Fix `templeos_vm op=bbs_digest` against the live community BBS: the compact

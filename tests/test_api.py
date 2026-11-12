@@ -81,7 +81,7 @@ def test_health_and_control_are_implemented(fresh):
     health = health_payload()
     assert health["ok"] is True
     assert health["plugin"] == "templeos"
-    assert health["version"] == "0.2.2"
+    assert health["version"] == "0.2.3"
     assert health["mode"] == "shared"
     taken = set_control({"op": "take"})
     assert taken["ok"] is True and taken["mode"] == "user" and taken["agent_paused"] is True

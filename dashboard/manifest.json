@@ -3,6 +3,6 @@
   "label": "TempleOS",
   "description": "Watch and co-drive a local TempleOS-family QEMU guest (default Temple of Hermes 0.1.3) with the agent. The Desktop pane talks only through ctx.rest.",
   "icon": "Monitor",
-  "version": "0.2.2",
+  "version": "0.2.3",
   "api": "plugin_api.py"
 }
