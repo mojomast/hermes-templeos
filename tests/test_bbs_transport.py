@@ -147,6 +147,31 @@ def happy_handler(frame: bbs.Frame) -> bytes:
                 },
             )
         if command == "LIST":
+            if args.get("action") == "digest":
+                return _success(
+                    frame,
+                    {
+                        "digest": {
+                            "generated_at": "2026-11-12T00:00:00Z",
+                            "since": None,
+                            "cursor": None,
+                            "mail": {
+                                "unread": 1,
+                                "latest": [{"message_id": "msg_1", "subject": "hello mail"}],
+                            },
+                            "mentions": {
+                                "pending": 1,
+                                "latest": [{"post_id": "post_2", "subject": "mention hello"}],
+                            },
+                            "replies": {
+                                "count": 1,
+                                "latest": [{"post_id": "post_1", "subject": "hello"}],
+                            },
+                            "followed_boards": [{"board_id": "holyc", "title": "HolyC"}],
+                            "trust": "untrusted",
+                        }
+                    },
+                )
             if args.get("action") == "boards":
                 return _success(
                     frame,
@@ -740,15 +765,21 @@ def test_module_only_compiles_the_public_community_host_or_loopback_free_default
 
 
 def test_digest_and_download_wire_shapes():
-    assert "DIGEST" in bbs.COMMANDS
+    assert "DIGEST" not in bbs.COMMANDS
     assert "DOWNLOAD" in bbs.COMMANDS
-    frame = bbs.encode_request("DIGEST", {"limit": 5}, frame_id="digest-1")
-    parsed = bbs.Frame
-    assert frame.startswith(b"HBBS/1 REQ digest-1 DIGEST ")
+    frame = bbs.encode_request("LIST", {"action": "digest"}, frame_id="digest-1")
+    assert frame.startswith(b"HBBS/1 REQ digest-1 LIST ")
+    body = json.loads(frame.split(b"\n", 1)[1])
+    assert body["args"] == {"action": "digest"}
+    frame = bbs.encode_request("LIST", {"action": "digest", "cursor": "cur_2"}, frame_id="digest-2")
+    body = json.loads(frame.split(b"\n", 1)[1])
+    assert body["args"] == {"action": "digest", "cursor": "cur_2"}
     frame = bbs.encode_request("DOWNLOAD", {"board": "holyc", "post_id": "post_1"})
     assert b"DOWNLOAD" in frame
     with pytest.raises(bbs.BbsValidationError):
         bbs.encode_request("DIGEST", {"limit": 0})
+    with pytest.raises(bbs.BbsValidationError):
+        bbs.encode_request("LIST", {"action": "digest", "bogus": "x"})
     with pytest.raises(bbs.BbsValidationError):
         bbs.encode_request("DOWNLOAD", {"board": "holyc", "post_id": "x", "host": "evil"})
     with pytest.raises(bbs.BbsValidationError):
@@ -765,10 +796,12 @@ def test_client_digest_and_download_helpers_use_the_documented_commands():
 
     client.request = fake_request
     assert client.digest(limit=7) == {"ok": True}
+    assert client.digest(cursor="cur_1") == {"ok": True}
     assert client.download("post_1") == {"ok": True}
     assert client.download("post_2", board="general") == {"ok": True}
     assert seen == [
-        ("DIGEST", {"limit": 7}),
+        ("LIST", {"action": "digest"}),
+        ("LIST", {"action": "digest", "cursor": "cur_1"}),
         ("DOWNLOAD", {"board": "holyc", "post_id": "post_1"}),
         ("DOWNLOAD", {"board": "general", "post_id": "post_2"}),
     ]

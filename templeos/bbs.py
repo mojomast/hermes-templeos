@@ -52,7 +52,7 @@ DEST_ALLOWLIST: frozenset[str] = frozenset({DEST_BBS})
 
 PROTOCOL = "HBBS/1"
 COMMANDS: frozenset[str] = frozenset(
-    {"AUTH", "WHOAMI", "LIST", "READ", "POST", "REPLY", "MAIL", "LOGOUT", "DIGEST", "DOWNLOAD"}
+    {"AUTH", "WHOAMI", "LIST", "READ", "POST", "REPLY", "MAIL", "LOGOUT", "DOWNLOAD"}
 )
 
 MAX_HEADER_BYTES = 128
@@ -1221,11 +1221,10 @@ _COMMAND_ARGS: dict[str, frozenset[str]] = {
         }
     ),
     "LOGOUT": frozenset({"revoke_refresh"}),
-    "DIGEST": frozenset({"limit"}),
     "DOWNLOAD": frozenset({"board", "post_id"}),
 }
 
-_LIST_ACTIONS = frozenset({"boards", "threads", "posts"})
+_LIST_ACTIONS = frozenset({"boards", "threads", "posts", "digest"})
 _AUTH_ACTIONS = frozenset({"login", "signup", "signup_status", "refresh"})
 _MAIL_ACTIONS = frozenset({"send", "list", "read"})
 _MAIL_KINDS = frozenset({"message", "report"})
@@ -1354,9 +1353,6 @@ def _validate_args(command: str, args: Mapping[str, Any] | None) -> dict[str, An
             _validate_limit(body)
         else:
             _require_string(body, "message_id", max_chars=64)
-
-    if command == "DIGEST":
-        _validate_limit(body)
 
     if command == "DOWNLOAD":
         _validate_board(body)
@@ -1833,8 +1829,15 @@ class BbsClient:
             args["cursor"] = cursor
         return self.request("READ", args)
 
-    def digest(self, *, limit: int = 10) -> dict[str, Any]:
-        return self.request("DIGEST", {"limit": limit})
+    def digest(self, *, limit: int = 10, cursor: str | None = None) -> dict[str, Any]:
+        # HBBS/1 section 17.2: the compact community digest is the additive
+        # LIST action "digest", never a top-level DIGEST command.  ``limit`` is
+        # accepted for local normalization compatibility but is not on the wire.
+        del limit
+        args: dict[str, Any] = {"action": "digest"}
+        if cursor is not None:
+            args["cursor"] = cursor
+        return self.request("LIST", args)
 
     def download(self, post_id: str, *, board: str = "holyc") -> dict[str, Any]:
         return self.request("DOWNLOAD", {"board": board, "post_id": post_id})

@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.2.2
+
+- Fix `templeos_vm op=bbs_digest` against the live community BBS: the compact
+  digest is now the additive HBBS/1 section 17.2 `LIST` action `digest`
+  instead of a top-level `DIGEST` command, so Temple of Hermes v0.1.3 no
+  longer answers `unknown_command`. An optional `cursor` is forwarded and no
+  `limit` is sent on the wire.
+- `_normalize_digest` reads `mail.unread`, `mentions.pending`, and
+  `replies.count` plus the latest arrays into the existing compact
+  counts/ids/subjects/pending envelope, and still accepts the older flat
+  counts/ids/subjects fixture. A server without the extension returns an
+  empty compact result instead of crashing. Tokens, bodies, and full server
+  payloads are never returned or logged.
+
 ## 0.2.1
 
 - Ship the public community Temple of Hermes BBS (HBBS/1, Temple of Hermes

@@ -33,7 +33,13 @@ _HANDLE_RE = re.compile(r"^[A-Za-z0-9_.-]{1,32}$")
 _ACCOUNT_RE = re.compile(r"^[a-z0-9][a-z0-9_.-]{2,31}$")
 _POST_RE = re.compile(r"^[A-Za-z0-9._:-]{1,64}$")
 _FILENAME_RE = re.compile(r"[^A-Za-z0-9_.-]+")
-_COUNT_KEYS = ("replies", "unread", "unread_replies", "mail", "unread_mail", "threads", "posts")
+_COUNT_KEYS = ("replies", "mentions", "unread", "unread_replies", "mail", "unread_mail", "threads", "posts")
+_DIGEST_LATEST_KEYS = ("mail", "mentions", "replies", "followed_boards")
+_DIGEST_ID_KEYS = ("post_id", "thread_id", "message_id", "board_id", "mention_id", "reply_id", "id")
+_DIGEST_TITLE_KEYS = ("subject", "title", "name", "display_name")
+_DIGEST_UNSUPPORTED_CODES = frozenset(
+    {"unknown_command", "unsupported_command", "unsupported_action", "command_not_found", "invalid_action", "not_implemented"}
+)
 _SOURCE_KEYS = ("source", "code", "holyc", "body", "text", "content")
 
 
@@ -178,42 +184,107 @@ def _safe_subject(value: Any) -> str:
     return text
 
 
+def _digest_latest_items(value: Any) -> list[Any]:
+    """Return the latest/items/recent list for one digest section."""
+
+    if isinstance(value, Mapping):
+        for key in ("latest", "items", "recent"):
+            items = value.get(key)
+            if isinstance(items, list):
+                return items
+        return []
+    if isinstance(value, list):
+        return value
+    return []
+
+
 def _normalize_digest(data: Mapping[str, Any]) -> dict[str, Any]:
+    """Reduce an HBBS/1 digest to counts, safe ids, short subjects, and pending.
+
+    Handles the section 17.2 nested shape ``{"digest": {...}}`` (mail.unread,
+    mentions.pending, replies.count, latest arrays) and the older flat
+    counts/ids/subjects fixture.  Only whitelisted scalar fields survive;
+    tokens, bodies, and unknown keys are dropped.
+    """
+
+    source: Mapping[str, Any] = data
+    nested = data.get("digest")
+    if isinstance(nested, Mapping):
+        source = nested
     counts: dict[str, int] = {}
-    source = data
-    for key in ("counts", "digest"):
-        nested = source.get(key) if isinstance(source, Mapping) else None
-        if isinstance(nested, Mapping):
-            source = nested
-            break
+
+    counts_block = data.get("counts")
+    if isinstance(counts_block, Mapping):
+        for key in _COUNT_KEYS:
+            if key in counts_block:
+                counts[key] = _count(counts_block.get(key))
+
+    for section, field, count_key in (
+        ("mail", "unread", "mail"),
+        ("mentions", "pending", "mentions"),
+        ("replies", "count", "replies"),
+    ):
+        block = source.get(section)
+        if isinstance(block, Mapping) and field in block:
+            counts[count_key] = _count(block.get(field))
+
     for key in _COUNT_KEYS:
-        if key in source:
+        if key in source and not isinstance(source.get(key), Mapping) and key not in counts:
             counts[key] = _count(source.get(key))
+
     ids: list[str] = []
-    for key in ("ids", "post_ids", "thread_ids"):
-        values = data.get(key)
-        if isinstance(values, list):
-            for value in values:
-                safe = _safe_id(value)
-                if safe and safe not in ids:
-                    ids.append(safe)
+    seen_ids: set[str] = set()
+
+    def add_id(value: Any) -> None:
+        safe = _safe_id(value)
+        if safe and safe not in seen_ids:
+            seen_ids.add(safe)
+            ids.append(safe)
+
+    for container in (data, source):
+        for key in ("ids", "post_ids", "thread_ids"):
+            values = container.get(key)
+            if isinstance(values, list):
+                for value in values:
+                    add_id(value)
+
     subjects: list[str] = []
+
+    def add_subject(value: Any) -> None:
+        text = _safe_subject(value)
+        if text and text not in subjects:
+            subjects.append(text)
+
     items = data.get("subjects")
     if items is None:
         items = data.get("items") if isinstance(data.get("items"), list) else data.get("recent")
     if isinstance(items, list):
         for item in items:
             if isinstance(item, Mapping):
-                title = item.get("subject") or item.get("title") or item.get("name")
+                title = next((item.get(key) for key in _DIGEST_TITLE_KEYS if item.get(key)), None)
             else:
                 title = item
-            text = _safe_subject(title)
-            if text:
-                subjects.append(text)
+            add_subject(title)
+
+    for key in _DIGEST_LATEST_KEYS:
+        for item in _digest_latest_items(source.get(key)):
+            if isinstance(item, Mapping):
+                for id_key in _DIGEST_ID_KEYS:
+                    if id_key in item:
+                        add_id(item.get(id_key))
+                title = next((item.get(title_key) for title_key in _DIGEST_TITLE_KEYS if item.get(title_key)), None)
+                add_subject(title)
+            elif key == "followed_boards":
+                add_id(item)
+                add_subject(item)
+            else:
+                add_subject(item)
+
     replies = counts.get("replies", 0) + counts.get("unread_replies", 0)
     mail = counts.get("mail", 0) + counts.get("unread_mail", 0)
+    mentions = counts.get("mentions", 0)
     unread = counts.get("unread", 0)
-    pending = max(replies + mail, unread)
+    pending = max(replies + mail + mentions, unread)
     return {
         "counts": counts,
         "ids": ids[:MAX_DIGEST_ITEMS],
@@ -596,11 +667,22 @@ def bbs_digest(
         if not getattr(config, "enabled", False):
             raise _bbs_failure(bbs.BbsDisabledError("The BBS is turned off.", code="bbs_disabled"))
     client = None
+    data: Mapping[str, Any] | None = None
+    unsupported = False
     try:
         client = _connect_authenticated(client_factory)
         data = client.digest(limit=max(1, min(20, int(limit))))
     except OpsError:
         raise
+    except bbs.BbsServerError as exc:
+        rejected_digest_action = exc.code == "invalid_args" and exc.field in (None, "args.action")
+        if exc.code in _DIGEST_UNSUPPORTED_CODES or rejected_digest_action:
+            # Optional section-17.2 extension: an older server rejects the
+            # additive LIST action.  Return an empty compact digest instead of
+            # crashing; never include server payloads or tokens.
+            unsupported = True
+        else:
+            raise _bbs_failure(exc) from None
     except bbs.BbsError as exc:
         raise _bbs_failure(exc) from None
     except Exception:
@@ -616,6 +698,18 @@ def bbs_digest(
                 close()
             except Exception:
                 pass
+    if unsupported:
+        return {
+            "ok": True,
+            "unsupported": True,
+            "code": "bbs_digest_unsupported",
+            "reason": "bbs_digest_unsupported",
+            "counts": {},
+            "ids": [],
+            "subjects": [],
+            "pending": 0,
+            "truncated": False,
+        }
     if not isinstance(data, Mapping):
         raise OpsError("The BBS digest reply was malformed.", "bbs_protocol_error", "Check the server version.")
     body = _normalize_digest(data)

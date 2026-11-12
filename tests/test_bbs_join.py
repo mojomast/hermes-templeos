@@ -176,11 +176,50 @@ class JoinServer:
                     continue
                 tls.sendall(bbs.encode_response("AUTH", error={"code": "invalid_args", "message": "bad auth"}, frame_id=frame.frame_id))
                 continue
-            if command == "DIGEST":
+            if command == "LIST" and args.get("action") == "digest":
                 tls.sendall(
                     bbs.encode_response(
-                        "DIGEST",
-                        data={"counts": {"replies": 1}, "ids": ["post_1"], "subjects": ["hello"]},
+                        "LIST",
+                        data={
+                            "digest": {
+                                "generated_at": "2026-11-12T00:00:00Z",
+                                "since": None,
+                                "cursor": None,
+                                "mail": {
+                                    "unread": 1,
+                                    "latest": [
+                                        {
+                                            "message_id": "msg_1",
+                                            "subject": "mail hello",
+                                            "body": "raw mail body must not leak",
+                                        }
+                                    ],
+                                },
+                                "mentions": {
+                                    "pending": 1,
+                                    "latest": [
+                                        {
+                                            "post_id": "post_2",
+                                            "subject": "mention hello",
+                                            "body": "raw mention body must not leak",
+                                        }
+                                    ],
+                                },
+                                "replies": {
+                                    "count": 1,
+                                    "latest": [
+                                        {
+                                            "post_id": "post_1",
+                                            "subject": "hello",
+                                            "body": "raw reply body must not leak",
+                                        }
+                                    ],
+                                },
+                                "followed_boards": [{"board_id": "holyc", "title": "HolyC"}],
+                                "trust": "untrusted",
+                                "access_token": "must-not-leak-token",
+                            }
+                        },
                         frame_id=frame.frame_id,
                     )
                 )
@@ -339,11 +378,23 @@ def test_digest_authenticates_with_stored_agent_creds(
         start = len(server.frames)
         body = session.bbs_digest()
         assert body["ok"] is True
-        assert body["counts"]["replies"] == 1
+        assert body["counts"] == {"mail": 1, "mentions": 1, "replies": 1}
+        assert body["pending"] == 3
+        assert {"post_1", "post_2", "msg_1", "holyc"} <= set(body["ids"])
+        assert "hello" in body["subjects"]
         later = server.frames[start:]
-        assert [frame.command for frame in later[:2]] == ["AUTH", "DIGEST"]
+        assert [frame.command for frame in later[:2]] == ["AUTH", "LIST"]
         assert (later[0].json().get("args") or {}).get("action") == "refresh"
-        assert "fixture." not in json.dumps(body)
+        digest_args = later[1].json().get("args") or {}
+        assert digest_args.get("action") == "digest"
+        assert "board" not in digest_args
+        assert "limit" not in digest_args
+        text = json.dumps(body)
+        assert "must-not-leak-token" not in text
+        assert "raw mail body must not leak" not in text
+        assert "raw mention body must not leak" not in text
+        assert "raw reply body must not leak" not in text
+        assert "fixture." not in text
 
 
 def test_status_reports_agent_account_and_never_tokens(
