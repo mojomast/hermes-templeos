@@ -743,7 +743,9 @@ def _json_kind_path(kind: str, account: str) -> Path:
     return _bbs_dir() / f"{prefix}{safe}.json"
 
 
-def discover_credentials(kind: str) -> tuple[Path, dict[str, str]]:
+def discover_credentials(
+    kind: str, *, include_token_txt: bool = True
+) -> tuple[Path, dict[str, str]]:
     """Locate stored *kind* creds, adopting the moltussy JSON layout first.
 
     Search order, all under ``$TEMPLEOS_HOME/bbs/``:
@@ -754,6 +756,10 @@ def discover_credentials(kind: str) -> tuple[Path, dict[str, str]]:
     The first file that has an account plus an access or refresh token wins.
     Missing files yield the default JSON path for a later write and an empty
     map.  Contents are never logged.
+
+    Callers that push a fresh guest token pass ``include_token_txt=False``.
+    A legacy ``token.txt`` is a snapshot with no refresh credential, so it can
+    be hours old; the agent JSON/creds pair is the source of truth.
     """
 
     if kind not in ("human", "agent"):
@@ -772,9 +778,10 @@ def discover_credentials(kind: str) -> tuple[Path, dict[str, str]]:
     fallback = directory / (HUMAN_CREDS_NAME if kind == "human" else AGENT_CREDS_NAME)
     if fallback.exists():
         candidates.append(fallback)
-    token_path = directory / TOKEN_TXT_NAME
-    if token_path.exists():
-        candidates.append(token_path)
+    if include_token_txt:
+        token_path = directory / TOKEN_TXT_NAME
+        if token_path.exists():
+            candidates.append(token_path)
     for path in candidates:
         try:
             target = _credential_path(path)

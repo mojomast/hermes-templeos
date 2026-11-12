@@ -45,6 +45,8 @@ MAX_FILE_BYTES = 256 * 1024
 MAX_PATH_CHARS = 200
 MAX_LIST_ENTRIES = 512
 DEFAULT_TIMEOUT_S = 8.0
+HRPC_PROBE_TIMEOUT_S = 2.5
+HRPC_MAX_PAYLOAD = 262144
 EXCHANGE_DIR = "exchange"
 FAT_IMAGE_NAME = "xfer.img"
 FAT_IMAGE_BYTES = 1_474_560  # 1440 KiB floppy-sized image; experimental
@@ -71,8 +73,10 @@ _bound_serial: SerialLike | None = None
 
 def bind_serial(port: SerialLike | None) -> None:
     """Inject a SerialPort or FakeSerial for the current session / tests."""
-    global _bound_serial
+    global _bound_serial, _rx_pushback_port
     _bound_serial = port
+    _rx_pushback_port = None
+    _rx_pushback.clear()
 
 
 def get_serial() -> SerialLike | None:
@@ -196,6 +200,35 @@ def try_decode_frame(buf: bytes) -> tuple[int, bytes, int] | None:
     return cmd, payload, total
 
 
+# Bytes read while probing for an HRPC reply that turned out not to be HRPC
+# belong to the TXFR fallback.  Keep them here until the next read so a daemon
+# probe cannot swallow a pending framed reply.
+_rx_pushback = bytearray()
+_rx_pushback_port: object | None = None
+
+
+def _read_chunk(port: SerialLike, n: int = 4096, *, timeout_s: float = 0.2) -> bytes:
+    global _rx_pushback_port
+    if _rx_pushback_port is not port:
+        _rx_pushback_port = port
+        _rx_pushback.clear()
+    if _rx_pushback:
+        out = bytes(_rx_pushback[:n])
+        del _rx_pushback[:n]
+        return out
+    return port.read(n, timeout_s=timeout_s)
+
+
+def _push_back(port: SerialLike, data: bytes) -> None:
+    global _rx_pushback_port
+    if not data:
+        return
+    if _rx_pushback_port is not port:
+        _rx_pushback_port = port
+        _rx_pushback.clear()
+    _rx_pushback[:0] = data
+
+
 def _read_frame(port: SerialLike, *, timeout_s: float) -> tuple[int, bytes]:
     import time
 
@@ -203,7 +236,7 @@ def _read_frame(port: SerialLike, *, timeout_s: float) -> tuple[int, bytes]:
     buf = bytearray()
     while time.monotonic() < deadline:
         remaining = max(0.05, deadline - time.monotonic())
-        chunk = port.read(4096, timeout_s=min(0.2, remaining))
+        chunk = _read_chunk(port, 4096, timeout_s=min(0.2, remaining))
         if chunk:
             buf.extend(chunk)
             while True:
@@ -232,6 +265,122 @@ def _transact(
         raise RuntimeError("serial not open")
     port.write(encode_frame(cmd, payload))
     return _read_frame(port, timeout_s=timeout_s)
+
+
+
+
+# --- HRPC (daemon) path ------------------------------------------------------
+#
+# The Hermes daemon already owns COM1 and already implements list/pull/push as
+# HREQ operations.  Running the TXFR helper at the same time means two readers
+# race for the same bytes: the daemon consumes the TXFR frame and the host
+# times out.  Prefer the daemon's HRPC ops whenever it answers, and keep the
+# TXFR path only for a stock TinkerOS guest with no Hermes daemon.
+
+class HrpcUnavailable(RuntimeError):
+    """No HRPC reply on COM1; caller may fall back to the TXFR helper."""
+
+
+class HrpcError(RuntimeError):
+    """The daemon answered HRPL with an error status."""
+
+
+_hrpc_next_id = 0
+
+
+def _hrpc_request(
+    port: SerialLike,
+    op: str,
+    payload: bytes = b"",
+    *,
+    timeout_s: float = HRPC_PROBE_TIMEOUT_S,
+) -> bytes:
+    """Send one HREQ and return the matching HRPL payload.
+
+    COM1 also carries HBEACON/HEVT frames from the daemon, so this skips any
+    frame that is not the HRPL for this request.  A missing reply raises
+    HrpcUnavailable; an ``err`` HRPL raises HrpcError.
+    """
+    import time
+
+    global _hrpc_next_id
+    _hrpc_next_id += 1
+    rid = _hrpc_next_id
+    header = f"HREQ {rid} {op} {len(payload)}\n".encode("ascii")
+    port.write(header + payload)
+
+    deadline = time.monotonic() + max(0.05, timeout_s)
+    buf = bytearray()
+    while time.monotonic() < deadline:
+        remaining = max(0.01, deadline - time.monotonic())
+        chunk = _read_chunk(port, 4096, timeout_s=min(0.2, remaining))
+        if chunk:
+            buf.extend(chunk)
+        else:
+            time.sleep(0.01)
+        while True:
+            marks = [
+                i
+                for i in (
+                    buf.find(b"HBEACON "),
+                    buf.find(b"HEVT "),
+                    buf.find(b"HRPL "),
+                )
+                if i >= 0
+            ]
+            if not marks:
+                # Discard complete noise lines, keep any partial line.
+                cut = buf.rfind(b"\n")
+                if cut >= 0:
+                    del buf[: cut + 1]
+                break
+            i = min(marks)
+            if i > 0:
+                del buf[:i]
+            nl = buf.find(b"\n")
+            if nl < 0:
+                break
+            line = bytes(buf[:nl])
+            body_at = nl + 1
+            parts = line.decode("ascii", "replace").split()
+            if line.startswith(b"HBEACON "):
+                del buf[:body_at]
+                continue
+            if len(parts) < 4:
+                del buf[:body_at]
+                continue
+            try:
+                length = int(parts[3])
+            except ValueError:
+                del buf[:body_at]
+                continue
+            if length < 0 or length > HRPC_MAX_PAYLOAD:
+                del buf[:body_at]
+                continue
+            if len(buf) - body_at < length:
+                break
+            body = bytes(buf[body_at : body_at + length])
+            del buf[: body_at + length]
+            if parts[0] == "HEVT":
+                continue
+            if parts[0] == "HRPL":
+                try:
+                    reply_id = int(parts[1])
+                except ValueError:
+                    continue
+                if reply_id != rid:
+                    continue
+                if parts[2] != "ok":
+                    _push_back(port, bytes(buf))
+                    raise HrpcError(
+                        body.decode("utf-8", "replace") or "guest rpc error"
+                    )
+                _push_back(port, bytes(buf))
+                return body
+    _push_back(port, bytes(buf))
+    raise HrpcUnavailable(
+        f"no HRPC reply for {op} within {timeout_s:.1f}s"
+    )
 
 
 def _err_result(message: str, code: str, fix: str | None = None, **fields: Any) -> dict[str, Any]:
@@ -268,9 +417,35 @@ def list_guest(path: str = "T:/") -> dict[str, Any]:
         return _serial_missing()
 
     try:
+        reply = _hrpc_request(port, "list", guest.encode("utf-8"))
+        entries = json.loads(reply.decode("utf-8"))
+        if isinstance(entries, dict):
+            entries = entries.get("entries", [])
+        if not isinstance(entries, list):
+            raise ValueError("daemon list reply was not a list")
+        entries = entries[:MAX_LIST_ENTRIES]
+        return {
+            "ok": True,
+            "path": guest,
+            "entries": entries,
+            "count": len(entries),
+            "via": "hrpc",
+        }
+    except HrpcUnavailable:
+        pass
+    except HrpcError as exc:
+        return _err_result(
+            str(exc),
+            "guest_error",
+            "Check the guest path with Dir; in HolyC.",
+        )
+    except (UnicodeDecodeError, json.JSONDecodeError, ValueError):
+        pass
+
+    try:
         cmd, payload = _transact(port, CMD_LIST, guest.encode("utf-8"))
     except TimeoutError as exc:
-        return _err_result(str(exc), "timeout", "Raise the timeout or check that Xfer.HC is running.")
+        return _err_result(str(exc), "timeout", "Raise the timeout or check that the guest daemon or Xfer.HC is running.")
     except Exception as exc:
         return _err_result(str(exc), "serial_not_ready", "Re-open COM1 and retry.")
 
@@ -319,6 +494,28 @@ def pull(guest_path: str, host_dest: Path) -> dict[str, Any]:
     port = get_serial()
     if port is None:
         return _serial_missing()
+
+    try:
+        payload = _hrpc_request(port, "pull", guest.encode("utf-8"))
+        if len(payload) > MAX_FILE_BYTES:
+            return _err_result(
+                f"guest file exceeds {MAX_FILE_BYTES} bytes",
+                "payload_too_large",
+                "Pull a smaller file, or split it in the guest.",
+            )
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        dest.write_bytes(payload)
+        return {
+            "ok": True,
+            "guest_path": guest,
+            "host_path": str(dest),
+            "bytes": len(payload),
+            "via": "hrpc",
+        }
+    except HrpcUnavailable:
+        pass
+    except HrpcError as exc:
+        return _err_result(str(exc), "invalid_args")
 
     try:
         cmd, payload = _transact(port, CMD_PULL, guest.encode("utf-8"))
@@ -383,6 +580,41 @@ def push(host_src: Path, guest_path: str) -> dict[str, Any]:
         return _push_via_fat(src, guest, data)
 
     payload = guest.encode("utf-8") + b"\x00" + data
+    try:
+        reply = _hrpc_request(port, "push", payload)
+        try:
+            status = json.loads(reply.decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError):
+            status = {}
+        if isinstance(status, dict) and (
+            status.get("ok") == 1
+            or status.get("ok") is True
+            or "wrote" in status
+        ):
+            return {
+                "ok": True,
+                "guest_path": guest,
+                "host_path": str(src),
+                "bytes": size,
+                "via": "hrpc",
+            }
+        detail = ""
+        if isinstance(status, dict):
+            detail = str(status.get("error") or status.get("code") or "")
+        return _err_result(
+            detail or "guest push failed",
+            "guest_error",
+            "Check the guest path and that its parent directory is writable.",
+        )
+    except HrpcUnavailable:
+        pass
+    except HrpcError as exc:
+        return _err_result(
+            str(exc),
+            "guest_error",
+            "Check the guest path and that its parent directory is writable.",
+        )
+
     try:
         cmd, reply = _transact(port, CMD_PUSH, payload)
     except TimeoutError as exc:

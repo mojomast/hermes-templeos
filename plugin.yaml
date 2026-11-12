@@ -1,5 +1,5 @@
 name: templeos
-version: "0.2.2"
+version: "0.2.3"
 description: >-
   Skill id templeos:templeos-operator. TempleOS runs official-family guests
   (default Temple of Hermes 0.1.3; optional TinkerOS 5.20-rc10, stock

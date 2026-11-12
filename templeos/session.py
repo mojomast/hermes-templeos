@@ -28,6 +28,8 @@ DEFAULT_HANDLE = "hermes"
 ENV_HANDLE = "TEMPLEOS_HANDLE"
 MAX_DIGEST_ITEMS = 10
 MAX_SUBJECT_CHARS = 60
+GUEST_TOKEN_DISK = "C:/Hermes/Apps/HermesBBS/token.txt"
+GUEST_TOKEN_LIVE = "B:/Tmp/Hermes/HermesBBS/token.txt"
 
 _HANDLE_RE = re.compile(r"^[A-Za-z0-9_.-]{1,32}$")
 _ACCOUNT_RE = re.compile(r"^[a-z0-9][a-z0-9_.-]{2,31}$")
@@ -393,10 +395,20 @@ def _call_with_rate_limit(fn: Callable[[], Any]) -> Any:
         raise
 
 
-def _refresh_creds(client: Any, creds: Mapping[str, str], path: Path) -> str | None:
+def _refresh_creds_tokens(
+    client: Any, creds: Mapping[str, str], path: Path
+) -> tuple[str, str | None]:
+    """Rotate the refresh credential and persist both tokens.
+
+    Returns ``(access_token, account)``.  The access token is never logged or
+    placed in an OpsError envelope; callers either use it immediately or drop
+    it.  The refreshed pair is written before returning so the host store stays
+    in sync even when a later guest push fails.
+    """
+
     token = creds.get("REFRESH_TOKEN")
     if not token:
-        return None
+        raise bbs.BbsProtocolError("BBS refresh credential is missing.", code="bbs_not_joined")
     data = _call_with_rate_limit(lambda: client.auth_refresh(token))
     access, refresh, account = bbs.extract_tokens(data)
     resolved = account or creds.get("ACCOUNT")
@@ -409,7 +421,12 @@ def _refresh_creds(client: Any, creds: Mapping[str, str], path: Path) -> str | N
         refresh_token=refresh,
         status="approved",
     )
-    return resolved
+    return access, resolved
+
+
+def _refresh_creds(client: Any, creds: Mapping[str, str], path: Path) -> str | None:
+    _, account = _refresh_creds_tokens(client, creds, path)
+    return account
 
 
 def _signup_application(
@@ -614,6 +631,113 @@ def bbs_join(
         "human_account": human_account,
         "agent_account": agent_app.account,
         "status": "joined",
+    }
+
+
+def bbs_push_guest_token(
+    *,
+    live_cd: bool = False,
+    guest_path: str | None = None,
+    client_factory: Callable[..., Any] | None = None,
+    config_factory: Callable[..., Any] | None = None,
+    push: Callable[..., Mapping[str, Any]] | None = None,
+) -> dict[str, Any]:
+    """Refresh the agent credential, then push one fresh guest access token.
+
+    The token source is the current agent JSON/creds pair; a legacy
+    ``token.txt`` in the plugin BBS directory is deliberately ignored.  With a
+    refresh credential the host rotates it and persists both new tokens before
+    the push.  Without one, the stored access token is verified with AUTH login
+    so an expired token is never re-pushed.
+
+    The token value is written to a mode-0600 temporary file, pushed through
+    the existing COM1 file path, and never appears in the returned envelope.
+    """
+
+    try:
+        config = (config_factory or bbs.load_config)()
+    except bbs.BbsError as exc:
+        raise _bbs_failure(exc) from None
+    except Exception:
+        raise OpsError(
+            "The BBS endpoint is invalid.",
+            "bbs_not_configured",
+            "Fix the host bbs.json or TOH_BBS_ENDPOINT value.",
+        ) from None
+    if not getattr(config, "enabled", False):
+        raise _bbs_failure(bbs.BbsDisabledError("The BBS is turned off.", code="bbs_disabled"))
+
+    target = guest_path or (GUEST_TOKEN_LIVE if live_cd else GUEST_TOKEN_DISK)
+    if target not in (GUEST_TOKEN_DISK, GUEST_TOKEN_LIVE):
+        raise OpsError(
+            "Guest token path is not one of the documented BBS paths.",
+            "invalid_args",
+            "Use the disk path C:/Hermes/Apps/HermesBBS/token.txt or the live path B:/Tmp/Hermes/HermesBBS/token.txt.",
+        )
+
+    cred_path, creds = bbs.discover_credentials("agent", include_token_txt=False)
+    refresh = creds.get("REFRESH_TOKEN")
+    access = creds.get("ACCESS_TOKEN")
+    if not refresh and not access:
+        raise OpsError(
+            "The community BBS is not joined on this host.",
+            "bbs_not_joined",
+            "Run templeos_vm op=bbs_join (human first, then the agent under that human).",
+        )
+
+    client = _new_client(client_factory)
+    account = creds.get("ACCOUNT") or None
+    try:
+        if refresh:
+            access, refreshed_account = _refresh_creds_tokens(client, creds, cred_path)
+            account = refreshed_account
+        else:
+            _call_with_rate_limit(lambda: client.auth_login(access))
+    except bbs.BbsError as exc:
+        raise _bbs_failure(exc) from None
+    finally:
+        _close_client(client)
+    if not access:
+        raise OpsError(
+            "The BBS refresh did not return an access token.",
+            "bbs_protocol_error",
+            "Retry templeos_vm op=bbs_join.",
+        )
+
+    push_fn = push
+    if push_fn is None:
+        from templeos import files as files_mod
+
+        push_fn = files_mod.push
+    root = home()
+    root.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(dir=root, prefix=".bbs-token-") as tmp:
+        src = Path(tmp) / "token.txt"
+        src.write_text(str(access) + "\n", encoding="ascii", newline="\n")
+        try:
+            src.chmod(0o600)
+        except OSError:
+            pass
+        try:
+            result = push_fn(src, target)
+        except Exception:
+            raise OpsError(
+                "The fresh BBS token could not be pushed to the guest.",
+                "bbs_push_failed",
+                "Check the COM1 file path and retry.",
+            ) from None
+    if not isinstance(result, Mapping) or result.get("ok") is False:
+        raise OpsError(
+            "The fresh BBS token could not be pushed to the guest.",
+            "bbs_push_failed",
+            "Check the COM1 file path and retry.",
+        )
+    return {
+        "ok": True,
+        "pushed": True,
+        "guest_path": target,
+        "account": account,
+        "via": result.get("via") if isinstance(result, Mapping) else None,
     }
 
 
