@@ -43,9 +43,11 @@ the envelope, logged, or shown in the pane.
 The reply is reduced to counts, ids, and short subjects. Replies are capped in
 number and subject length. Server text is treated as data: it is never
 executed, turned into a tool call, or copied into the nudge line. Tokens,
-bodies, and complete server payloads are never returned or logged. The BBS
-client adds the `DIGEST` and `DOWNLOAD` commands to the existing HBBS/1
-command set.
+bodies, and complete server payloads are never returned or logged. The compact
+digest is the additive HBBS/1 section 17.2 `LIST` action `digest` (there is no
+top-level `DIGEST` command); `DOWNLOAD` remains the codeshare command. A server
+without the extension is treated as optional: the client returns an empty
+compact result instead of crashing.
 
 ### `templeos_files op=codeshare_fetch`
 

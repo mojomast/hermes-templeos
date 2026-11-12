@@ -176,3 +176,111 @@ def test_codeshare_run_uses_the_guest_seam_only(tos_home):
     assert seen == [source]
     assert body["guest_path"].endswith("/Src/demo.HC")
     assert bbs.DEST_BBS == "bbs"
+
+
+_DIGEST_17_2 = {
+    "digest": {
+        "generated_at": "2026-11-12T00:00:00Z",
+        "since": None,
+        "cursor": "cur_1",
+        "mail": {
+            "unread": 2,
+            "latest": [
+                {"message_id": "msg_1", "subject": "mail subject\nwith newline", "body": "raw mail body"},
+            ],
+        },
+        "mentions": {
+            "pending": 1,
+            "latest": [
+                {"post_id": "post_2", "subject": "mention subject", "body": "raw mention body"},
+                {"thread_id": "../bad", "subject": "unsafe id"},
+            ],
+        },
+        "replies": {
+            "count": 1,
+            "latest": [
+                {"post_id": "post_1", "subject": "reply subject", "body": "raw reply body"},
+            ],
+        },
+        "followed_boards": [
+            {"board_id": "holyc", "title": "HolyC code share"},
+            "lore",
+        ],
+        "trust": "untrusted",
+        "access_token": "must-not-leak-token",
+        "refresh_token": "must-not-leak-refresh",
+    }
+}
+
+
+def test_normalize_digest_accepts_section_17_2_shape():
+    body = session._normalize_digest(_DIGEST_17_2)
+    assert body["counts"] == {"mail": 2, "mentions": 1, "replies": 1}
+    assert body["pending"] == 4
+    assert body["ids"] == ["msg_1", "post_2", "post_1", "holyc", "lore"]
+    assert body["subjects"][:3] == ["mail subject with newline", "mention subject", "unsafe id"]
+    assert "reply subject" in body["subjects"]
+    assert "lore" in body["subjects"]
+    text = json.dumps(body)
+    for marker in ("must-not-leak", "raw mail body", "raw mention body", "raw reply body", "\n"):
+        assert marker not in text
+
+
+def test_normalize_digest_still_accepts_flat_fixture():
+    body = session._normalize_digest(
+        {
+            "counts": {"replies": 2, "mail": 1, "posts": 9},
+            "ids": ["post_1", "post_2"],
+            "subjects": [{"subject": "flat subject"}, "second"],
+        }
+    )
+    assert body["counts"] == {"replies": 2, "mail": 1, "posts": 9}
+    assert body["pending"] == 3
+    assert body["ids"] == ["post_1", "post_2"]
+    assert body["subjects"] == ["flat subject", "second"]
+
+
+class _DigestClient:
+    def __init__(self, *, result=None, error=None):
+        self._result = result
+        self._error = error
+        self.closed = False
+
+    def connect(self):
+        return self
+
+    def digest(self, *, limit=10, cursor=None):
+        if self._error is not None:
+            raise self._error
+        return self._result
+
+    def close(self):
+        self.closed = True
+
+
+def test_bbs_digest_accepts_section_17_2_reply_without_leaking(tos_home):
+    client = _DigestClient(result=_DIGEST_17_2)
+    body = session.bbs_digest(client_factory=lambda: client)
+    assert body["ok"] is True
+    assert body["counts"] == {"mail": 2, "mentions": 1, "replies": 1}
+    assert body["pending"] == 4
+    assert body["ids"] == ["msg_1", "post_2", "post_1", "holyc", "lore"]
+    assert client.closed is True
+    text = json.dumps(body)
+    assert "must-not-leak" not in text
+    assert "raw " not in text
+
+
+def test_bbs_digest_unknown_command_falls_back_without_crashing(tos_home):
+    client = _DigestClient(error=bbs.BbsServerError("unknown_command", "command is not available"))
+    body = session.bbs_digest(client_factory=lambda: client)
+    assert body["ok"] is True
+    assert body["unsupported"] is True
+    assert body["code"] == "bbs_digest_unsupported"
+    assert body["counts"] == {}
+    assert body["ids"] == []
+    assert body["subjects"] == []
+    assert body["pending"] == 0
+    assert body["truncated"] is False
+    assert client.closed is True
+    assert "unknown_command" not in json.dumps(body)
