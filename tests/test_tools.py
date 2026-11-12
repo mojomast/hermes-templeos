@@ -225,18 +225,18 @@ def test_community_ops_return_structured_errors_without_a_guest(tos_home, monkey
     assert "data" not in summary
     digest = _parse(handle_vm({"op": "bbs_digest"}))
     assert digest["ok"] is False
-    assert digest["code"] == "bbs_not_configured"
+    assert digest["code"] == "bbs_not_joined"
     missing = _parse(handle_files({"op": "codeshare_fetch"}))
     assert missing["code"] == "invalid_args"
     fetch = _parse(handle_files({"op": "codeshare_fetch", "id": "post_1"}))
     assert fetch["ok"] is False
-    assert fetch["code"] == "bbs_not_configured"
+    assert fetch["code"] == "bbs_not_joined"
 
 
 def test_still_exactly_four_tools_with_community_ops():
     names = [s["name"] for s in tool_specs()]
     assert names == ["templeos_vm", "templeos_screen", "templeos_input", "templeos_files"]
-    assert "session_start" in VM_OPS and "bbs_digest" in VM_OPS
+    assert "session_start" in VM_OPS and "bbs_join" in VM_OPS and "bbs_digest" in VM_OPS
     assert "codeshare_fetch" in FILES_OPS_ALL
     assert SCHEMA_VM["parameters"]["properties"]["op"]["enum"] == list(VM_OPS)
     assert SCHEMA_FILES["parameters"]["properties"]["op"]["enum"] == list(FILES_OPS_ALL)

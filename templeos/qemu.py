@@ -41,9 +41,56 @@ _BLOCKED = frozenset(
 
 
 def find_binary(name: str = QEMU_BINARY) -> Path | None:
-    """Return the resolved executable path, or None if it is not on PATH."""
+    """Return a QEMU binary on PATH, preferring the real executable.
+
+    A user wrapper (for example ``~/.local/bin/qemu-system-x86_64`` that
+    appends ``-drive ...index=0``) is skipped when a regular QEMU binary
+    exists later on PATH.  If only a wrapper is present, it is still
+    returned so doctor can report it.
+    """
+    seen: set[Path] = set()
+    wrapper: Path | None = None
+    path_var = os.environ.get("PATH") or ""
+    for directory in path_var.split(os.pathsep):
+        if not directory:
+            continue
+        candidate = Path(directory) / name
+        try:
+            resolved = candidate.resolve()
+        except OSError:
+            resolved = candidate
+        if resolved in seen:
+            continue
+        seen.add(resolved)
+        if not candidate.is_file() or not os.access(candidate, os.X_OK):
+            continue
+        if _is_wrapper(candidate):
+            if wrapper is None:
+                wrapper = candidate
+            continue
+        return candidate
     found = shutil.which(name)
-    return Path(found) if found else None
+    if found:
+        path = Path(found)
+        if not _is_wrapper(path):
+            return path
+        if wrapper is None:
+            wrapper = path
+    return wrapper
+
+
+def _is_wrapper(path: Path) -> bool:
+    """True when *path* looks like a script or thin wrapper, not QEMU itself."""
+    try:
+        head = path.read_bytes()[:4]
+    except OSError:
+        return False
+    if head.startswith(b"#!"):
+        return True
+    mach_o = (b"\xcf\xfa\xed\xfe", b"\xfe\xed\xfa\xcf", b"\xca\xfe\xba\xbe")
+    if os.name == "posix" and not (head.startswith(b"\x7fELF") or head[:4] in mach_o):
+        return True
+    return False
 
 
 def sanitize_env(env: Mapping[str, str]) -> dict[str, str]:

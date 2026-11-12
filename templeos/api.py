@@ -386,6 +386,19 @@ def status_payload() -> dict[str, Any]:
         "agent_busy": agent_is_busy(),
         **snap,
     }
+    try:
+        from templeos.session import bbs_status
+
+        body["bbs"] = bbs_status()
+    except Exception:
+        body["bbs"] = {
+            "enabled": False,
+            "configured": False,
+            "joined": False,
+            "account": None,
+            "last_ok": None,
+            "error": "bbs_status_failed",
+        }
     _apply_flavor_dims(body, body["flavor"])
 
     doctor_body: dict[str, Any] | None = None
@@ -994,6 +1007,38 @@ def settings_payload(body: dict[str, Any] | None = None) -> dict[str, Any]:
     path. No tool schema changes: the pane keeps using this existing route.
     """
     body = body or {}
+    bbs_touched = "bbs_enabled" in body or bool(body.get("bbs_join"))
+    if bbs_touched:
+        from templeos import bbs as bbs_mod
+        from templeos.session import bbs_join
+
+        try:
+            if "bbs_enabled" in body:
+                bbs_mod.set_enabled(bool(body.get("bbs_enabled")))
+        except bbs_mod.BbsError as exc:
+            return _json_err(str(exc), getattr(exc, "code", "bbs_config_error"))
+        joined = None
+        if body.get("bbs_join"):
+            joined = _from_impl(
+                bbs_join,
+                handle=body.get("handle"),
+                account=body.get("account"),
+                display_name=body.get("display_name"),
+                unit="bbs.join",
+            )
+        status = status_payload()
+        if joined is not None:
+            status["bbs_join"] = {
+                k: joined.get(k)
+                for k in ("joined", "human_account", "agent_account", "status")
+                if k in joined
+            }
+            if joined.get("ok") is False:
+                status["ok"] = False
+                status["error"] = joined.get("error")
+                status["code"] = joined.get("code")
+                status["fix"] = joined.get("fix")
+        return status
     disk_touched = "disk_image" in body or "disk_image_path" in body
     if disk_touched:
         try:

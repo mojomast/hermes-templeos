@@ -38,6 +38,7 @@ VM_OPS = (
     "modem",
     "flavor",
     "session_start",
+    "bbs_join",
     "bbs_digest",
 )
 SCREEN_OPS = ("look", "read_text", "wait_idle", "hash", "lore")
@@ -122,7 +123,7 @@ SCHEMA_VM = {
         "snapshot restore status doctor modem). THE supported boot path — never dial "
         "VNC/QMP sockets yourself. Network always off; modem is serial, not a NIC. "
         "snapshot ejects non-qcow2 writables first; restore issues cont if loadvm "
-        "left the VM paused. doctor checks QEMU, ISO pins, and /dev/kvm openability. op=flavor lists or selects the guest image (default templeoh / Temple of Hermes 0.1.3; tinkeros, templeos, and zealos stay selectable), fetches the pinned ISO if needed, and applies it on the next boot if the VM is running. session_start reads the guest journal/projects summary; bbs_digest asks only the configured bbs endpoint for a compact digest. "
+        "left the VM paused. doctor checks QEMU, ISO pins, and /dev/kvm openability. op=flavor lists or selects the guest image (default templeoh / Temple of Hermes 0.1.3; tinkeros, templeos, and zealos stay selectable), fetches the pinned ISO if needed, and applies it on the next boot if the VM is running. session_start reads the guest journal/projects summary; bbs_join joins the built-in community BBS (human first, then the agent); bbs_digest asks only the bbs destination for a compact digest. "
         "Sockets are existence flags only. If deferred behind tool_search, search "
         "for templeos vm first."
     ),
@@ -154,7 +155,15 @@ SCHEMA_VM = {
             },
             "handle": {
                 "type": "string",
-                "description": "Guest Home handle for session_start/bbs ops.",
+                "description": "Guest Home handle for session_start, or account for bbs_join.",
+            },
+            "account": {
+                "type": "string",
+                "description": "Optional human account for op=bbs_join.",
+            },
+            "display_name": {
+                "type": "string",
+                "description": "Optional display name for op=bbs_join.",
             },
         },
         "required": ["op"],
@@ -406,7 +415,12 @@ def _call_impl(fn: Callable[..., Any], *a: Any, **k: Any) -> str:
 
 # --- handlers ---
 
-VM_OP_ALIASES = {"digest": "bbs_digest", "bbs": "bbs_digest"}
+VM_OP_ALIASES = {
+    "digest": "bbs_digest",
+    "bbs": "bbs_digest",
+    "join": "bbs_join",
+    "bbs_setup": "bbs_join",
+}
 
 
 def handle_vm(params: Any) -> str:
@@ -459,6 +473,15 @@ def handle_vm(params: Any) -> str:
         from templeos.session import session_start as impl
 
         return _call_impl(impl, limit=args.get("limit", 5), handle=args.get("handle"))
+    if op == "bbs_join":
+        from templeos.session import bbs_join as impl
+
+        return _call_impl(
+            impl,
+            handle=args.get("handle"),
+            account=args.get("account"),
+            display_name=args.get("display_name"),
+        )
     if op == "bbs_digest":
         from templeos.session import bbs_digest as impl
 

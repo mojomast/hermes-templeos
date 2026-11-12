@@ -95,7 +95,7 @@ def test_bbs_digest_is_compact_and_treats_text_as_data(tos_home):
     assert "full body must not leak" not in text
 
 
-def test_bbs_digest_requires_host_configuration(tos_home, monkeypatch):
+def test_bbs_digest_without_join_asks_for_the_join_op(tos_home, monkeypatch):
     for name in (
         "TOH_BBS_ENABLED",
         "TOH_BBS_ENDPOINT",
@@ -105,8 +105,16 @@ def test_bbs_digest_requires_host_configuration(tos_home, monkeypatch):
         monkeypatch.delenv(name, raising=False)
     with pytest.raises(session.OpsError) as caught:
         session.bbs_digest()
-    assert caught.value.code == "bbs_not_configured"
-    assert "no default host" in caught.value.fix
+    assert caught.value.code == "bbs_not_joined"
+    assert "templeos_vm op=bbs_join" in caught.value.fix
+
+
+def test_bbs_digest_disabled_says_turned_off(tos_home, monkeypatch):
+    monkeypatch.setenv("TOH_BBS_ENABLED", "0")
+    with pytest.raises(session.OpsError) as caught:
+        session.bbs_digest()
+    assert caught.value.code == "bbs_disabled"
+    assert "turned off" in str(caught.value)
 
 
 def test_codeshare_fetch_rejects_oversize_before_writing(tos_home):

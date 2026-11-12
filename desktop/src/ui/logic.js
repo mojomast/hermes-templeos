@@ -587,13 +587,27 @@ export function bbsChip(status, loaded = true) {
     return { state: "loading", label: "BBS checking", title: "Waiting for the first status reply." };
   }
   if (raw && typeof raw === "object") {
+    if (raw.enabled === false) {
+      return { state: "idle", label: "BBS off", title: "The BBS is turned off (bbs.json enabled:false or TOH_BBS_ENABLED=0)." };
+    }
+    if (raw.joining || raw.state === "joining") {
+      return { state: "loading", label: "BBS joining", title: "Signing up the human, then the agent, on the community BBS." };
+    }
+    if (raw.joined === true) {
+      const account = raw.account ? String(raw.account) : "";
+      return {
+        state: "ok",
+        label: "BBS joined",
+        title: account ? "Joined the community BBS as " + account + "." : "Joined the community BBS.",
+      };
+    }
     if (raw.error) {
-      return { state: "error", label: "BBS error", title: "The BBS link reported an error. The guest still runs locally." };
+      return { state: "error", label: "BBS error", title: "The community BBS reported an error. The guest still runs locally." };
     }
-    if (raw.connected === true || raw.online === true || raw.ok === true) {
-      return { state: "ok", label: "BBS online", title: "The local BBS link is online." };
+    if (raw.enabled === true) {
+      return { state: "warn", label: "BBS not joined", title: "Press Join BBS, or run templeos_vm op=bbs_join." };
     }
-    return { state: "idle", label: "BBS offline", title: "No BBS session is open." };
+    return { state: "idle", label: "BBS idle", title: "The BBS has not reported a session yet." };
   }
   if (typeof raw === "string" && raw.trim()) {
     const value = raw.trim();
@@ -602,6 +616,14 @@ export function bbsChip(status, loaded = true) {
     return { state: state, label: "BBS " + value, title: "BBS status from the guest." };
   }
   return { state: "empty", label: "BBS idle", title: "The BBS has not reported a session yet." };
+}
+
+export function bbsJoinVisible(status, loaded = true) {
+  if (!loaded) return false;
+  const raw = status && status.bbs;
+  if (!raw || typeof raw !== "object") return false;
+  if (raw.enabled === false) return false;
+  return raw.enabled === true && raw.joined !== true;
 }
 
 export function guestVersionChip(status, loaded = true) {

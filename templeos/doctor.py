@@ -47,6 +47,63 @@ def kvm_openable(node: str | Path) -> bool:
     return True
 
 
+def qemu_wrapper_issue(path: str | Path | None) -> str | None:
+    """Describe a PATH qemu that is a script or thin wrapper, else None.
+
+    A wrapper that appends its own ``-drive ...index=0`` collides with the ToH
+    disk.  Reading the first bytes is safe and never runs the binary.
+    """
+
+    if path is None:
+        return None
+    target = Path(path)
+    try:
+        head = target.read_bytes()[:4]
+    except OSError:
+        return None
+    if head.startswith(b"#!"):
+        return "a script wrapper (shebang) rather than the real QEMU binary"
+    if os.name == "posix" and not (head.startswith(b"\x7fELF") or head[:4] in (b"\xcf\xfa\xed\xfe", b"\xfe\xed\xfa\xcf", b"\xca\xfe\xba\xbe")):
+        return "not a regular QEMU executable (likely a thin wrapper)"
+    return None
+
+
+def _wrapper_ahead_on_path(selected: Path | None) -> str | None:
+    """Describe a script wrapper earlier on PATH than the selected binary."""
+
+    import shutil
+
+    name = QEMU_BINARY
+    selected_resolved = None
+    if selected is not None:
+        try:
+            selected_resolved = selected.resolve()
+        except OSError:
+            selected_resolved = selected
+    path_var = os.environ.get("PATH") or ""
+    for directory in path_var.split(os.pathsep):
+        if not directory:
+            continue
+        candidate = Path(directory) / name
+        if not candidate.is_file():
+            continue
+        try:
+            resolved = candidate.resolve()
+        except OSError:
+            resolved = candidate
+        if selected_resolved is not None and resolved == selected_resolved:
+            return None
+        issue = qemu_wrapper_issue(candidate)
+        if issue:
+            return issue
+    found = shutil.which(name)
+    if found:
+        issue = qemu_wrapper_issue(Path(found))
+        if issue and (selected is None or Path(found) != selected):
+            return issue
+    return None
+
+
 def qemu_version() -> dict[str, Any]:
     """Locate qemu-system-x86_64 on PATH and return {path, version}."""
     path = find_binary(QEMU_BINARY)
@@ -78,10 +135,15 @@ def qemu_version() -> dict[str, Any]:
         }
     text = (completed.stdout or completed.stderr or b"").decode("utf-8", "replace")
     version = _parse_qemu_version(text)
+    selected_wrapper = qemu_wrapper_issue(path)
+    skipped = _wrapper_ahead_on_path(path)
+    wrapper = selected_wrapper or skipped
     return {
         "ok": completed.returncode == 0,
         "path": str(path),
         "version": version,
+        "wrapper": wrapper,
+        "wrapper_skipped": bool(skipped and not selected_wrapper),
         "output": text.strip().splitlines()[0] if text.strip() else "",
         "code": None if completed.returncode == 0 else "qemu_missing",
     }
@@ -230,8 +292,24 @@ def doctor(*, setup: bool = False, flavor: str | None = None) -> dict[str, Any]:
     socks = {key: path.exists() for key, path in socket_paths(root).items()}
     img = find_binary(QEMU_IMG)
 
+    wrapper = qemu.get("wrapper")
+    wrapper_skipped = bool(qemu.get("wrapper_skipped"))
+    selected_is_wrapper = bool(wrapper) and not wrapper_skipped
     checks = [
         _check("qemu", bool(qemu.get("ok")), qemu.get("output") or qemu.get("error") or str(qemu.get("path"))),
+        _check(
+            "qemu-wrapper",
+            not selected_is_wrapper,
+            (
+                f"a {wrapper} is earlier on PATH but start will use {qemu.get('path')}"
+                if wrapper_skipped
+                else (
+                    f"{qemu.get('path')} is {wrapper}; use the real QEMU or remove the extra index=0 drive"
+                    if wrapper
+                    else "qemu-system-x86_64 on PATH is the real binary"
+                )
+            ),
+        ),
         _check("kvm", True, kvm_note),  # TCG fallback is a note, not a failure.
         _check(
             "iso",
@@ -255,7 +333,7 @@ def doctor(*, setup: bool = False, flavor: str | None = None) -> dict[str, Any]:
         ),
         _check("sockets", True, "existence only: " + ", ".join(f"{k}={'yes' if v else 'no'}" for k, v in socks.items())),
     ]
-    qemu_ok = bool(qemu.get("ok"))
+    qemu_ok = bool(qemu.get("ok")) and not selected_is_wrapper
     disk_ready = bool(disk_image.get("enabled") and disk_image.get("verified"))
     iso_ok = bool(iso.get("ok")) or disk_ready
     img_ok = img is not None
@@ -263,7 +341,11 @@ def doctor(*, setup: bool = False, flavor: str | None = None) -> dict[str, Any]:
     code = None
     error = None
     fix = None
-    if not qemu_ok:
+    if selected_is_wrapper:
+        code = "qemu_wrapper"
+        error = f"qemu-system-x86_64 on PATH is {wrapper}; it may add a second index=0 drive."
+        fix = _qemu_wrapper_fix()
+    elif not qemu_ok:
         code = "qemu_missing"
         error = str(qemu.get("error") or "qemu-system-x86_64 is missing.")
         fix = _qemu_install_fix()
@@ -286,7 +368,7 @@ def doctor(*, setup: bool = False, flavor: str | None = None) -> dict[str, Any]:
         "fix": fix,
         "flavor": rec["id"],
         "home": str(home()),
-        "qemu": {k: qemu[k] for k in ("ok", "path", "version") if k in qemu},
+        "qemu": {k: qemu[k] for k in ("ok", "path", "version", "wrapper", "wrapper_skipped") if k in qemu},
         "kvm": {"usable": kvm, "exists": kvm_exists, "note": kvm_note},
         "iso": {k: iso[k] for k in iso if k not in {"fix"}},
         "disk": {"present": disk.exists(), "path": str(disk)},
@@ -349,6 +431,14 @@ def _parse_qemu_version(text: str) -> str | None:
                     return parts[idx + 1]
             return line
     return text.strip().splitlines()[0] if text.strip() else None
+
+
+def _qemu_wrapper_fix() -> str:
+    return (
+        "Use the real qemu-system-x86_64 (for example /usr/bin/qemu-system-x86_64) "
+        "or remove the wrapper that appends another -drive ...index=0; the ToH disk "
+        "already owns IDE index 0."
+    )
 
 
 def _qemu_install_fix() -> str:

@@ -7,7 +7,7 @@ description: >-
   ONLY with templeos_vm / templeos_screen / templeos_input / templeos_files
   (discover via tool_search if deferred). Never write VNC clients or dial
   plugin-data sockets. Prefer templeos_input op=holyc for HolyC one-liners.
-version: "0.1.2"
+version: "0.1.3"
 author: mojomast
 license: MIT
 compatibility: >-
@@ -169,6 +169,17 @@ Never fight the user for the keyboard. Announce what you are about to click when
 | `timeout` | Longer `wait_idle`, then one `read_text`. |
 | `not_implemented` | Say which slice has not landed yet. |
 | Pane blank / stale | User: **Capabilities → Plugins → Rescan**. |
+
+## Community BBS
+
+The community Temple of Hermes BBS is built in at `tls://toh.rizz.click:9443`
+and on by default. Join once with `templeos_vm op=bbs_join` (human first, then
+the agent), then `templeos_vm op=bbs_digest` and `templeos_files
+op=codeshare_fetch` just work. Never probe DNS, ports, vhosts, or certificate
+names, and never substitute a host or port for the dest name `bbs`. The human
+can override the endpoint in `bbs.json` / `TOH_BBS_ENDPOINT` or opt out with
+`enabled:false` / `TOH_BBS_ENABLED=0`. Keep the light habit of two short
+sessions a day.
 
 ## Safety
 

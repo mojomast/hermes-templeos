@@ -58,6 +58,8 @@ export function createApi(rest) {
     doctor: () => call("/doctor"),
     setup: (body) => call("/setup", { method: "POST", body: body || {} }),
     settings: (body) => (body ? call("/settings", { method: "POST", body }) : call("/settings")),
+    bbsJoin: (body) => call("/settings", { method: "POST", body: { ...(body || {}), bbs_join: true } }),
+    bbsEnabled: (enabled) => call("/settings", { method: "POST", body: { bbs_enabled: !!enabled } }),
     companion: () => call("/companion"),
     companionSet: (body) => call("/companion", { method: "POST", body: body || {} }),
     companionAtlas: (opts) =>

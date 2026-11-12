@@ -70,6 +70,8 @@ function createApi(rest) {
     doctor: () => call("/doctor"),
     setup: (body) => call("/setup", { method: "POST", body: body || {} }),
     settings: (body) => (body ? call("/settings", { method: "POST", body }) : call("/settings")),
+    bbsJoin: (body) => call("/settings", { method: "POST", body: { ...(body || {}), bbs_join: true } }),
+    bbsEnabled: (enabled) => call("/settings", { method: "POST", body: { bbs_enabled: !!enabled } }),
     companion: () => call("/companion"),
     companionSet: (body) => call("/companion", { method: "POST", body: body || {} }),
     companionAtlas: (opts) =>
@@ -2372,13 +2374,27 @@ function bbsChip(status, loaded = true) {
     return { state: "loading", label: "BBS checking", title: "Waiting for the first status reply." };
   }
   if (raw && typeof raw === "object") {
+    if (raw.enabled === false) {
+      return { state: "idle", label: "BBS off", title: "The BBS is turned off (bbs.json enabled:false or TOH_BBS_ENABLED=0)." };
+    }
+    if (raw.joining || raw.state === "joining") {
+      return { state: "loading", label: "BBS joining", title: "Signing up the human, then the agent, on the community BBS." };
+    }
+    if (raw.joined === true) {
+      const account = raw.account ? String(raw.account) : "";
+      return {
+        state: "ok",
+        label: "BBS joined",
+        title: account ? "Joined the community BBS as " + account + "." : "Joined the community BBS.",
+      };
+    }
     if (raw.error) {
-      return { state: "error", label: "BBS error", title: "The BBS link reported an error. The guest still runs locally." };
+      return { state: "error", label: "BBS error", title: "The community BBS reported an error. The guest still runs locally." };
     }
-    if (raw.connected === true || raw.online === true || raw.ok === true) {
-      return { state: "ok", label: "BBS online", title: "The local BBS link is online." };
+    if (raw.enabled === true) {
+      return { state: "warn", label: "BBS not joined", title: "Press Join BBS, or run templeos_vm op=bbs_join." };
     }
-    return { state: "idle", label: "BBS offline", title: "No BBS session is open." };
+    return { state: "idle", label: "BBS idle", title: "The BBS has not reported a session yet." };
   }
   if (typeof raw === "string" && raw.trim()) {
     const value = raw.trim();
@@ -2387,6 +2403,14 @@ function bbsChip(status, loaded = true) {
     return { state: state, label: "BBS " + value, title: "BBS status from the guest." };
   }
   return { state: "empty", label: "BBS idle", title: "The BBS has not reported a session yet." };
+}
+
+function bbsJoinVisible(status, loaded = true) {
+  if (!loaded) return false;
+  const raw = status && status.bbs;
+  if (!raw || typeof raw !== "object") return false;
+  if (raw.enabled === false) return false;
+  return raw.enabled === true && raw.joined !== true;
 }
 
 function guestVersionChip(status, loaded = true) {
@@ -2455,7 +2479,7 @@ function rectsOverlap(a, b, epsilon = 0) {
   );
 }
 
-  return { "DEFAULT_WIDTH": DEFAULT_WIDTH, "DEFAULT_HEIGHT": DEFAULT_HEIGHT, "ZEALOS_WIDTH": ZEALOS_WIDTH, "ZEALOS_HEIGHT": ZEALOS_HEIGHT, "CONTROL_MODES": CONTROL_MODES, "GOLDEN_SNAPSHOT": GOLDEN_SNAPSHOT, "FLAVOR_LABELS": FLAVOR_LABELS, "POLL_VISIBLE_MS": POLL_VISIBLE_MS, "POLL_FOCUSED_MS": POLL_FOCUSED_MS, "POLL_IDLE_MS": POLL_IDLE_MS, "POLL_STOPPED_MS": POLL_STOPPED_MS, "POLL_HIDDEN_MS": POLL_HIDDEN_MS, "POLL_SLOW_MS": POLL_SLOW_MS, "guestSize": guestSize, "flavorLabel": flavorLabel, "FLAVOR_PICKER_IDS": FLAVOR_PICKER_IDS, "shaStateLabel": shaStateLabel, "preferredFlavorId": preferredFlavorId, "selectedFlavorRecord": selectedFlavorRecord, "flavorShaSummary": flavorShaSummary, "DISK_IMAGE_STATE_LABELS": DISK_IMAGE_STATE_LABELS, "diskImageSummary": diskImageSummary, "integerScale": integerScale, "SCREEN_SIZE_KEY": SCREEN_SIZE_KEY, "fitGuestDisplay": fitGuestDisplay, "measureScreenSpace": measureScreenSpace, "maxScreenWidth": maxScreenWidth, "clampScreenWidth": clampScreenWidth, "parseScreenPref": parseScreenPref, "serializeScreenPref": serializeScreenPref, "screenDisplay": screenDisplay, "readStoredScreenPref": readStoredScreenPref, "writeStoredScreenPref": writeStoredScreenPref, "mapPointerToGuest": mapPointerToGuest, "modeLabel": modeLabel, "accelLabel": accelLabel, "statusSummary": statusSummary, "drivingChip": drivingChip, "firstCheck": firstCheck, "checkState": checkState, "checkMissing": checkMissing, "needsOnboarding": needsOnboarding, "pollIntervalMs": pollIntervalMs, "isReleaseHatch": isReleaseHatch, "qcodeFor": qcodeFor, "keyEventToPayload": keyEventToPayload, "nextMode": nextMode, "userMayInput": userMayInput, "formatLogTime": formatLogTime, "logLine": logLine, "COMPACT_BREAKPOINT_PX": COMPACT_BREAKPOINT_PX, "COMPACT_MIN_DOCK_PX": COMPACT_MIN_DOCK_PX, "SLIM_BREAKPOINT_PX": SLIM_BREAKPOINT_PX, "SLIM_MIN_DOCK_PX": SLIM_MIN_DOCK_PX, "SLIM_MAX_DOCK_PX": SLIM_MAX_DOCK_PX, "LOG_FILTERS": LOG_FILTERS, "filterLogEvents": filterLogEvents, "logToolKey": logToolKey, "vmStateChip": vmStateChip, "bbsChip": bbsChip, "guestVersionChip": guestVersionChip, "paneLayoutMode": paneLayoutMode, "companionColumnWidth": companionColumnWidth, "layoutRegions": layoutRegions, "rectsOverlap": rectsOverlap };
+  return { "DEFAULT_WIDTH": DEFAULT_WIDTH, "DEFAULT_HEIGHT": DEFAULT_HEIGHT, "ZEALOS_WIDTH": ZEALOS_WIDTH, "ZEALOS_HEIGHT": ZEALOS_HEIGHT, "CONTROL_MODES": CONTROL_MODES, "GOLDEN_SNAPSHOT": GOLDEN_SNAPSHOT, "FLAVOR_LABELS": FLAVOR_LABELS, "POLL_VISIBLE_MS": POLL_VISIBLE_MS, "POLL_FOCUSED_MS": POLL_FOCUSED_MS, "POLL_IDLE_MS": POLL_IDLE_MS, "POLL_STOPPED_MS": POLL_STOPPED_MS, "POLL_HIDDEN_MS": POLL_HIDDEN_MS, "POLL_SLOW_MS": POLL_SLOW_MS, "guestSize": guestSize, "flavorLabel": flavorLabel, "FLAVOR_PICKER_IDS": FLAVOR_PICKER_IDS, "shaStateLabel": shaStateLabel, "preferredFlavorId": preferredFlavorId, "selectedFlavorRecord": selectedFlavorRecord, "flavorShaSummary": flavorShaSummary, "DISK_IMAGE_STATE_LABELS": DISK_IMAGE_STATE_LABELS, "diskImageSummary": diskImageSummary, "integerScale": integerScale, "SCREEN_SIZE_KEY": SCREEN_SIZE_KEY, "fitGuestDisplay": fitGuestDisplay, "measureScreenSpace": measureScreenSpace, "maxScreenWidth": maxScreenWidth, "clampScreenWidth": clampScreenWidth, "parseScreenPref": parseScreenPref, "serializeScreenPref": serializeScreenPref, "screenDisplay": screenDisplay, "readStoredScreenPref": readStoredScreenPref, "writeStoredScreenPref": writeStoredScreenPref, "mapPointerToGuest": mapPointerToGuest, "modeLabel": modeLabel, "accelLabel": accelLabel, "statusSummary": statusSummary, "drivingChip": drivingChip, "firstCheck": firstCheck, "checkState": checkState, "checkMissing": checkMissing, "needsOnboarding": needsOnboarding, "pollIntervalMs": pollIntervalMs, "isReleaseHatch": isReleaseHatch, "qcodeFor": qcodeFor, "keyEventToPayload": keyEventToPayload, "nextMode": nextMode, "userMayInput": userMayInput, "formatLogTime": formatLogTime, "logLine": logLine, "COMPACT_BREAKPOINT_PX": COMPACT_BREAKPOINT_PX, "COMPACT_MIN_DOCK_PX": COMPACT_MIN_DOCK_PX, "SLIM_BREAKPOINT_PX": SLIM_BREAKPOINT_PX, "SLIM_MIN_DOCK_PX": SLIM_MIN_DOCK_PX, "SLIM_MAX_DOCK_PX": SLIM_MAX_DOCK_PX, "LOG_FILTERS": LOG_FILTERS, "filterLogEvents": filterLogEvents, "logToolKey": logToolKey, "vmStateChip": vmStateChip, "bbsChip": bbsChip, "bbsJoinVisible": bbsJoinVisible, "guestVersionChip": guestVersionChip, "paneLayoutMode": paneLayoutMode, "companionColumnWidth": companionColumnWidth, "layoutRegions": layoutRegions, "rectsOverlap": rectsOverlap };
 })();
 
 // desktop/src/ui/pane.js
@@ -2485,6 +2509,7 @@ const __m8 = (function () {
   const GOLDEN_SNAPSHOT = __m7["GOLDEN_SNAPSHOT"];
   const accelLabel = __m7["accelLabel"];
   const bbsChip = __m7["bbsChip"];
+  const bbsJoinVisible = __m7["bbsJoinVisible"];
   const drivingChip = __m7["drivingChip"];
   const clampScreenWidth = __m7["clampScreenWidth"];
   const filterLogEvents = __m7["filterLogEvents"];
@@ -2818,6 +2843,7 @@ function defaultStatus(initial) {
       filename: "TempleOfHermes-0.1.3-disk.qcow2",
       text: "Preinstalled disk: downloads on next start",
     },
+    bbs: { enabled: true, configured: true, joined: false, account: null, last_ok: null, error: null },
     kvm: false,
     setup_needed: false,
     ready: false,
@@ -3192,6 +3218,14 @@ function TempleOSPane({ transport, initial } = {}) {
     return run("disk-image", () => api.settings({ disk_image: next ? "on" : "off" }));
   }
 
+  function onJoinBbs() {
+    return run("bbs-join", () => api.bbsJoin({}));
+  }
+
+  function onToggleBbs(next) {
+    return run("bbs-toggle", () => api.bbsEnabled(next));
+  }
+
   function onApplyFlavorNow() {
     const id = preferredFlavorId(status);
     return run("flavor-reboot", () => {
@@ -3379,6 +3413,20 @@ function TempleOSPane({ transport, initial } = {}) {
                   }),
                   actionButton({ testid: "take-control", label: "Take control", icon: "hand", primary: true, disabled: disabled || status.mode === "user", onClick: () => setMode("take"), title: "Take the keyboard from the agent" }),
                   actionButton({ testid: "hand-back", label: "Hand back", icon: "users", disabled: disabled || status.mode === "shared", onClick: () => setMode("handback"), title: "Hand the keyboard back to the agent" }),
+                ],
+              }),
+              jsxs("div", {
+                className: "tos-group",
+                role: "group",
+                "aria-label": "Community BBS",
+                children: [
+                  jsx("span", { className: "tos-group-label", children: "BBS" }),
+                  bbsJoinVisible(status, statusLoaded)
+                    ? actionButton({ testid: "bbs-join", label: busy === "bbs-join" ? "Joining…" : "Join BBS", icon: "terminal", primary: true, disabled, onClick: onJoinBbs, title: "Join the built-in community BBS (human first, then the agent)" })
+                    : null,
+                  status.bbs && status.bbs.enabled === false
+                    ? actionButton({ testid: "bbs-on", label: "BBS on", icon: "unlock", disabled, onClick: () => onToggleBbs(true), title: "Turn the BBS back on" })
+                    : actionButton({ testid: "bbs-off", label: "BBS off", icon: "lock", disabled, onClick: () => onToggleBbs(false), title: "Turn the BBS off (writes enabled:false)" }),
                 ],
               }),
               jsxs("div", {

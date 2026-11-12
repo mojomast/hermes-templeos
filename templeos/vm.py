@@ -268,6 +268,19 @@ def _start(*, flavor: str | None, snapshot: str, skip_prompts: bool = True) -> d
     except Exception as exc:
         return _fail(f"Failed to spawn QEMU: {exc}", "doctor_failed")
 
+    exit_code = proc.poll()
+    if exit_code is not None:
+        _clear_pidfile(root)
+        tail = _qemu_log_tail(root)
+        detail = f"QEMU exited immediately (code {exit_code})."
+        if tail:
+            detail += " QEMU said: " + tail
+        return _fail(
+            detail,
+            "qemu_start_failed",
+            "Check for a qemu-system-x86_64 wrapper that appends another -drive ...index=0; run templeos_vm op=doctor.",
+        )
+
     _write_pidfile(root, proc.pid)
     qmp = qmp_factory()
     serial = serial_factory()
@@ -279,7 +292,15 @@ def _start(*, flavor: str | None, snapshot: str, skip_prompts: bool = True) -> d
         terminate(proc, timeout_s=3.0)
         _clear_pidfile(root)
         _close_quietly(qmp, serial)
-        return _fail(f"QEMU started but QMP or COM1 could not be opened: {exc}", "doctor_failed")
+        tail = _qemu_log_tail(root) if proc.poll() is not None else ""
+        detail = f"QEMU started but QMP or COM1 could not be opened: {exc}"
+        if tail:
+            detail += " QEMU said: " + tail
+        return _fail(
+            detail,
+            "doctor_failed",
+            "Check templeos_vm op=doctor; a qemu wrapper that adds another index=0 drive can make QEMU exit immediately.",
+        )
 
     global _runtime
     _runtime = Runtime(
@@ -799,6 +820,23 @@ def _unbind_screen() -> None:
         unbind_screen()
     except Exception:
         return
+
+
+def _qemu_log_tail(root: Path, limit: int = 1600) -> str:
+    """Short, sanitized tail of qemu.log for start errors (no home paths)."""
+
+    try:
+        data = (root / LOG_NAME).read_bytes()[-limit:]
+    except OSError:
+        return ""
+    text = data.decode("utf-8", "replace").strip()
+    if not text:
+        return ""
+    text = text.replace(str(root), "<data>")
+    text = text.replace(str(Path.home()), "<home>")
+    text = re.sub(r"/(?:home|workspace|Users)/[^\s:'\"]+", "<path>", text)
+    text = re.sub(r"[A-Za-z]:\\Users\\[^\s]+", "<path>", text)
+    return text[-limit:]
 
 
 def _fail(error: str, code: str, fix: str | None = None) -> dict[str, Any]:

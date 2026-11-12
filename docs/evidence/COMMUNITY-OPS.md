@@ -1,8 +1,8 @@
 # Community ops and pending nudge
 
-Slice C on top of the released v0.1.1 tree (base `c61d00e`, tag `v0.1.1`).
-Changes stay uncommitted in the worktree. Plugin version is unchanged at
-`0.1.1`, and the plugin still exposes exactly four tools:
+Community ops on top of the v0.2.0 tree, shipped in v0.2.1 with the built-in
+community BBS. Changes stay uncommitted in the worktree, and the plugin still
+exposes exactly four tools:
 
 `templeos_vm`, `templeos_screen`, `templeos_input`, `templeos_files`.
 
@@ -26,10 +26,19 @@ structured `session_unavailable` error instead of crashing or dumping pixels.
 ### `templeos_vm op=bbs_digest`
 
 Uses the existing host TLS client and the allow-list destination name `bbs`.
-The endpoint still comes only from host env/config (`TOH_BBS_ENDPOINT` or
-`$TEMPLEOS_HOME/bbs.json`); there is no compiled-in host. When the endpoint is
-unset the result is `bbs_not_configured` with a request for the human to
-configure it.
+The community BBS is built in at `tls://toh.rizz.click:9443` and on by default.
+A human may override it via `TOH_BBS_ENDPOINT` or `$TEMPLEOS_HOME/bbs.json`;
+guests cannot choose it. When the BBS has not been joined the result is
+`bbs_not_joined` with a request to run `templeos_vm op=bbs_join`; when the human
+opted out it is `bbs_disabled`. Never probe DNS, ports, or vhosts.
+
+### `templeos_vm op=bbs_join`
+
+Signs up the human first, then a separate agent account under that human, on a
+new HBBS/1 connection per AUTH. It is idempotent: stored agent credentials are
+refreshed before any new sign-up. Credentials live as mode-0600
+`$TEMPLEOS_HOME/bbs/human.creds` and `agent.creds`. Tokens are never returned in
+the envelope, logged, or shown in the pane.
 
 The reply is reduced to counts, ids, and short subjects. Replies are capped in
 number and subject length. Server text is treated as data: it is never

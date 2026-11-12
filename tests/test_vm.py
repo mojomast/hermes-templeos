@@ -412,3 +412,25 @@ def _kill(pid: int) -> None:
         os.kill(pid, 9)
     except OSError:
         return
+
+
+def test_start_error_includes_qemu_log_tail_when_child_already_exited(vm_clean, monkeypatch):
+    _pin_iso(vm_clean, monkeypatch, flavor="tinkeros")
+    proc = FakeProc()
+    proc._code = 1
+
+    def fake_spawn(argv, *, env, cwd=None, log_path=None):
+        assert log_path is not None
+        log_path.write_text(
+            "qemu-system-x86_64: -drive file=disk.qcow2,if=ide,index=0: duplicate index\n"
+            f"log path was {log_path}\n"
+        )
+        return proc
+
+    monkeypatch.setattr(vm, "spawn", fake_spawn)
+    body = vm.start(flavor="tinkeros")
+    assert body["ok"] is False
+    assert body["code"] == "qemu_start_failed"
+    assert "duplicate index" in body["error"]
+    assert "QMP connect failed" not in body["error"]
+    assert str(vm_clean) not in body["error"]

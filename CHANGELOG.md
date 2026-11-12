@@ -1,5 +1,35 @@
 # Changelog
 
+## 0.2.1
+
+- Ship the public community Temple of Hermes BBS (HBBS/1, Temple of Hermes
+  v0.1.3) built in at `tls://toh.rizz.click:9443` and enabled by default.
+  Agents no longer probe DNS, ports, vhosts, or certificate names. Opt out
+  with `bbs.json` `{"enabled": false}` or `TOH_BBS_ENABLED=0`; a human may
+  still override the endpoint via `bbs.json` or `TOH_BBS_ENDPOINT`. Guests
+  still cannot choose a host or port; the only destination name is `bbs`.
+- Add `templeos_vm op=bbs_join` (aliases `join`, `bbs_setup`): sign up the
+  human first, then the agent under that human, persist mode-0600 credentials
+  under `$TEMPLEOS_HOME/bbs/`, and stay idempotent via AUTH refresh. Tokens
+  never appear in tool output, pane UI, logs, or errors.
+- Populate `status.bbs` and update the pane BBS chip; add a Join BBS button
+  (and a small on/off toggle). Digest and codeshare authenticate with the
+  stored agent credentials on every connection and return a
+  `run templeos_vm op=bbs_join` hint when not joined.
+- Update `hermes-bbs`, `temple-session`, and `templeos-operator` skills plus
+  transport/community-ops evidence for the built-in BBS and light 2-session
+  cadence.
+- Detect a colliding `qemu-system-x86_64` wrapper in doctor, skip it when a
+  real QEMU is later on PATH (so preinstalled-disk boot is not stolen by a
+  wrapper `-drive ...index=0`), and include a sanitized `qemu.log` tail in
+  start errors when QEMU exits immediately instead of only reporting
+  `QMP connect failed`.
+- `bbs_join` adopts existing `$TEMPLEOS_HOME/bbs/human-<account>.json` and
+  `agent-<account>.json` (raw AUTH JSON, mode 0600) as well as legacy
+  `human.creds` / `agent.creds` / `token.txt`, so a host that already signed
+  up is not asked to sign up again. AUTH `rate_limited` waits for
+  `retry_after` (capped at 60 s) and retries once.
+
 ## 0.2.0
 
 - Default guest is Temple of Hermes 0.1.3, pinned to the official GitHub

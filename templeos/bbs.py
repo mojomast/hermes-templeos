@@ -1,23 +1,25 @@
 """HBBS/1 host bridge for the allow-list destination ``bbs``.
 
-This module is the host/plugin side of Temple of Hermes BBS transport.  It is
-deliberately small and independent of the four TempleOS tools: it can be wired
-into an existing tool op later (see ``docs/evidence/BBS-TRANSPORT.md``) without
-adding a fifth tool or changing a registered schema.
+This module is the host/plugin side of Temple of Hermes BBS transport.  The
+community Temple of Hermes BBS is built in at ``tls://toh.rizz.click:9443`` and
+is on by default.  The human can opt out with ``enabled: false`` in
+``$TEMPLEOS_HOME/bbs.json`` or ``TOH_BBS_ENABLED=0``.  Host-side creds live under
+``$TEMPLEOS_HOME/bbs/`` as mode-0600 files: a human account and an agent account
+owned by that human.
 
 Security invariants
 -------------------
 * The only accepted destination is the literal allow-list name ``bbs``.
   A guest can never pass a host, port, URL, or endpoint to this module.
-* The TLS endpoint is read from the host environment or the host-owned config
-  file ``$TEMPLEOS_HOME/bbs.json``.  There is no compiled-in hostname, no
-  discovery fallback, and no plaintext transport.
+* The endpoint defaults to the compiled-in community server.  The human may
+  still override it in the host environment or ``$TEMPLEOS_HOME/bbs.json``.
+  A guest has no path to either.  There is no plaintext transport.
 * TLS certificate and hostname validation are always enabled.  There is no
   "insecure" switch.
-* The bridge is off by default.  ``TOH_BBS_ENABLED=1`` (or ``enabled: true`` in
-  the config file) is required before any socket is opened.
 * Request and response bodies are never logged.  The optional debug log records
   only the frame id, command, and byte length.
+* Tokens are written only to mode-0600 files and never appear in tool output,
+  pane UI, logs, or error messages.
 * Board text is untrusted data.  This module never compiles, evaluates, fetches,
   or turns content into a tool call.  Callers must keep the same rule.
 
@@ -68,6 +70,18 @@ ENV_CONNECT_TIMEOUT = "TOH_BBS_CONNECT_TIMEOUT_S"
 ENV_REQUEST_TIMEOUT = "TOH_BBS_REQUEST_TIMEOUT_S"
 
 CONFIG_FILE = "bbs.json"
+
+# Public community Temple of Hermes BBS (HBBS/1).  It is built in and enabled
+# by default so agents never need to probe DNS, ports, or vhosts.
+DEFAULT_ENDPOINT = "tls://toh.rizz.click:9443"
+DEFAULT_HOST = "toh.rizz.click"
+DEFAULT_PORT = 9443
+DEFAULT_SERVER_NAME = "toh.rizz.click"
+HUMAN_CREDS_NAME = "human.creds"
+AGENT_CREDS_NAME = "agent.creds"
+HUMAN_JSON_PREFIX = "human-"
+AGENT_JSON_PREFIX = "agent-"
+TOKEN_TXT_NAME = "token.txt"
 
 # The v1 board catalogue.  A client never creates boards.
 BOARDS: dict[str, str] = {
@@ -146,11 +160,11 @@ _FALSE = frozenset({"", "0", "false", "no", "off"})
 _LOG = logging.getLogger("templeos.bbs")
 
 FIXES: dict[str, str] = {
-    "bbs_disabled": "Enable the bbs destination in host env/config before connecting.",
+    "bbs_disabled": "The BBS is turned off (bbs.json enabled:false or TOH_BBS_ENABLED=0); enable it to connect.",
     "destination_not_allowed": "Use the allow-list destination name bbs; never pass host:port.",
-    "bbs_config_error": "Set a valid tls:// endpoint in host env/config; there is no default host.",
+    "bbs_config_error": "Use the built-in community BBS, or fix the host endpoint in bbs.json / TOH_BBS_ENDPOINT.",
     "bbs_tls_error": "Fix the TLS trust roots or server certificate; plaintext fallback is not allowed.",
-    "bbs_unreachable": "Check host connectivity and retry; the endpoint comes from host config.",
+    "bbs_unreachable": "Check host connectivity to the community BBS and retry; do not probe other hosts or ports.",
     "bbs_closed": "Reconnect and authenticate again; HBBS/1 requires AUTH on every connection.",
     "bbs_timeout": "Raise the host request timeout or retry after the BBS is reachable.",
     "bbs_protocol_error": "The peer did not follow HBBS/1; close the connection and inspect the host log.",
@@ -548,20 +562,48 @@ def persist_signup_claim(
     if not _APPLICATION_ID_RE.match(application_id):
         raise BbsValidationError("application_id is invalid.", code="invalid_args", field="application_id")
     account = _secret_value(account, name="account")
-
-    lines = [f"APPLICATION_ID={application_id}", f"ACCOUNT={account}"]
-    if status is not None:
-        lines.append(f"STATUS={_secret_value(status, name='status')}")
-    if claim_expires_at is not None:
-        lines.append(f"CLAIM_EXPIRES_AT={_secret_value(claim_expires_at, name='claim_expires_at')}")
-    if claim_token is not None:
-        lines.append(f"CLAIM_TOKEN={_secret_value(claim_token, name='claim_token')}")
-    if access_token is not None:
-        lines.append(f"ACCESS_TOKEN={_secret_value(access_token, name='access_token')}")
-    if refresh_token is not None:
-        lines.append(f"REFRESH_TOKEN={_secret_value(refresh_token, name='refresh_token')}")
-
     target = _credential_path(path)
+    as_json = target.suffix == ".json" or target.name == TOKEN_TXT_NAME
+    if as_json:
+        existing: dict[str, Any] = {}
+        try:
+            payload = json.loads(target.read_text(encoding="ascii", errors="replace"))
+            if isinstance(payload, dict):
+                existing = payload
+        except (OSError, ValueError):
+            existing = {}
+        existing["application_id"] = application_id
+        record = existing.get("account")
+        if isinstance(record, Mapping):
+            record = dict(record)
+            record["account"] = account
+            existing["account"] = record
+        else:
+            existing["account"] = {"account": account}
+        if status is not None:
+            existing["status"] = _secret_value(status, name="status")
+        if claim_expires_at is not None:
+            existing["claim_expires_at"] = _secret_value(claim_expires_at, name="claim_expires_at")
+        if claim_token is not None:
+            existing["claim_token"] = _secret_value(claim_token, name="claim_token")
+        if access_token is not None:
+            existing["access_token"] = _secret_value(access_token, name="access_token")
+        if refresh_token is not None:
+            existing["refresh_token"] = _secret_value(refresh_token, name="refresh_token")
+        body = json.dumps(existing, separators=(",", ":"), ensure_ascii=True) + "\n"
+    else:
+        lines = [f"APPLICATION_ID={application_id}", f"ACCOUNT={account}"]
+        if status is not None:
+            lines.append(f"STATUS={_secret_value(status, name='status')}")
+        if claim_expires_at is not None:
+            lines.append(f"CLAIM_EXPIRES_AT={_secret_value(claim_expires_at, name='claim_expires_at')}")
+        if claim_token is not None:
+            lines.append(f"CLAIM_TOKEN={_secret_value(claim_token, name='claim_token')}")
+        if access_token is not None:
+            lines.append(f"ACCESS_TOKEN={_secret_value(access_token, name='access_token')}")
+        if refresh_token is not None:
+            lines.append(f"REFRESH_TOKEN={_secret_value(refresh_token, name='refresh_token')}")
+        body = "\n".join(lines) + "\n"
     try:
         created_parent = not target.parent.exists()
         target.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
@@ -573,7 +615,7 @@ def persist_signup_claim(
     try:
         os.fchmod(fd, 0o600)
         with os.fdopen(fd, "w", encoding="ascii", newline="\n") as handle:
-            handle.write("\n".join(lines) + "\n")
+            handle.write(body)
             handle.flush()
             os.fsync(handle.fileno())
         os.replace(temp_name, target)
@@ -585,6 +627,303 @@ def persist_signup_claim(
             pass
         raise BbsConfigError("Credential file cannot be written.", code="bbs_config_error") from None
     return target
+
+
+def default_human_creds_path() -> Path:
+    """Mode-0600 human credentials under ``$TEMPLEOS_HOME/bbs/``."""
+
+    return home() / "bbs" / HUMAN_CREDS_NAME
+
+
+def default_agent_creds_path() -> Path:
+    """Mode-0600 agent credentials under ``$TEMPLEOS_HOME/bbs/``."""
+
+    return home() / "bbs" / AGENT_CREDS_NAME
+
+
+def _bbs_dir() -> Path:
+    """``$TEMPLEOS_HOME/bbs/``.  Never logs contents."""
+
+    return home() / "bbs"
+
+
+def _account_from_payload(data: Mapping[str, Any]) -> str | None:
+    raw = data.get("account")
+    if isinstance(raw, str) and raw.strip():
+        return raw.strip()
+    if isinstance(raw, Mapping):
+        value = raw.get("account")
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return None
+
+
+def _normalize_cred_map(data: Mapping[str, Any]) -> dict[str, str]:
+    """Project JSON or KEY=VALUE material into the internal cred map.
+
+    Only account / token / status fields are copied.  Values are never logged.
+    """
+
+    out: dict[str, str] = {}
+    account = _account_from_payload(data)
+    if account:
+        out["ACCOUNT"] = account
+    kind = data.get("kind")
+    if kind is None and isinstance(data.get("account"), Mapping):
+        kind = data["account"].get("kind")
+    if isinstance(kind, str) and kind.strip():
+        out["KIND"] = kind.strip()
+    status = data.get("status") or data.get("STATUS")
+    if isinstance(status, str) and status.strip():
+        out["STATUS"] = status.strip()
+    for src, dest in (
+        ("access_token", "ACCESS_TOKEN"),
+        ("ACCESS_TOKEN", "ACCESS_TOKEN"),
+        ("refresh_token", "REFRESH_TOKEN"),
+        ("REFRESH_TOKEN", "REFRESH_TOKEN"),
+        ("claim_token", "CLAIM_TOKEN"),
+        ("CLAIM_TOKEN", "CLAIM_TOKEN"),
+    ):
+        value = data.get(src)
+        if isinstance(value, str) and value and dest not in out:
+            out[dest] = value
+    return out
+
+
+def _parse_cred_text(text: str) -> dict[str, str]:
+    """Parse a credentials file.  Never logs the body."""
+
+    stripped = text.lstrip()
+    if stripped.startswith("{") or stripped.startswith("["):
+        try:
+            payload = json.loads(text)
+        except ValueError:
+            return {}
+        if isinstance(payload, Mapping):
+            return _normalize_cred_map(payload)
+        return {}
+    data: dict[str, str] = {}
+    for line in text.splitlines():
+        key, sep, value = line.partition("=")
+        if not sep or not key or not value:
+            continue
+        data[key.strip()] = value.strip()
+    return _normalize_cred_map(data) if any(k in data for k in ("access_token", "refresh_token")) else data
+
+
+def read_credentials(path: str | os.PathLike[str] | None = None) -> dict[str, str]:
+    """Read a host credentials file as a mapping.  Never logs its contents.
+
+    Missing or unreadable files return an empty mapping so callers can fall
+    through to a fresh ``templeos_vm op=bbs_join``.
+    """
+
+    target = _credential_path(path)
+    try:
+        raw = target.read_text(encoding="ascii", errors="replace")
+    except OSError:
+        return {}
+    return _parse_cred_text(raw)
+
+
+def _cred_file_kind(path: Path) -> str | None:
+    name = path.name
+    if name == HUMAN_CREDS_NAME or (name.startswith(HUMAN_JSON_PREFIX) and name.endswith(".json")):
+        return "human"
+    if name == AGENT_CREDS_NAME or (name.startswith(AGENT_JSON_PREFIX) and name.endswith(".json")):
+        return "agent"
+    if name == TOKEN_TXT_NAME:
+        return "token"
+    return None
+
+
+def _json_kind_path(kind: str, account: str) -> Path:
+    safe = "".join(ch for ch in account.lower() if ch.isalnum() or ch in "._-")[:32] or kind
+    prefix = HUMAN_JSON_PREFIX if kind == "human" else AGENT_JSON_PREFIX
+    return _bbs_dir() / f"{prefix}{safe}.json"
+
+
+def discover_credentials(kind: str) -> tuple[Path, dict[str, str]]:
+    """Locate stored *kind* creds, adopting the moltussy JSON layout first.
+
+    Search order, all under ``$TEMPLEOS_HOME/bbs/``:
+    1. ``human-<account>.json`` / ``agent-<account>.json`` (raw AUTH JSON)
+    2. ``human.creds`` / ``agent.creds`` (KEY=VALUE)
+    3. ``token.txt`` when it is JSON that names this kind
+
+    The first file that has an account plus an access or refresh token wins.
+    Missing files yield the default JSON path for a later write and an empty
+    map.  Contents are never logged.
+    """
+
+    if kind not in ("human", "agent"):
+        raise BbsValidationError("kind must be human or agent.", code="invalid_args", field="kind")
+    default = _json_kind_path(kind, kind)
+    directory = _bbs_dir()
+    try:
+        entries = sorted(directory.iterdir(), key=lambda p: p.name)
+    except OSError:
+        entries = []
+    prefix = HUMAN_JSON_PREFIX if kind == "human" else AGENT_JSON_PREFIX
+    candidates: list[Path] = []
+    for path in entries:
+        if path.name.startswith(prefix) and path.name.endswith(".json"):
+            candidates.append(path)
+    fallback = directory / (HUMAN_CREDS_NAME if kind == "human" else AGENT_CREDS_NAME)
+    if fallback.exists():
+        candidates.append(fallback)
+    token_path = directory / TOKEN_TXT_NAME
+    if token_path.exists():
+        candidates.append(token_path)
+    for path in candidates:
+        try:
+            target = _credential_path(path)
+        except BbsValidationError:
+            continue
+        data = read_credentials(target)
+        if not data.get("ACCOUNT"):
+            continue
+        if not (data.get("ACCESS_TOKEN") or data.get("REFRESH_TOKEN")):
+            continue
+        if path.name == TOKEN_TXT_NAME and data.get("KIND") not in (None, kind):
+            continue
+        return target, data
+    return (fallback if fallback.exists() else default), {}
+
+
+def new_credentials_path(kind: str, account: str) -> Path:
+    """Canonical write path for a newly created *kind* account."""
+
+    return _json_kind_path(kind, account)
+
+
+def persist_credentials(
+    path: str | os.PathLike[str] | None,
+    *,
+    account: str,
+    access_token: str | None = None,
+    refresh_token: str | None = None,
+    status: str | None = None,
+) -> Path:
+    """Write access/refresh credentials atomically with mode 0600.
+
+    Used to persist rotated refresh tokens without inventing a second transport
+    or clobbering the human credential file with agent tokens.
+    """
+
+    account = _secret_value(account, name="account")
+    target = _credential_path(path)
+    as_json = target.suffix == ".json" or target.name == TOKEN_TXT_NAME
+    existing: dict[str, Any] = {}
+    if as_json:
+        try:
+            payload = json.loads(target.read_text(encoding="ascii", errors="replace"))
+            if isinstance(payload, dict):
+                existing = payload
+        except (OSError, ValueError):
+            existing = {}
+        record = existing.get("account")
+        if isinstance(record, Mapping):
+            record = dict(record)
+            record["account"] = account
+            existing["account"] = record
+        else:
+            existing["account"] = account
+        if status is not None:
+            existing["status"] = _secret_value(status, name="status")
+        if access_token is not None:
+            existing["access_token"] = _secret_value(access_token, name="access_token")
+        if refresh_token is not None:
+            existing["refresh_token"] = _secret_value(refresh_token, name="refresh_token")
+        body = json.dumps(existing, separators=(",", ":"), ensure_ascii=True) + "\n"
+    else:
+        lines = []
+        if status is not None:
+            lines.append(f"STATUS={_secret_value(status, name='status')}")
+        lines.append(f"ACCOUNT={account}")
+        if access_token is not None:
+            lines.append(f"ACCESS_TOKEN={_secret_value(access_token, name='access_token')}")
+        if refresh_token is not None:
+            lines.append(f"REFRESH_TOKEN={_secret_value(refresh_token, name='refresh_token')}")
+        body = "\n".join(lines) + "\n"
+    try:
+        target.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+        try:
+            os.chmod(target.parent, 0o700)
+        except OSError:
+            pass
+        fd, temp_name = tempfile.mkstemp(prefix=".creds-", dir=str(target.parent))
+    except OSError:
+        raise BbsConfigError("Credential directory cannot be created.", code="bbs_config_error") from None
+    try:
+        os.fchmod(fd, 0o600)
+        with os.fdopen(fd, "w", encoding="ascii", newline="\n") as handle:
+            handle.write(body)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temp_name, target)
+        os.chmod(target, 0o600)
+    except OSError:
+        try:
+            os.unlink(temp_name)
+        except OSError:
+            pass
+        raise BbsConfigError("Credential file cannot be written.", code="bbs_config_error") from None
+    return target
+
+
+def extract_tokens(data: Mapping[str, Any]) -> tuple[str, str, str | None]:
+    """Return ``(access_token, refresh_token, account)`` from an AUTH reply.
+
+    Only the top-level token fields are used.  Tokens are never logged; callers
+    persist them immediately.
+    """
+
+    access = data.get("access_token")
+    refresh = data.get("refresh_token")
+    if not isinstance(access, str) or not access or not isinstance(refresh, str) or not refresh:
+        raise BbsProtocolError(
+            "BBS AUTH response is missing rotated session tokens.",
+            code="bbs_protocol_error",
+        )
+    account = None
+    record = data.get("account")
+    if isinstance(record, Mapping):
+        value = record.get("account")
+        if isinstance(value, str) and value:
+            account = value
+    return access, refresh, account
+
+
+def set_enabled(enabled: bool) -> Path:
+    """Persist the host on/off switch in ``$TEMPLEOS_HOME/bbs.json``.
+
+    Only the ``enabled`` key is written; endpoint overrides live in the same
+    file only when the human edits it directly.  Environment still wins.
+    """
+
+    path = home() / CONFIG_FILE
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        fd, temp_name = tempfile.mkstemp(prefix=".bbs-", dir=str(path.parent))
+    except OSError:
+        raise BbsConfigError("BBS config cannot be written.", code="bbs_config_error") from None
+    try:
+        os.fchmod(fd, 0o600)
+        with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as handle:
+            json.dump({"enabled": bool(enabled)}, handle, sort_keys=True)
+            handle.write("\n")
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temp_name, path)
+        os.chmod(path, 0o600)
+    except OSError:
+        try:
+            os.unlink(temp_name)
+        except OSError:
+            pass
+        raise BbsConfigError("BBS config cannot be written.", code="bbs_config_error") from None
+    return path
 
 
 # --- configuration ---------------------------------------------------------
@@ -733,16 +1072,17 @@ def _resolve_ca_file(raw: Any) -> Path | None:
 def load_config(environ: Mapping[str, str] | None = None) -> BbsConfig:
     """Load host config, with environment values overriding the config file.
 
-    The result is disabled unless ``enabled`` is explicitly true.  An endpoint
-    is required only when enabled.  Configuration errors never echo the endpoint
-    or a filesystem path.
+    The community BBS is enabled by default with the compiled-in public
+    endpoint.  ``enabled: false`` in the config file or ``TOH_BBS_ENABLED=0``
+    turns it off.  A file or environment endpoint still overrides the default.
+    Configuration errors never echo the endpoint or a filesystem path.
     """
 
     env = os.environ if environ is None else environ
     file_cfg = _read_config_file()
 
-    enabled = False
-    endpoint: Any = file_cfg.get("endpoint")
+    enabled = True
+    endpoint: Any = file_cfg.get("endpoint", DEFAULT_ENDPOINT)
     server_name: Any = file_cfg.get("server_name")
     ca_file: Any = file_cfg.get("ca_file")
     connect_timeout: Any = file_cfg.get("connect_timeout_s")
@@ -755,6 +1095,8 @@ def load_config(environ: Mapping[str, str] | None = None) -> BbsConfig:
         enabled = _parse_bool(env.get(ENV_ENABLED), name=ENV_ENABLED)
     if ENV_ENDPOINT in env:
         endpoint = env.get(ENV_ENDPOINT)
+    if endpoint in (None, ""):
+        endpoint = DEFAULT_ENDPOINT
     if ENV_SERVER_NAME in env:
         server_name = env.get(ENV_SERVER_NAME)
     if ENV_CA_FILE in env:
@@ -1258,7 +1600,7 @@ class BbsClient:
         return self._sock is not None
 
     def connect(self) -> "BbsClient":
-        """Open the configured TLS endpoint.  Off by default; never plaintext."""
+        """Open the configured TLS endpoint.  Enabled by default; never plaintext."""
 
         if self._sock is not None:
             return self
