@@ -284,3 +284,115 @@ def test_bbs_digest_unknown_command_falls_back_without_crashing(tos_home):
     assert body["truncated"] is False
     assert client.closed is True
     assert "unknown_command" not in json.dumps(body)
+
+
+class _TokenClient:
+    def __init__(self, *, login_error: Exception | None = None) -> None:
+        self.login_error = login_error
+        self.refresh_calls: list[str] = []
+        self.login_calls: list[str] = []
+        self.closed = False
+
+    def connect(self):
+        return self
+
+    def auth_refresh(self, refresh_token):
+        self.refresh_calls.append(refresh_token)
+        return {
+            "access_token": "fresh.access.token.not.real",
+            "refresh_token": "rotated.refresh.token.not.real",
+            "account": {"account": "ada-agent", "kind": "agent"},
+        }
+
+    def auth_login(self, token):
+        self.login_calls.append(token)
+        if self.login_error is not None:
+            raise self.login_error
+        return {"session": {"session_id": "fixture.session"}}
+
+    def close(self):
+        self.closed = True
+
+
+def test_bbs_push_guest_token_refreshes_then_pushes_on_disk(tos_home):
+    bbs_dir = tos_home / "bbs"
+    bbs_dir.mkdir()
+    agent = bbs_dir / "agent-ada-agent.json"
+    bbs.persist_credentials(
+        agent,
+        account="ada-agent",
+        access_token="stale.access.token.not.real",
+        refresh_token="old.refresh.token.not.real",
+        status="approved",
+    )
+    # A legacy token.txt must never win over the live agent credential JSON.
+    (bbs_dir / "token.txt").write_text("legacy.access.token.not.real\n", encoding="ascii")
+    client = _TokenClient()
+    pushed: list[tuple[Path, str, bytes]] = []
+
+    def push(src, guest):
+        pushed.append((Path(src), guest, Path(src).read_bytes()))
+        return {"ok": True, "via": "hrpc"}
+
+    body = session.bbs_push_guest_token(client_factory=lambda: client, push=push)
+    assert body == {
+        "ok": True,
+        "pushed": True,
+        "guest_path": session.GUEST_TOKEN_DISK,
+        "account": "ada-agent",
+        "via": "hrpc",
+    }
+    assert client.refresh_calls == ["old.refresh.token.not.real"]
+    assert len(pushed) == 1
+    stage, guest, payload = pushed[0]
+    assert guest == "C:/Hermes/Apps/HermesBBS/token.txt"
+    assert payload == b"fresh.access.token.not.real\n"
+    assert b"stale" not in payload and b"legacy" not in payload
+    assert not stage.exists()
+    after = bbs.read_credentials(agent)
+    assert after["ACCESS_TOKEN"] == "fresh.access.token.not.real"
+    assert after["REFRESH_TOKEN"] == "rotated.refresh.token.not.real"
+    assert client.closed is True
+    text = json.dumps(body)
+    assert "fresh.access" not in text and "rotated.refresh" not in text
+
+
+def test_bbs_push_guest_token_ignores_a_lone_stale_token_txt(tos_home):
+    bbs_dir = tos_home / "bbs"
+    bbs_dir.mkdir()
+    (bbs_dir / "token.txt").write_text("legacy.access.token.not.real\n", encoding="ascii")
+    with pytest.raises(session.OpsError) as caught:
+        session.bbs_push_guest_token(client_factory=lambda: _TokenClient(), push=lambda *a: {"ok": True})
+    assert caught.value.code == "bbs_not_joined"
+
+
+def test_bbs_push_guest_token_live_path_and_login_verification(tos_home):
+    bbs_dir = tos_home / "bbs"
+    bbs_dir.mkdir()
+    agent = bbs_dir / "agent-ada-agent.json"
+    bbs.persist_credentials(
+        agent,
+        account="ada-agent",
+        access_token="only.access.token.not.real",
+        status="approved",
+    )
+    client = _TokenClient()
+    pushed: list[str] = []
+
+    def push(src, guest):
+        pushed.append(guest)
+        return {"ok": True, "via": "hrpc"}
+
+    body = session.bbs_push_guest_token(
+        live_cd=True, client_factory=lambda: client, push=push
+    )
+    assert body["guest_path"] == session.GUEST_TOKEN_LIVE
+    assert pushed == ["B:/Tmp/Hermes/HermesBBS/token.txt"]
+    assert client.login_calls == ["only.access.token.not.real"]
+    assert client.refresh_calls == []
+
+
+def test_bbs_push_guest_token_rejects_an_undocumented_path(tos_home):
+    with pytest.raises(session.OpsError) as caught:
+        session.bbs_push_guest_token(client_factory=lambda: _TokenClient(), guest_path="C:/Temp/token.txt")
+    assert caught.value.code == "invalid_args"

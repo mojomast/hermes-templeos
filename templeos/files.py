@@ -73,8 +73,10 @@ _bound_serial: SerialLike | None = None
 
 def bind_serial(port: SerialLike | None) -> None:
     """Inject a SerialPort or FakeSerial for the current session / tests."""
-    global _bound_serial
+    global _bound_serial, _rx_pushback_port
     _bound_serial = port
+    _rx_pushback_port = None
+    _rx_pushback.clear()
 
 
 def get_serial() -> SerialLike | None:
@@ -198,6 +200,35 @@ def try_decode_frame(buf: bytes) -> tuple[int, bytes, int] | None:
     return cmd, payload, total
 
 
+# Bytes read while probing for an HRPC reply that turned out not to be HRPC
+# belong to the TXFR fallback.  Keep them here until the next read so a daemon
+# probe cannot swallow a pending framed reply.
+_rx_pushback = bytearray()
+_rx_pushback_port: object | None = None
+
+
+def _read_chunk(port: SerialLike, n: int = 4096, *, timeout_s: float = 0.2) -> bytes:
+    global _rx_pushback_port
+    if _rx_pushback_port is not port:
+        _rx_pushback_port = port
+        _rx_pushback.clear()
+    if _rx_pushback:
+        out = bytes(_rx_pushback[:n])
+        del _rx_pushback[:n]
+        return out
+    return port.read(n, timeout_s=timeout_s)
+
+
+def _push_back(port: SerialLike, data: bytes) -> None:
+    global _rx_pushback_port
+    if not data:
+        return
+    if _rx_pushback_port is not port:
+        _rx_pushback_port = port
+        _rx_pushback.clear()
+    _rx_pushback[:0] = data
+
+
 def _read_frame(port: SerialLike, *, timeout_s: float) -> tuple[int, bytes]:
     import time
 
@@ -205,7 +236,7 @@ def _read_frame(port: SerialLike, *, timeout_s: float) -> tuple[int, bytes]:
     buf = bytearray()
     while time.monotonic() < deadline:
         remaining = max(0.05, deadline - time.monotonic())
-        chunk = port.read(4096, timeout_s=min(0.2, remaining))
+        chunk = _read_chunk(port, 4096, timeout_s=min(0.2, remaining))
         if chunk:
             buf.extend(chunk)
             while True:
@@ -282,7 +313,7 @@ def _hrpc_request(
     buf = bytearray()
     while time.monotonic() < deadline:
         remaining = max(0.01, deadline - time.monotonic())
-        chunk = port.read(4096, timeout_s=min(0.2, remaining))
+        chunk = _read_chunk(port, 4096, timeout_s=min(0.2, remaining))
         if chunk:
             buf.extend(chunk)
         else:
@@ -340,10 +371,13 @@ def _hrpc_request(
                 if reply_id != rid:
                     continue
                 if parts[2] != "ok":
+                    _push_back(port, bytes(buf))
                     raise HrpcError(
                         body.decode("utf-8", "replace") or "guest rpc error"
                     )
+                _push_back(port, bytes(buf))
                 return body
+    _push_back(port, bytes(buf))
     raise HrpcUnavailable(
         f"no HRPC reply for {op} within {timeout_s:.1f}s"
     )
